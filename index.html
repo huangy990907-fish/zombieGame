@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" href="data:," />
+    <title>尸潮 · 人类 vs 丧尸</title>
+  </head>
+  <body>
+    <div class="frame">
+      <div class="topbar" id="topbar">
+        <div class="lineup" id="lineup"></div>
+        <div class="controls">
+          <button id="btnMode">防守</button>
+          <button id="btnPause">暂停</button>
+          <button id="btnSpeed">1x</button>
+          <button id="btnRestart">重开</button>
+          <button id="btnBackMenu">🏠 主菜单</button>
+          <button id="btnSettings" class="btn-settings">⚙ 设置</button>
+          <span class="hint">空格 暂停 · 1 / 2 / 3 切换速度 · R 重开</span>
+        </div>
+      </div>
+
+      <div class="screen" id="screen"></div>
+
+      <div class="bottom" id="bottom">
+        <div class="subbar" id="subbar"></div>
+        <div class="stats">
+          <div class="side">
+            <span class="cap human">人类</span>
+            <span class="num human" id="humanCount">50</span>
+          </div>
+          <div class="mid">
+            <div class="waveRow">
+              <span id="waveLabel">第 1/26 波</span>
+              <span class="phase" id="phaseLabel"></span>
+            </div>
+            <div class="bars">
+              <div class="bar"><i class="human" id="humanBar"></i></div>
+              <div class="bar"><i class="zombie" id="zombieBar"></i></div>
+            </div>
+          </div>
+          <div class="side right">
+            <span class="num zombie" id="zombieCount">0</span>
+            <span class="cap zombie">僵尸</span>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- ===== 主菜单 overlay —— 盖在 PixiJS 动态背景上 ===== -->
+    <div id="menuOverlay" class="overlay menu-overlay">
+      <button class="menu-mute" id="btnMenuMute" title="静音切换">🔊</button>
+      <div class="menu-content">
+        <h1 class="game-title">尸潮</h1>
+        <p class="subtitle">人类 vs 丧尸</p>
+        <div class="menu-buttons">
+          <button class="menu-btn primary" id="btnNewGame">🎮 新游戏</button>
+          <button class="menu-btn" id="btnLoadGame">📂 载入游戏</button>
+        </div>
+        <p class="menu-footer">选择关卡开始战斗 · 设置面板可调难度参数</p>
+      </div>
+    </div>
+
+    <!-- ===== 选关页 overlay —— 横向节点式地图 ===== -->
+    <div id="levelsOverlay" class="overlay levels-overlay">
+      <div class="levels-header">
+        <button class="back-btn" id="btnBackFromLevels">← 返回主菜单</button>
+        <h2 class="levels-title">选择关卡</h2>
+        <div class="levels-progress" id="levelsProgress"></div>
+      </div>
+      <div class="levels-map">
+        <!-- 节点由 main.ts 按 LEVELS 动态生成 -->
+        <div class="map-line"></div>
+        <div id="levelsNodes" class="map-nodes"></div>
+      </div>
+      <div class="levels-detail" id="levelsDetail">
+        <!-- 当前选中关卡的详情 + 开始按钮 -->
+      </div>
+    </div>
+
+    <!-- ===== 结算弹窗 —— victory / defeat ===== -->
+    <div id="resultOverlay" class="overlay result-overlay hidden">
+      <div class="result-card" id="resultCard">
+        <h2 class="result-title" id="resultTitle">胜利</h2>
+        <p class="result-subtitle" id="resultSubtitle">你守住了！</p>
+        <div class="result-buttons">
+          <button class="result-btn primary" id="btnResultReplay">重新挑战</button>
+          <button class="result-btn" id="btnResultLevels">回到选关</button>
+          <button class="result-btn" id="btnResultMenu">主菜单</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="settingsPanel" class="settings-panel">
+      <div class="top-row">
+        <span class="title">⚙ 参数控制台</span>
+        <button class="close-btn" id="btnSettingsClose">关闭</button>
+      </div>
+
+      <div id="settingsHeader" class="settings-header">
+        <div id="storageStatus" class="storage-status">💾 加载中…</div>
+        <div class="storage-btns">
+          <button class="storage-btn" id="btnPickDir" title="选择本地存档文件夹，之后自动读写（需要 Chrome/Edge + localhost 或 HTTPS）">📁 选存档目录</button>
+          <button class="storage-btn" id="btnClearDir" disabled title="清除已授权的存档目录（保留 localStorage 兜底）">🧹 清除目录</button>
+          <button class="storage-btn" id="btnExportSettings" title="导出当前设置为 JSON 文件，跨设备分享">⬇ 导出</button>
+          <button class="storage-btn" id="btnImportSettings" title="从 JSON 文件导入设置">⬆ 导入</button>
+          <button class="storage-btn danger" id="btnResetDefaults" title="恢复所有参数为出厂默认值">↺ 恢复默认</button>
+        </div>
+      </div>
+
+      <div id="settingsBody"></div>
+      <div class="foot">
+        调整后点"重开"生效 · 僵尸属性按正态分布在 ±随机幅度内个体差异<br />
+        存档格式 v1 · 每次修改自动写 localStorage · 选了文件夹再额外自动写盘
+      </div>
+    </div>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

@@ -1,0 +1,47 @@
+# 依赖
+node_modules/
+
+# 构建产物
+dist/
+dist-ssr/
+*.local
+
+# 系统文件
+.DS_Store
+Thumbs.db
+
+# 日志
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# 编辑器与 IDE
+.vscode/*
+!.vscode/extensions.json
+.idea/
+*.swp
+*.swo
+*~
+
+# 测试与覆盖率
+coverage/
+.nyc_output/
+
+# 缓存与临时目录
+.temp/
+.tmp/
+.cache/
+.screenshots/
+.trae-html-share-packages/
+
+# 环境变量与凭证
+.env
+.env.*
+*.pem
+*.key
+
+# Vite 缓存
+.vite/

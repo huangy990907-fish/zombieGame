@@ -3,7 +3,7 @@
 一个运行在浏览器里的 2D 自主对抗小游戏：50 名人类守在封闭房间里，抵御一波波从门和窗户涌入的丧尸。玩家不直接操控单个单位，而是通过调整参数、切换行为模式和游戏速度来观察战局；另外提供一个独立的「训练场」，用于自由生成单位、改数值、测武器 DPS。
 
 - 技术栈：TypeScript + Vite + PixiJS（渲染到 Canvas）
-- 版本：`0.2.0`，变更记录见 [CHANGELOG.md](./CHANGELOG.md)
+- 版本：`0.2.1`，变更记录见 [CHANGELOG.md](./CHANGELOG.md)
 - 入口：主菜单 → 新游戏 / 载入游戏 / 训练场
 
 ## 目录
@@ -372,9 +372,9 @@ npm run preview   # 本地预览 dist/ 构建产物
 - `package.json` 的 `version` 是版本的唯一来源。发版时同步更新 `package.json`、`CHANGELOG.md`，并打 **annotated tag** `vX.Y.Z`：
 
 ```bash
-git tag -a v0.2.0 -m "0.2.0: 训练场模式"
+git tag -a v0.2.1 -m "0.2.1: 修复首屏无样式闪烁（FOUC）"
 git push origin main
-git push origin v0.2.0
+git push origin v0.2.1
 ```
 
 - `CHANGELOG.md` 采用 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 风格，中文条目，新版本在上、旧版本在下；日期统一写 `YYYY-MM-DD`。

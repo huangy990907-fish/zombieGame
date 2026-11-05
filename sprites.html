@@ -1,0 +1,377 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" href="data:," />
+    <title>尸潮 · 像素精灵预览</title>
+    <style>
+      :root {
+        --bg: #07070d;
+        --panel: #10151f;
+        --panel-2: #0b1017;
+        --line: #1e2735;
+        --text: #dfe6f0;
+        --dim: #7f8ea3;
+        --accent: #22d3ee;
+        --zombie: #86c065;
+        --human: #7fb4ff;
+        --weapon: #ffa34d;
+        --font: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+      }
+      * { box-sizing: border-box; }
+      html { background: var(--bg); }
+      body {
+        margin: 0;
+        color: var(--text);
+        font-family: var(--font);
+        background:
+          radial-gradient(1200px 600px at 50% -10%, #101a26 0%, transparent 70%),
+          var(--bg);
+        padding: 24px 28px 60px;
+        opacity: 0;
+        transition: opacity 0.15s ease;
+      }
+      html.ready body { opacity: 1; }
+
+      .page-head {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: flex-end;
+        gap: 16px 28px;
+        justify-content: space-between;
+        border-bottom: 1px solid var(--line);
+        padding-bottom: 16px;
+        margin-bottom: 16px;
+      }
+      h1 { font-size: 20px; margin: 0 0 6px; letter-spacing: 1px; }
+      .sub { margin: 0; color: var(--dim); font-size: 12px; line-height: 1.7; }
+      .stat { color: var(--accent); font-size: 12px; }
+
+      .controls {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 10px 14px;
+      }
+      .control-group {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 6px 8px;
+        font-size: 12px;
+        color: var(--dim);
+      }
+      .control-group > span { color: var(--dim); }
+      button {
+        font-family: var(--font);
+        font-size: 12px;
+        color: var(--text);
+        background: #16202d;
+        border: 1px solid #26344a;
+        border-radius: 6px;
+        padding: 5px 10px;
+        cursor: pointer;
+      }
+      button:hover { border-color: #3d5575; }
+      button.active { background: #0f3b46; border-color: var(--accent); color: #eafdff; }
+      input[type="range"] { width: 110px; accent-color: var(--accent); }
+      input[type="checkbox"] { accent-color: var(--accent); }
+      #fpsValue { color: var(--accent); min-width: 46px; display: inline-block; }
+
+      .loadout-wrap {
+        background: var(--panel-2);
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        padding: 10px 14px 12px;
+        margin-bottom: 18px;
+      }
+      .loadout-title { font-size: 12px; color: var(--dim); margin-bottom: 8px; }
+      .loadout {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 16px;
+        align-items: flex-end;
+        min-height: 20px;
+      }
+      .loadout-item {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 4px;
+        color: var(--dim);
+        font-size: 10px;
+      }
+      .loadout-item canvas { image-rendering: auto; }
+
+      .section-block { margin: 0 0 26px; }
+      .section-title {
+        font-size: 13px;
+        letter-spacing: 1.5px;
+        margin: 0 0 6px;
+        padding-left: 9px;
+        border-left: 3px solid var(--accent);
+      }
+      .section-desc {
+        margin: 0 0 12px;
+        color: var(--dim);
+        font-size: 12px;
+        line-height: 1.7;
+        max-width: 980px;
+      }
+      .combo-card { border-top: 2px solid rgba(34, 211, 238, 0.45); }
+      .card.group-combo { border-top: 2px solid rgba(34, 211, 238, 0.45); }
+
+      /* 接入自检：12px 贴地放大 10×，叠 anchor / muzzle / 碰撞半径标记 */
+      .check-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+        gap: 16px;
+      }
+      .check-card {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-top: 2px solid rgba(126, 231, 255, 0.45);
+        border-radius: 12px;
+        padding: 12px 14px 14px;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+      .check-head { display: flex; flex-direction: column; gap: 2px; }
+      .check-head strong { font-size: 13px; letter-spacing: 1px; }
+      .check-stage {
+        width: 120px;
+        height: 120px;
+        align-self: center;
+        background-color: #0b0d16;
+        background-image: radial-gradient(circle at 50% 45%, #1a1d2b 0%, #0b0d16 70%);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+      }
+      .check-stage canvas { display: block; width: 120px; height: 120px; }
+      .check-legend {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        font-size: 11px;
+        color: var(--dim);
+        line-height: 1.5;
+      }
+      .check-legend .swatch {
+        display: inline-block;
+        width: 8px;
+        height: 8px;
+        margin-right: 5px;
+        border-radius: 50%;
+        vertical-align: middle;
+      }
+      .check-legend .swatch.anchor { background: #7ee7ff; }
+      .check-legend .swatch.muzzle { background: #ff5c8a; }
+      .check-legend .swatch.radius { border: 1px dashed rgba(255, 255, 255, 0.55); }
+
+      .sprite-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+        gap: 18px;
+      }
+      .card {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        padding: 12px 14px 14px;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+      .card.group-zombie { border-top: 2px solid rgba(134, 192, 101, 0.45); }
+      .card.group-human { border-top: 2px solid rgba(127, 180, 255, 0.45); }
+      .card.group-weapon { border-top: 2px solid rgba(255, 163, 77, 0.45); }
+      .card-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; }
+      .sprite-id { display: block; font-size: 11px; color: var(--dim); letter-spacing: 0.5px; }
+      .sprite-name { font-size: 14px; letter-spacing: 1px; }
+      .badge {
+        font-size: 10px;
+        color: var(--dim);
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        padding: 2px 8px;
+        white-space: nowrap;
+      }
+      .views { display: flex; align-items: flex-start; gap: 12px; }
+      .view { margin: 0; display: flex; flex-direction: column; gap: 5px; }
+      .view figcaption { font-size: 10px; color: var(--dim); white-space: nowrap; }
+      .view-zoom { margin-left: auto; }
+      .stage {
+        background-color: #0a0e14;
+        background-image:
+          linear-gradient(45deg, #141a24 25%, transparent 25%),
+          linear-gradient(-45deg, #141a24 25%, transparent 25%),
+          linear-gradient(45deg, transparent 75%, #141a24 75%),
+          linear-gradient(-45deg, transparent 75%, #141a24 75%);
+        background-size: 12px 12px;
+        background-position: 0 0, 0 6px, 6px -6px, -6px 0;
+        border: 1px solid #232e3f;
+        border-radius: 6px;
+        position: relative;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        overflow: hidden;
+      }
+      .stage-one { width: 56px; height: 56px; }
+      .stage-game { width: 56px; height: 56px; }
+      .stage-zoom { width: 256px; height: 256px; padding: 0; }
+      canvas { display: block; image-rendering: pixelated; }
+      .stage-one canvas, .stage-zoom canvas { image-rendering: pixelated; }
+      .grid-overlay {
+        position: absolute;
+        inset: 0;
+        display: none;
+        pointer-events: none;
+        background-image:
+          repeating-linear-gradient(to right, rgba(255, 255, 255, 0.09) 0 1px, transparent 1px var(--cell, 8px)),
+          repeating-linear-gradient(to bottom, rgba(255, 255, 255, 0.09) 0 1px, transparent 1px var(--cell, 8px));
+      }
+      body.show-grid .grid-overlay { display: block; }
+      .meta {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px 12px;
+        font-size: 11px;
+        color: var(--dim);
+        border-top: 1px dashed var(--line);
+        padding-top: 8px;
+      }
+      .meta b { color: var(--text); font-weight: 600; }
+      .meta .frame-label { color: var(--accent); }
+      .note { margin: 0; font-size: 11px; line-height: 1.6; color: #9fb0c6; }
+      .palette { display: flex; flex-wrap: wrap; gap: 6px; }
+      .chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        font-size: 10px;
+        color: var(--dim);
+        background: #0c1119;
+        border: 1px solid var(--line);
+        border-radius: 4px;
+        padding: 2px 5px 2px 2px;
+      }
+      .chip i { width: 12px; height: 12px; border-radius: 3px; border: 1px solid rgba(255, 255, 255, 0.15); }
+      .chip code { color: #c6d3e4; }
+
+      .footnotes {
+        margin-top: 26px;
+        border-top: 1px solid var(--line);
+        padding-top: 14px;
+        color: var(--dim);
+        font-size: 12px;
+        line-height: 1.8;
+        max-width: 980px;
+      }
+      .footnotes b { color: var(--text); }
+      #report { display: none; }
+      @media (max-width: 760px) {
+        body { padding: 16px; }
+        .view-zoom { margin-left: 0; }
+        .views { flex-wrap: wrap; }
+      }
+    </style>
+  </head>
+  <body>
+    <header class="page-head">
+      <div>
+        <h1>尸潮 · 像素精灵预览</h1>
+        <p class="sub">
+          全部精灵为 32×32 字符矩阵 + 调色板，无图片依赖。左侧为 1× 原生、中间为游戏内实际尺寸、右侧为 8× 放大。<br />
+          <span id="stat" class="stat"></span>
+        </p>
+      </div>
+      <div class="controls">
+        <div class="control-group">
+          <span>描边</span>
+          <button data-outline="0">无</button>
+          <button data-outline="1" class="active">1px</button>
+          <button data-outline="2">2px 加粗</button>
+        </div>
+        <label class="control-group">
+          <span>像素网格</span>
+          <input type="checkbox" id="gridToggle" />
+        </label>
+        <label class="control-group">
+          <span>速度</span>
+          <input type="range" id="fpsRange" min="0" max="15" step="1" value="6" />
+          <span id="fpsValue">6 fps</span>
+        </label>
+        <button id="pauseToggle">暂停</button>
+      </div>
+    </header>
+
+    <section class="loadout-wrap">
+      <div class="loadout-title">游戏内实际大小对比（按各自 gameDiameter 渲染，线性缩放）</div>
+      <div class="loadout" id="loadout"></div>
+    </section>
+
+    <section class="section-block">
+      <h2 class="section-title">烘焙组合精灵（人 + 枪）</h2>
+      <p class="section-desc">
+        不再是实时叠两层：武器已经按 overlay <code>dx=8 / dy=2</code> 压进人物帧，烘焙成一张 32×32 贴图，每种 4 帧（idle / walk1 / walk2 / fire）。
+        描边现在跟着合成后的外轮廓走，不会出现「人一圈、枪一圈」。每组都标注 anchor（单位中心）、muzzle（fire 帧枪口）、footprintRadius 与像素包围盒。
+      </p>
+      <div class="sprite-grid" id="comboGrid"></div>
+    </section>
+
+    <section class="section-block">
+      <h2 class="section-title">接入自检（12px 贴地）</h2>
+      <p class="section-desc">
+        每个组合精灵按游戏内 12px 渲染后再放大 10×（禁用平滑），方便肉眼核对中心对位。
+        <b>青色十字</b> = anchor（纹理中心，渲染时钉在碰撞体中心）；<b>粉色圈</b> = muzzle（fire 帧枪口）；<b>灰色虚线圈</b> = footprintRadius 建议碰撞半径。
+        最后一张是人类无武器对照。
+      </p>
+      <div class="check-grid" id="selfCheckGrid"></div>
+    </section>
+
+    <section class="section-block">
+      <h2 class="section-title">单体精灵</h2>
+      <p class="section-desc">1× 原生 / 游戏内实际尺寸 / 8× 放大（可开像素网格）。武器是单独精灵，合成效果见上一节。</p>
+      <div class="sprite-grid" id="spriteGrid"></div>
+    </section>
+
+    <section class="footnotes">
+      <p>
+        <b>俯视 32px 的取舍：</b>只画从上往下能看到的部分——头顶、双肩、向前伸的手臂、靴尖。放弃了正面五官、躯干细节和武器背带等在大尺寸下才成立的东西；
+        眼睛只保留 2×2 的亮点，因为这是 11px 下唯一还能看出「这是张脸」的像素量。
+      </p>
+      <p>
+        <b>为什么手臂画在头两侧：</b>32px 下如果让手臂从头前方交叉，缩到 11px 会糊成一个绿团；留 1px 空隙、把双肩画宽，才能在小尺寸下保住「人形」轮廓。
+        因此枪也不做「双手端平」的姿势，而是按 overlay 偏移放到头部右侧，保证头部和枪管都能看清。
+      </p>
+      <p>
+        <b>武器剪影（轮廓区分，识别色只是辅助）：</b>机枪＝4px 宽短枪管 + 枪口制退器 + 机匣前亮色提把 + 外张两脚架 + 偏左圆弹鼓（又窄又带「圆屁股」）；
+        喷火器＝2px 细长枪管 + 机身两侧各一个圆燃料罐（最细、尾部双圆）；霰弹枪＝并排双管中间留 2px 缝 + 横跨双管的宽泵动护木（顶部两条细棱、中段宽箍）；
+        火箭筒＝15→11→9 三层扩口锥 + 9px 粗管身 + 宽方肩托（上下都外张的喇叭形）。四把枪的「宽度节奏」不同，8px 下不靠颜色也能对上号。
+      </p>
+      <p>
+        <b>烘焙与接入约定：</b>组合精灵在 <code>src/art/composites.ts</code> 里烘焙成普通 SpriteDef（独立调色板 + 字符矩阵），渲染层只按 id 取图，不需要再叠两层、也不用再算 overlay。
+        所有精灵统一画成「朝上」（<code>facing: "up"</code>），枪口指向 -y；渲染时把纹理的 anchor 点（32×32 内坐标，人形是 (16,17)）钉在单位逻辑坐标上，再按朝向旋转。
+        muzzle 记录 fire 帧枪管口位置（合成后 x=24，霰弹枪 x=22，y=5），子弹/火花直接从该点喷出。
+      </p>
+      <p>
+        <b>关于旋转：</b>当前只烘焙「朝上」一个方向，运行时用线性旋转。像素图转任意角会出现边缘锯齿与轻微糊化；8 方向预烘焙（45° 一档）能明显更稳，
+        但贴图数量 ×8，需要等接入渲染层时再决定是否值得。
+      </p>
+      <p>
+        <b>紫色对齐：</b>僵尸与倒戈人类的衣物主色统一为 <code>#8b5cf6</code>（与 HUD 普通僵尸圆点一致），高光 <code>#c77dff</code>（与 HUD 狂奔僵尸圆点一致），
+        暗部压到 <code>#4c2a86</code>。皮肤仍为绿色，紫布只占胸口与下摆的破布、肩顶一条亮紫与外缘垂布，避免整只僵尸变成紫色。
+      </p>
+    </section>
+
+    <pre id="report"></pre>
+
+    <script type="module" src="/src/art/preview.ts"></script>
+  </body>
+</html>

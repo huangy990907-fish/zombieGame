@@ -10,7 +10,7 @@ export type PixelFrame = string[];
 /** 字模 → 十六进制颜色，例如 { g: "#63a04b" } */
 export type Palette = Record<string, string>;
 
-/** 帧名 → 像素矩阵（idle / walk1 / walk2 / fire / dead ...） */
+/** 帧名 → 像素矩阵（idle / walk1 / walk2 / fire / death-1 ...） */
 export type Frames = Record<string, PixelFrame>;
 
 /** 精灵分组；combo = 人 + 枪烘焙后的组合精灵 */

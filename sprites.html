@@ -337,7 +337,8 @@
 
     <section class="section-block">
       <h2 class="section-title">单体精灵</h2>
-      <p class="section-desc">1× 原生 / 游戏内实际尺寸 / 8× 放大（可开像素网格）。武器是单独精灵，合成效果见上一节。</p>
+      <p class="section-desc">1× 原生 / 游戏内实际尺寸 / 8× 放大（可开像素网格）。武器是单独精灵，合成效果见上一节。
+        <code>zombie-death</code> 的倒地序列会按 <code>death-1</code> → <code>death-2</code> → <code>death-3</code> 循环播放（游戏内每帧 0.2s，播完停在末帧并淡出）。</p>
       <div class="sprite-grid" id="spriteGrid"></div>
     </section>
 
@@ -367,6 +368,11 @@
       <p>
         <b>紫色对齐：</b>僵尸与倒戈人类的衣物主色统一为 <code>#8b5cf6</code>（与 HUD 普通僵尸圆点一致），高光 <code>#c77dff</code>（与 HUD 狂奔僵尸圆点一致），
         暗部压到 <code>#4c2a86</code>。皮肤仍为绿色，紫布只占胸口与下摆的破布、肩顶一条亮紫与外缘垂布，避免整只僵尸变成紫色。
+      </p>
+      <p>
+        <b>倒地三帧：</b><code>death-1</code> 中弹倾倒（头偏移、双臂下垂、骨盆还撑在地上）；<code>death-2</code> 触地摊开（四肢外张、身位压扁、血泊出现）；
+        <code>death-3</code> 静置（右手外缘收 1px、躯干亮边压暗、血泊外缘再渗一圈）。三帧共用 anchor <code>(16,21)</code>，
+        渲染层按 0.2s/帧推进，0.6s 播完停在 <code>death-3</code>，最后 0.3s 淡出。
       </p>
     </section>
 

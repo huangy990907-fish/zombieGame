@@ -33,10 +33,11 @@ function must<T>(value: T | null, what: string): T {
   return value;
 }
 
-/** 动画序列：武器 idle 停 3 拍再打一发；组合精灵 walk 两拍 + fire 一拍 */
+/** 动画序列：武器 idle 停 3 拍再打一发；组合精灵 walk 两拍 + fire 一拍；倒地按定义顺序播三帧 */
 function framesOf(def: SpriteDef): string[] {
   const keys = Object.keys(def.frames);
   if (keys.length <= 1) return keys;
+  if (def.id === "zombie-death") return keys;
   const wanted =
     def.group === "weapon"
       ? ["idle", "idle", "idle", "fire"]

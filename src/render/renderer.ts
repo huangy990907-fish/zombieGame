@@ -5,7 +5,7 @@
  *  - 单位使用 src/art 的 32×32 像素精灵：纹理在启动时按 (精灵 id, 帧) 预生成并缓存，
  *    每帧只切 Sprite.texture，不新建 canvas / 纹理
  *  - Sprite 按数组下标复用（sync() 池化），不随实体生死反复创建销毁
- *  - 动画状态机（idle / walk / fire / 死亡定格）状态挂在渲染器本地 Map 上，按实体 id 索引
+ *  - 动画状态机（idle / walk / fire / 倒地三帧）状态挂在渲染器本地 Map 上，按实体 id 索引
  *  - 转化中的人类 = human-defected 精灵 + 高频闪烁
  */
 import { Application, CanvasSource, Container, Graphics, Sprite, Text, Texture } from "pixi.js";
@@ -42,7 +42,11 @@ const WALK_STEP_DIST = 9;
 const MOVE_SPEED = 12;
 /** 开火帧停留时长（秒），略长于机枪 0.1s 冷却 */
 const FIRE_HOLD = 0.12;
-/** 死亡定格时长（秒） */
+/** 倒地序列的帧名（zombie-death 精灵内），按时间顺序播放 */
+const DEATH_FRAMES = ["death-1", "death-2", "death-3"] as const;
+/** 倒地单帧时长（秒）：3 帧共 0.6s，播完停在末帧 */
+const DEATH_FRAME = 0.2;
+/** 尸体总停留时长（秒，含最后 0.3s 淡出） */
 const DEATH_LIFE = 0.85;
 /** 单帧最多补几个倒地位移，避免重开/清场时一次性刷满屏 */
 const DEATH_BURST_LIMIT = 24;
@@ -71,7 +75,7 @@ interface UnitAnim {
   seen: boolean;
 }
 
-/** 倒地定格：僵尸消失后在原地留一小会儿 */
+/** 倒地序列：僵尸消失后在原地播三帧，再淡出回收 */
 interface DeathMark {
   x: number;
   y: number;
@@ -139,7 +143,7 @@ export class Renderer {
   }
 
   /**
-   * 启动时把所有精灵的每一帧都预生成成 Pixi 纹理（13 个精灵 / 37 帧，开销一次性）。
+   * 启动时把所有精灵的每一帧都预生成成 Pixi 纹理（13 个精灵 / 39 帧，开销一次性）。
    * nearest 采样：像素精灵缩放时不能做线性插值，否则边缘发糊。
    */
   private warmSpriteTextures(): void {
@@ -443,18 +447,19 @@ export class Renderer {
     }
   }
 
-  /** 倒地定格：固定纹理（zombie-death 的 dead 帧），0.85s 后淡出回收 */
+  /** 倒地序列：按 age 推进 death-1 → death-2 → death-3，0.6s 后停在末帧，最后 0.3s 淡出 */
   private renderDeaths(dt: number): void {
     for (let i = this.deaths.length - 1; i >= 0; i--) {
       this.deaths[i].age += dt;
       if (this.deaths[i].age >= DEATH_LIFE) this.deaths.splice(i, 1);
     }
     const def = spriteDef("zombie-death");
+    const textures = DEATH_FRAMES.map((name) => this.texture(def.id, name));
     const scale = spriteScale(def.footprintRadius * 2 * VISUAL_SCALE);
     const anchorX = def.anchor.x / SPRITE_SIZE;
     const anchorY = def.anchor.y / SPRITE_SIZE;
     while (this.deathSprites.length < this.deaths.length) {
-      const s = new Sprite(this.texture(def.id, "dead"));
+      const s = new Sprite(textures[0]);
       s.anchor.set(anchorX, anchorY);
       this.deathLayer.addChild(s);
       this.deathSprites.push(s);
@@ -470,6 +475,9 @@ export class Renderer {
       s.position.set(d.x, d.y);
       s.rotation = spriteRotation(d.angle);
       s.scale.set(scale);
+      // 播完停在末帧；超出序列的部分自然落在 death-3
+      const frame = Math.min(DEATH_FRAMES.length - 1, Math.floor(d.age / DEATH_FRAME));
+      s.texture = textures[frame];
       s.alpha = d.age < DEATH_LIFE - 0.3 ? 1 : (DEATH_LIFE - d.age) / 0.3;
     }
   }

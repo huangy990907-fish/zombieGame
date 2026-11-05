@@ -12,7 +12,7 @@
  */
 import { DEFAULT_MAP, type MapDef } from "../data/maps";
 import { effectiveHuman, effectiveWeapon, effectiveZombie, openingTuning, settings } from "../data/settings/runtime";
-import type { HumanMode, Rect } from "../data/types";
+import type { HumanMode, Rect, ZombieMode } from "../data/types";
 import { FlowField } from "../systems/flowField";
 import { gaussClamped, insideRect, randRange, segRectHit } from "../utils/math";
 import { SpatialHash } from "../utils/spatialHash";
@@ -86,9 +86,17 @@ export interface Zombie {
   bite: number;
   /** 重新索敌的计时 */
   retarget: number;
-  /** 追击目标坐标 */
+  /** 追击目标坐标（漫游时保留最后一次索敌坐标，仅供扩展逻辑参考） */
   tx: number;
   ty: number;
+  /** 行为状态：hunt 索敌进攻 / wander 场上零人类时漫游 */
+  mode: ZombieMode;
+  /** 漫游朝向（弧度）；仅 mode === "wander" 时由行为层推进 */
+  wanderAngle: number;
+  /** 漫游当前动作的剩余时间（秒）：移动段与停顿段共用 */
+  wanderTimer: number;
+  /** 漫游是否处于停顿段 */
+  wanderRest: boolean;
   alive: boolean;
   /** 训练场用：血量上限（面板显示 / 重设血量） */
   maxHp?: number;
@@ -208,6 +216,11 @@ export class World {
   humanGrid: SpatialHash<Human>;
   flow: FlowField;
   time = 0;
+  /**
+   * 每帧刷新一次的存活人类数量（含正在转化倒计时中的）。
+   * 行为层用它决定丧尸处于索敌还是漫游，避免每只丧尸各扫一遍人类数组。
+   */
+  livingHumans = 0;
   /** 统计：击杀数 / 被感染数 */
   kills = 0;
   infected = 0;
@@ -352,10 +365,28 @@ export class World {
       retarget: randRange(0, 0.3),
       tx: x,
       ty: y,
+      mode: "hunt",
+      wanderAngle: randRange(-Math.PI, Math.PI),
+      wanderTimer: 0,
+      wanderRest: false,
       alive: true,
     };
     this.zombies.push(zombie);
     return zombie;
+  }
+
+  /**
+   * 刷新存活人类计数（每帧一次）。包含正在转化倒计时中的人类：
+   * 只要还有任何一个没变成丧尸，丧尸就保持索敌进攻。
+   * 返回值就是当前存活人数，方便行为层直接复用。
+   */
+  refreshLivingHumans(): number {
+    let n = 0;
+    for (let i = 0; i < this.humans.length; i++) {
+      if (this.humans[i].alive) n++;
+    }
+    this.livingHumans = n;
+    return n;
   }
 
   /** 每帧开头重建两张空间索引表 */

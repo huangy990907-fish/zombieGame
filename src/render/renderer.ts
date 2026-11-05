@@ -413,7 +413,10 @@ export class Renderer {
     for (let i = 0; i < zombies.length; i++) {
       const z = zombies[i];
       const s = this.zSprites[i];
-      const st = this.stateFor(this.zAnim, z, dt, Math.atan2(z.ty - z.y, z.tx - z.x));
+      // 漫游时不追目标，朝向跟随自己的漫游方向；索敌时朝目标坐标
+      const angle =
+        z.mode === "wander" ? z.wanderAngle : Math.atan2(z.ty - z.y, z.tx - z.x);
+      const st = this.stateFor(this.zAnim, z, dt, angle);
       st.seen = true;
 
       const def = spriteDef(zombieSpriteId(z.kind));

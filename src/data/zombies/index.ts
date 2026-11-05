@@ -14,6 +14,22 @@ export const ZOMBIE_DEFS: Record<string, ZombieDef> = {
 /** 有序列表（插入顺序）—— 只影响默认展示顺序，身份始终用 id */
 export const ZOMBIE_LIST: ZombieDef[] = Object.values(ZOMBIE_DEFS);
 
+/**
+ * 零人类时丧尸的漫游参数（行为层 systems/ai.ts 读取）。
+ * 以后若要做不同索敌机制的僵尸，可把这份参数扩展成 ZombieDef 的可选字段，
+ * 按类型覆盖而不必改行为逻辑。
+ */
+export const WANDER_TUNING = {
+  /** 漫游移速相对正常移速的比例 */
+  speedScale: 0.55,
+  /** 朝同一方向持续移动的时长下限 / 上限（秒） */
+  moveMin: 1.5,
+  moveMax: 3,
+  /** 两次移动之间的停顿下限 / 上限（秒） */
+  restMin: 0.4,
+  restMax: 1.2,
+} as const;
+
 /** 常用 id 常量，避免在玩法代码里散落字符串字面量 */
 export const ZOMBIE_IDS = {
   normal: normal.id,

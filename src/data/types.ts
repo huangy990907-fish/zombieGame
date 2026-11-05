@@ -19,6 +19,13 @@ export interface RoomDef {
 /** 人类行为模式：defend 守开口（默认）/ attack 主动出击 / guard 保护个体（留接口） */
 export type HumanMode = "defend" | "attack" | "guard";
 
+/**
+ * 丧尸行为状态：hunt 索敌进攻（默认）/ wander 场上零人类时漫游。
+ * 每只丧尸独立持有，行为层按世界级人数标记统一切换，
+ * 方便以后按僵尸类型接入别的索敌机制。
+ */
+export type ZombieMode = "hunt" | "wander";
+
 /** 武器攻击形态：直线子弹 / 霰弹多弹丸 / 喷火锥形 / 火箭爆炸 */
 export type WeaponKind = "bullet" | "pellet" | "flame" | "rocket";
 

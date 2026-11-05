@@ -13,7 +13,6 @@
  * menu/levels 路由下 ticker 继续跑（保证 Pixi 渲染帧稳定），
  * 但 game.tick() 不被调用——战斗逻辑停止，画面冻结成静态背景。
  */
-import "./style.css";
 import { getSetting, setSetting, SLIDER_GROUPS } from "./config";
 import { sound, SFX } from "./audio/manager";
 import {
@@ -559,6 +558,9 @@ async function boot(): Promise<void> {
   refreshButtons();
   buildSettingsPanel();
   await refreshStorageStatus();
+
+  // 初始化完成：解除 critical CSS 的首屏隐藏（index.html 里还有 3 秒兜底）
+  document.documentElement.classList.add("ui-ready");
 
   if (import.meta.env.DEV) {
     (window as unknown as { __game: Game; __router: typeof router }).__game = game;

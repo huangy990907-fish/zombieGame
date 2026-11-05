@@ -5,6 +5,24 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link rel="icon" href="data:," />
     <title>尸潮 · 人类 vs 丧尸</title>
+    <!-- 主样式表随 HTML 并行加载，避免等 JS 运行时注入样式造成首屏裸 HTML -->
+    <link rel="stylesheet" href="/src/style.css" />
+    <style>
+      /* critical CSS：首帧就铺好背景，并在初始化完成前隐藏未就绪内容 */
+      html {
+        background-color: #030308;
+        background-image: radial-gradient(circle at 50% 0%, #10101c 0%, #030308 70%);
+      }
+      html:not(.ui-ready) body {
+        visibility: hidden;
+      }
+    </style>
+    <script>
+      // 兜底：脚本异常或初始化超时也不能让页面一直空白
+      setTimeout(function () {
+        document.documentElement.classList.add("ui-ready");
+      }, 3000);
+    </script>
   </head>
   <body>
     <div class="frame">

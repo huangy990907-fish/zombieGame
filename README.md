@@ -3,7 +3,7 @@
 一个运行在浏览器里的 2D 自主对抗小游戏：50 名人类守在封闭房间里，抵御一波波从门和窗户涌入的丧尸。玩家不直接操控单个单位，而是通过调整参数、切换行为模式和游戏速度来观察战局；另外提供一个独立的「训练场」，用于自由生成单位、改数值、测武器 DPS。
 
 - 技术栈：TypeScript + Vite + PixiJS（渲染到 Canvas）
-- 版本：`0.3.0`，变更记录见 [CHANGELOG.md](./CHANGELOG.md)
+- 版本：`0.4.0`，变更记录见 [CHANGELOG.md](./CHANGELOG.md)
 - 入口：主菜单 → 新游戏 / 载入游戏 / 训练场
 
 ## 目录
@@ -14,6 +14,7 @@
 - [目录结构](#目录结构)
 - [快速开始](#快速开始)
 - [操作说明](#操作说明)
+- [美术资源](#美术资源)
 - [音效系统](#音效系统)
 - [参数与存档](#参数与存档)
 - [已知限制](#已知限制)
@@ -185,6 +186,7 @@ zombieGame/
 ├── package.json            # 版本号与 scripts（dev / build / preview）
 ├── README.md               # 本文件
 ├── CHANGELOG.md            # 变更记录
+├── sprites.html            # 像素精灵预览页（开发服务器下访问；不进入构建）
 ├── public/
 │   └── audio/              # 16 个音效 mp3 + CREDITS.md 授权台账
 ├── src/
@@ -192,6 +194,14 @@ zombieGame/
 │   ├── levels.ts           # 关卡定义（目前只有 level-1）与关卡级参数覆盖
 │   ├── router.ts           # hash 路由与路由表
 │   ├── style.css           # 页面、HUD、面板、训练场样式
+│   ├── art/                # 美术数据层：32px 像素精灵（不依赖游戏其它模块）
+│   │   ├── types.ts        # SpriteDef / 调色板 / 帧矩阵 / anchor / muzzle 类型
+│   │   ├── sprites.ts      # 人类、僵尸、武器、倒地等单体精灵定义
+│   │   ├── composites.ts   # 人类 + 四把武器烘焙成 human-<weapon> 组合精灵
+│   │   ├── bake.ts         # 武器叠加烘焙（overlay 偏移）
+│   │   ├── render.ts       # 帧矩阵 → Canvas 绘制
+│   │   ├── preview.ts      # sprites.html 预览页逻辑
+│   │   └── index.ts        # 聚合导出 + getSprite(id) 查表
 │   ├── data/               # 数据层：实体定义、地图、设置（唯一的数值来源）
 │   │   ├── index.ts        # 聚合导出
 │   │   ├── types.ts        # 共享类型：实体定义、地图、设置结构、滑块元数据
@@ -222,6 +232,7 @@ zombieGame/
 │   │   ├── combat.ts       # 开火、弹道、扫掠命中、爆炸
 │   │   └── flowField.ts    # BFS 流场寻路
 │   ├── render/
+│   │   ├── pixel.ts        # 精灵接入适配：id 查表、朝向换算、缩放、枪口坐标
 │   │   └── renderer.ts     # PixiJS 场景、实体绘制、粒子、训练场装饰、飘字
 │   ├── training/
 │   │   ├── session.ts      # 训练场独立 World、生成/删除/清场、统计、暂停/单步/慢放
@@ -288,6 +299,7 @@ npm run preview   # 本地预览 dist/ 构建产物
 | 单步 | 面板「⏭ 单步」或 `.` / `N` |
 | 慢放 / 恢复 | 面板「0.25x 慢放」「1x 正常」，或 `0` / `1` |
 | 退出 | 面板「← 主菜单」 |
+| 查看单位外观 | 浏览器打开 `/sprites.html`（需 `npm run dev` 在跑） |
 
 典型用法：
 
@@ -295,6 +307,60 @@ npm run preview   # 本地预览 dist/ 构建产物
 2. 暂停后逐帧单步，检查弹道与命中判定。
 3. 训练前后分别点「读数清零」，对比同一批单位的武器表现。
 4. 给人类勾上「无敌」并调高血量，把它当作持续输出平台；关闭无敌后可以观察感染转化。
+
+造美术或调单位外观时，先打开像素精灵预览页 `sprites.html`（见[美术资源](#美术资源)），比在战场里反复刷新直观。
+
+## 美术资源
+
+### 像素精灵
+
+单位由 `src/art/` 里的 32×32 俯视像素精灵渲染，不是运行时用代码画的圆形。每个精灵是一个 `SpriteDef`（定义在 `src/art/types.ts`）：
+
+| 字段 | 作用 |
+|---|---|
+| `id` | 稳定标识，渲染层按 id 取图；人类为 `human-<weapon>`，僵尸为 `zombie-<kind>` |
+| `palette` | 字模 → 颜色的调色板，例如 `{ g: "#63a04b" }` |
+| `frames` | 帧名 → 32 行字符串，每行 32 个字符，`.` 表示透明 |
+| `anchor` | 32×32 内钉在单位逻辑坐标上的中心点（人形为 `(16,17)`） |
+| `muzzle` | 开火帧的枪口坐标，子弹与火舌从这里出膛；无武器时为 `undefined` |
+| `gameDiameter` / `footprintRadius` | 建议绘制直径与碰撞半径，用于预览页还原 1:1 大小 |
+| `facing` | 统一为 `"up"`（枪口指向 -y），运行时按朝向旋转 |
+
+人类与四把武器的组合精灵 `human-mg` / `human-flame` / `human-shotgun` / `human-rocket` 由 `src/art/composites.ts` 在模块加载时用 `bakeOverlay` 烘焙，产物是普通 `SpriteDef`；渲染层只按 id 取一张贴图，不再实时叠两层。
+
+### 新增一个单位外观
+
+1. 在 `src/art/sprites.ts` 复制一个现有 `SpriteDef`，改 `id` / `name` / 调色板与帧矩阵，并登记进 `SPRITE_LIST`。
+2. 如果是新武器的人类外观，在 `src/art/composites.ts` 的 `MUZZLE_BY_WEAPON` 与武器叠加逻辑里补上对应 id，烘焙会自动生成 `human-<weapon>`。
+3. 在数据层新增对应实体：僵尸加 `src/data/zombies/` 并登记到注册表，武器加 `src/data/weapons/`。
+4. 打开预览页核对 1×、游戏内尺寸与 8× 放大，并确认 anchor / muzzle 标记落在正确位置。
+
+`src/art/` 不 import 游戏其它模块；与引擎之间的换算（id 查表、朝向旋转、缩放、枪口折算）集中在 `src/render/pixel.ts`。
+
+### 预览页 `sprites.html`
+
+根目录的 `sprites.html` 是独立预览页：左 1× 原生、中按 `gameDiameter` 的游戏内尺寸、右 8× 放大；另有「接入自检」区块叠加 anchor（青色十字）、muzzle（粉色圈）与 `footprintRadius`（灰色虚线圈），可切换描边档位、像素网格与动画速度。
+
+它和主游戏一样必须通过 HTTP 访问：
+
+```bash
+npm run dev
+# 浏览器打开 http://localhost:5173/sprites.html
+```
+
+当前构建只以 `index.html` 为入口，`sprites.html` 仅用于开发期预览，不会进入 `dist/`。
+
+### 视觉缩放
+
+`src/render/pixel.ts` 的 `VISUAL_SCALE = 1.5` 是纯视觉倍数，只乘在精灵缩放上：
+
+| 单位 | 碰撞半径 | 逻辑直径 | 放大后绘制直径 |
+|---|---|---|---|
+| 人类 | 6 | 12 | 18 |
+| 普通丧尸 | 5.5 | 11 | 16.5 |
+| 狂奔丧尸 | 4.5 | 9 | 13.5 |
+
+32px 精灵四周有透明留白，1.5 倍后人类可见宽度约 12.4px，接近 12px 的碰撞直径，所以看上去变大、判定没有变。碰撞半径、速度、伤害、咬合距离、查询边距与寻路格子全部保持原值；枪口世界坐标同样按放大后的直径折算，子弹仍从枪口出膛。
 
 ## 音效系统
 
@@ -382,7 +448,7 @@ npm run preview   # 本地预览 dist/ 构建产物
 
 - 目前只有 1 个关卡（`level-1`「初次尸潮」，8 波）和 1 张地图（`arena`）。地图已是注册表结构（`src/data/maps/`），但入口暂时只用默认地图，还没有地图选择界面；关卡结构支持继续添加，但尚未有第二关。
 - 音效：16 个事件已接线，素材均为 freesound CC0 录音；但 `weapon-reload` 与 `human-hurt` 没有调用点，放入文件也不会响。
-- 美术：全部由代码绘制（Pixi Graphics、Sprite、粒子与程序化贴图），没有外部美术资源，也没有角色动画帧。
+- 美术：单位与武器已改为 32px 像素精灵（`src/art/`，13 精灵 / 37 帧），但只为「朝上」方向烘焙了一帧集，运行时按朝向线性旋转，任意角会有轻微锯齿；特效与场景装饰仍由 Pixi 代码绘制。
 - 没有自动化测试；`npm run build` 只做类型检查与打包，行为正确性依赖浏览器实跑。
 - 面向桌面浏览器：训练场需要鼠标精确点选，未做移动端触控适配。
 - 顶栏速度按钮支持 8x，但键盘只覆盖 1x / 2x / 4x。

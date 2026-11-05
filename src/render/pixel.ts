@@ -7,8 +7,14 @@
 import { SPRITE_SIZE, getSprite, type SpriteDef, type Vec2 } from "../art";
 import { HUMAN_DEF } from "../data/humans";
 
-/** 人类游戏内直径（碰撞半径 6 → 12px，与精灵 gameDiameter 一致） */
-export const HUMAN_DIAMETER = HUMAN_DEF.radius * 2;
+/**
+ * 纯视觉放大倍数：只作用于精灵缩放，不参与碰撞 / 分离 / 寻路等物理判定。
+ * 32px 精灵四周有透明留白，1.5 倍后人类可见宽度约 12.4px，接近 12px 碰撞直径。
+ */
+export const VISUAL_SCALE = 1.5;
+
+/** 人类精灵直径（碰撞半径 6 → 逻辑 12px，视觉 18px） */
+export const HUMAN_DIAMETER = HUMAN_DEF.radius * 2 * VISUAL_SCALE;
 
 /**
  * 精灵朝上、引擎 0 朝右 → 渲染旋转角 = 逻辑角 + 90°。

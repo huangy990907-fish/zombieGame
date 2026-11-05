@@ -1149,9 +1149,13 @@ body {
   color: #a5f3fc;
 }
 
-/* 训练场时给右侧面板让位，画布等比缩小 */
+/* 训练场时给右侧面板让位：body 预留面板宽度，画布在剩余区域内居中，不钻到面板底下 */
+body.training {
+  padding-right: 380px;
+}
+
 body.training .frame {
-  width: min(880px, calc(100vw - 380px));
+  width: min(1040px, calc(100vw - 380px));
 }
 
 body.training .screen canvas {

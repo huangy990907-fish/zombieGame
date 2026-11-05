@@ -13,7 +13,7 @@ import { COMBO_SPRITES, SPRITE_LIST, SPRITE_SIZE, getNativeFrame, getSprite, typ
 import { DEFAULT_MAP, type MapDef } from "../data/maps";
 import { effectiveZombie, settings } from "../data/settings/runtime";
 import type { Human, World, Zombie } from "../core/world";
-import { HUMAN_DIAMETER, humanSpriteId, spriteDef, spriteRotation, spriteScale, zombieSpriteId } from "./pixel";
+import { HUMAN_DIAMETER, humanSpriteId, spriteDef, spriteRotation, spriteScale, VISUAL_SCALE, zombieSpriteId } from "./pixel";
 
 /** 单条伤害飘字（训练场用，渲染层只负责画，生命周期由训练场会话管理） */
 export interface FloatingText {
@@ -420,7 +420,7 @@ export class Renderer {
       const frame = st.moving ? (st.step ? "walk2" : "walk1") : "idle";
       s.position.set(z.x, z.y);
       s.rotation = spriteRotation(st.angle);
-      s.scale.set(spriteScale(effectiveZombie(z.kind).radius * 2));
+      s.scale.set(spriteScale(effectiveZombie(z.kind).radius * 2 * VISUAL_SCALE));
       s.alpha = 1;
       this.applyFrame(s, st, def, frame);
     }
@@ -450,7 +450,7 @@ export class Renderer {
       if (this.deaths[i].age >= DEATH_LIFE) this.deaths.splice(i, 1);
     }
     const def = spriteDef("zombie-death");
-    const scale = spriteScale(def.footprintRadius * 2);
+    const scale = spriteScale(def.footprintRadius * 2 * VISUAL_SCALE);
     const anchorX = def.anchor.x / SPRITE_SIZE;
     const anchorY = def.anchor.y / SPRITE_SIZE;
     while (this.deathSprites.length < this.deaths.length) {

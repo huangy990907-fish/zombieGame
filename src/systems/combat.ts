@@ -13,6 +13,7 @@ import type { WeaponDef } from "../data/types";
 import { dist2, mixColor, pointSegDistSq } from "../utils/math";
 import type { BulletKind, DamageSource, Human, World, Zombie } from "../core/world";
 import { sound, SFX } from "../audio/manager";
+import { humanMuzzle } from "../render/pixel";
 
 const queryBuf: Zombie[] = [];
 
@@ -89,9 +90,11 @@ function flameTick(world: World, h: Human, def: WeaponDef): void {
   const angle = h.facing;
   const dirX = Math.cos(angle);
   const dirY = Math.sin(angle);
-  // 枪口位置：从人物中心往前偏一点，火焰看起来才是"喷出去"的
-  const muzzleX = h.x + dirX * 9;
-  const muzzleY = h.y + dirY * 9;
+  // 枪口位置：精灵 fire 帧的 muzzle 偏移（muzzle - anchor）按朝向旋转，
+  // 子弹与火舌都从这里出膛，保证视觉上贴着枪管口
+  const muzzle = humanMuzzle(h.weapon, h.x, h.y, angle);
+  const muzzleX = muzzle.x;
+  const muzzleY = muzzle.y;
 
   /*
    * ember 火星粒子：每次结算喷 7 颗，从枪口沿锥形方向飞出。
@@ -146,8 +149,9 @@ function spawnBullet(
   blast: number,
   life: number,
 ): void {
-  const x = h.x + Math.cos(angle) * 10;
-  const y = h.y + Math.sin(angle) * 10;
+  const muzzle = humanMuzzle(h.weapon, h.x, h.y, angle);
+  const x = muzzle.x;
+  const y = muzzle.y;
   world.bullets.push({
     x,
     y,

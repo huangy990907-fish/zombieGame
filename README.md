@@ -186,6 +186,7 @@ zombieGame/
 ├── package.json            # 版本号与 scripts（dev / build / preview）
 ├── README.md               # 本文件
 ├── CHANGELOG.md            # 变更记录
+├── TODO.md                 # 待办与交付约定（按优先级）
 ├── sprites.html            # 像素精灵预览页（开发服务器下访问；不进入构建）
 ├── public/
 │   └── audio/              # 16 个音效 mp3 + CREDITS.md 授权台账
@@ -337,6 +338,36 @@ npm run preview   # 本地预览 dist/ 构建产物
 
 `src/art/` 不 import 游戏其它模块；与引擎之间的换算（id 查表、朝向旋转、缩放、枪口折算）集中在 `src/render/pixel.ts`。
 
+### 新增实体交付清单
+
+新增僵尸 / 武器 / 地图时按下面清单逐项完成，缺项视为未完成（`TODO.md` 顶部记录了同一约定）：
+
+**1. 数据注册**
+
+- 僵尸：新建 `src/data/zombies/<id>.ts`，在 `src/data/zombies/index.ts` 注册；武器：新建 `src/data/weapons/<id>.ts`，在 `src/data/weapons/index.ts` 与 `LOADOUT` 里登记；地图：新建 `src/data/maps/<id>.ts`，在 `src/data/maps/index.ts` 注册。
+- 数值只写在定义文件里，不在设置里重复一份；训练场按钮、统计列与 HUD 会跟随注册表自动出现，不需要手改 UI。
+
+**2. 精灵与动画帧**
+
+- 在 `src/art/sprites.ts` 增加 `SpriteDef`：32×32、32 行 × 32 字符、`.` 表示透明，僵尸为 `zombie-<id>`，人类武器为 `human-<weapon>`（在 `src/art/composites.ts` 补枪口与叠加偏移）。
+- 至少包含 idle、移动帧与开火帧；需要倒地表现的补 `death-1…N` 帧序列，并在渲染层按时间推进。
+- 打开 `sprites.html` 核对 1×、游戏内尺寸与 8× 放大，确认 anchor / muzzle / footprintRadius 标记位置正确、无空帧、无宽度错误。
+
+**3. 音效**
+
+- 把音频文件放进 `public/audio/`，在 `src/audio/events.ts` 三处登记：`SFX`、`SFX_MAP`、`SFX_THROTTLE`。
+- 在 `public/audio/CREDITS.md` 记录来源、许可证、作者与处理方式；已备好但没有调用点的事件要注明，避免误以为已生效。
+
+**4. 文档**
+
+- `README.md`：更新目录结构（如新增目录）、操作说明（如新按钮）、音效事件表与精灵/帧数量。
+- `CHANGELOG.md`：在 `[Unreleased]` 写条目。新实体写进「新增」并注明 id 与外观/音效；既有行为变化写进「变更」。
+
+**5. 训练场与验收**
+
+- 新实体在训练场单位库出现，可生成、可选中，统计列有数值。
+- `npx tsc --noEmit` 与 `npm run build` 通过；`#/play`、`#/training` 实跑无 console error。
+
 ### 预览页 `sprites.html`
 
 根目录的 `sprites.html` 是独立预览页：左 1× 原生、中按 `gameDiameter` 的游戏内尺寸、右 8× 放大；另有「接入自检」区块叠加 anchor（青色十字）、muzzle（粉色圈）与 `footprintRadius`（灰色虚线圈），可切换描边档位、像素网格与动画速度。
@@ -448,7 +479,7 @@ npm run dev
 
 - 目前只有 1 个关卡（`level-1`「初次尸潮」，8 波）和 1 张地图（`arena`）。地图已是注册表结构（`src/data/maps/`），但入口暂时只用默认地图，还没有地图选择界面；关卡结构支持继续添加，但尚未有第二关。
 - 音效：16 个事件已接线，素材均为 freesound CC0 录音；但 `weapon-reload` 与 `human-hurt` 没有调用点，放入文件也不会响。
-- 美术：单位与武器已改为 32px 像素精灵（`src/art/`，13 精灵 / 37 帧），但只为「朝上」方向烘焙了一帧集，运行时按朝向线性旋转，任意角会有轻微锯齿；特效与场景装饰仍由 Pixi 代码绘制。
+- 美术：单位与武器已改为 32px 像素精灵（`src/art/`，13 精灵 / 39 帧），但只为「朝上」方向烘焙了一帧集，运行时按朝向线性旋转，任意角会有轻微锯齿；特效与场景装饰仍由 Pixi 代码绘制。
 - 没有自动化测试；`npm run build` 只做类型检查与打包，行为正确性依赖浏览器实跑。
 - 面向桌面浏览器：训练场需要鼠标精确点选，未做移动端触控适配。
 - 顶栏速度按钮支持 8x，但键盘只覆盖 1x / 2x / 4x。

@@ -10,7 +10,7 @@
  *       破口后涌入（穿窗会被窗檐减速）-> 直扑最近人类 -> 贴近就咬
  */
 import { HUMAN_DEF } from "../data/humans";
-import { ZOMBIE_IDS } from "../data/zombies";
+import { WANDER_TUNING, ZOMBIE_IDS } from "../data/zombies";
 import { effectiveWeapon, effectiveZombie, openingTuning, settings } from "../data/settings/runtime";
 import { tryFire, updateFlame } from "./combat";
 import { angDiff, clamp, dist2, pointRectDist, randRange, turnToward } from "../utils/math";
@@ -287,43 +287,107 @@ function retarget(world: World, z: Zombie): void {
   }
 }
 
+/** 切到漫游：随机选一个方向，开始一段移动 */
+function beginWander(z: Zombie): void {
+  z.mode = "wander";
+  z.wanderRest = false;
+  z.wanderAngle = randRange(-Math.PI, Math.PI);
+  z.wanderTimer = randRange(WANDER_TUNING.moveMin, WANDER_TUNING.moveMax);
+}
+
+/** 推进漫游节拍：移动 1.5~3 秒 -> 停顿 0.4~1.2 秒 -> 换方向继续 */
+function tickWander(z: Zombie, dt: number): void {
+  z.wanderTimer -= dt;
+  if (z.wanderTimer > 0) return;
+  if (z.wanderRest) {
+    z.wanderRest = false;
+    z.wanderAngle = randRange(-Math.PI, Math.PI);
+    z.wanderTimer = randRange(WANDER_TUNING.moveMin, WANDER_TUNING.moveMax);
+  } else {
+    z.wanderRest = true;
+    z.wanderTimer = randRange(WANDER_TUNING.restMin, WANDER_TUNING.restMax);
+  }
+}
+
+/** 漫游撞墙：按被挡住的轴反射方向；两轴同时被挡就换随机方向，避免卡死 */
+function bounceWander(z: Zombie, blockedX: boolean, blockedY: boolean): void {
+  if (blockedX && blockedY) {
+    z.wanderAngle = randRange(-Math.PI, Math.PI);
+    return;
+  }
+  let vx = Math.cos(z.wanderAngle);
+  let vy = Math.sin(z.wanderAngle);
+  if (blockedX) vx = -vx;
+  if (blockedY) vy = -vy;
+  z.wanderAngle = Math.atan2(vy, vx) + randRange(-0.2, 0.2);
+}
+
 export function updateZombies(world: World, dt: number): void {
   const flow = world.flow;
   const map = world.map;
   const room = map.room;
   const s = settings();
+  // 每帧只统计一次存活人类（含转化倒计时中的），所有丧尸共用一个标记
+  const huntMode = world.refreshLivingHumans() > 0;
   for (let i = 0; i < world.zombies.length; i++) {
     const z = world.zombies[i];
     if (!z.alive) continue;
     if (z.bite > 0) z.bite -= dt;
 
-    // 每隔 0.3~0.6 秒重新索敌，而不是每帧都找（几千只一起找会卡）
-    z.retarget -= dt;
-    if (z.retarget <= 0) {
-      retarget(world, z);
-      z.retarget = 0.3 + Math.random() * 0.3;
+    /*
+     * 行为状态切换：场上有活人就索敌进攻，零人类才漫游。
+     * 人类重新出现时把索敌计时清零，下一帧立刻恢复进攻，不留延迟。
+     */
+    if (huntMode) {
+      if (z.mode !== "hunt") {
+        z.mode = "hunt";
+        z.retarget = 0;
+      }
+    } else if (z.mode !== "wander") {
+      beginWander(z);
+    }
+
+    if (z.mode === "hunt") {
+      // 每隔 0.3~0.6 秒重新索敌，而不是每帧都找（几千只一起找会卡）
+      z.retarget -= dt;
+      if (z.retarget <= 0) {
+        retarget(world, z);
+        z.retarget = 0.3 + Math.random() * 0.3;
+      }
     }
 
     let dx: number;
     let dy: number;
-    // 是否还在房间外（墙外圈 6px 内算边界上）
-    const outside =
-      z.x < room.left + 6 ||
-      z.y < room.top + 6 ||
-      z.y > room.bottom - 6 ||
-      z.x > room.right - 6;
-    if (outside) {
-      // 房间外：查流场方向，涌向最近的开口
-      const f = flow.sample(z.x, z.y);
-      dx = f.x;
-      dy = f.y;
+    if (z.mode === "wander") {
+      // 漫游：自己走自己的，不采样流场、不追开口
+      tickWander(z, dt);
+      if (z.wanderRest) {
+        dx = 0;
+        dy = 0;
+      } else {
+        dx = Math.cos(z.wanderAngle);
+        dy = Math.sin(z.wanderAngle);
+      }
     } else {
-      // 房间内：直扑索敌目标
-      const tx = z.tx - z.x;
-      const ty = z.ty - z.y;
-      const d = Math.hypot(tx, ty) || 1;
-      dx = tx / d;
-      dy = ty / d;
+      // 是否还在房间外（墙外圈 6px 内算边界上）
+      const outside =
+        z.x < room.left + 6 ||
+        z.y < room.top + 6 ||
+        z.y > room.bottom - 6 ||
+        z.x > room.right - 6;
+      if (outside) {
+        // 房间外：查流场方向，涌向最近的开口
+        const f = flow.sample(z.x, z.y);
+        dx = f.x;
+        dy = f.y;
+      } else {
+        // 房间内：直扑索敌目标
+        const tx = z.tx - z.x;
+        const ty = z.ty - z.y;
+        const d = Math.hypot(tx, ty) || 1;
+        dx = tx / d;
+        dy = ty / d;
+      }
     }
 
     // 行走时轻微摇摆，尸群看起来更自然
@@ -365,18 +429,37 @@ export function updateZombies(world: World, dt: number): void {
       }
     }
     const len = Math.hypot(dx, dy) || 1;
-    const speed = z.speed * passMul * (cnt >= 5 ? 0.72 : 1);
+    const wanderMul = z.mode === "wander" ? WANDER_TUNING.speedScale : 1;
+    const speed = z.speed * passMul * (cnt >= 5 ? 0.72 : 1) * wanderMul;
     let x = z.x + (dx / len) * speed * dt;
     let y = z.y + (dy / len) * speed * dt;
 
     // 撞墙 / 撞上完好的门窗时被挡住（破口可以钻）
-    if (world.solidAt(x, z.y)) x = z.x;
-    if (world.solidAt(z.x, y)) y = z.y;
-    z.x = clamp(x, 2, map.width - 2);
-    z.y = clamp(y, 2, map.height - 2);
+    let blockedX = false;
+    let blockedY = false;
+    if (world.solidAt(x, z.y)) {
+      x = z.x;
+      blockedX = true;
+    }
+    if (world.solidAt(z.x, y)) {
+      y = z.y;
+      blockedY = true;
+    }
+    const cx = clamp(x, 2, map.width - 2);
+    const cy = clamp(y, 2, map.height - 2);
+    if (cx !== x) blockedX = true;
+    if (cy !== y) blockedY = true;
+    z.x = cx;
+    z.y = cy;
 
-    // 撕咬冷却就绪时先试着咬人；够不到人就啃贴上的门窗
-    if (z.bite <= 0) {
+    // 漫游撞到墙 / 地图边界时转向，不沿着墙硬顶
+    if (z.mode === "wander" && (blockedX || blockedY)) {
+      bounceWander(z, blockedX, blockedY);
+    }
+
+    // 撕咬冷却就绪时先试着咬人；够不到人就啃贴上的门窗。
+    // 漫游状态下完全不碰建筑：不扣门窗血量、也不触发咬合音效。
+    if (z.mode === "hunt" && z.bite <= 0) {
       let bit = false;
       world.humanGrid.query(z.x, z.y, 14, queryH);
       const zdef = effectiveZombie(z.kind);

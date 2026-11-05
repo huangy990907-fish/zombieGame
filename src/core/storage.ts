@@ -9,16 +9,18 @@
  *   - showDirectoryPicker 存在 → 支持 FSA 目录句柄（Chrome/Edge，localhost 或 HTTPS）
  *   - 否则                    → 所有 FSA 操作自动降级为手动 <input file> / <a download>
  *
- * 存档 JSON 结构（版本 1）：
- *   { _version: 1, _exportedAt: "...", settings: { ...完整 SETTINGS... } }
+ * 存档 JSON 结构（版本 2）：
+ *   { _version: 2, _exportedAt: "...", settings: { ...玩家覆盖值... } }
+ * 版本 1 存的是完整 SETTINGS 快照（含数字下标的实体值），与 0.3.0 不再兼容；
+ * 读到不认识的版本直接回落默认值，不抛异常。
  */
-import { DEFAULT_SETTINGS, SETTINGS, SLIDERS, setSetting } from "../config";
+import { clearOverrides, getOverridesSnapshot, mergeOverrides, replaceOverrides } from "../data/settings/runtime";
 
 /** 当前存档格式版本，导入时校验用。跨版本迁移时 bump 这个号 + 加迁移逻辑 */
-export const SAVE_VERSION = 1;
+export const SAVE_VERSION = 2;
 
-/** localStorage key：存 SETTINGS 快照 */
-const LS_SETTINGS = "zombieGame.settings.v1";
+/** localStorage key：存玩家覆盖值快照 */
+const LS_SETTINGS = "zombieGame.settings.v2";
 /** IndexedDB database / store / key：存 FSA 目录句柄（句柄不能放 localStorage，必须进 IDB） */
 const IDB_DB = "zombieGame";
 const IDB_STORE = "handles";
@@ -85,7 +87,10 @@ async function idbDelete(key: string): Promise<void> {
 
 export function saveToLocal(): void {
   try {
-    localStorage.setItem(LS_SETTINGS, JSON.stringify(SETTINGS));
+    localStorage.setItem(
+      LS_SETTINGS,
+      JSON.stringify({ _version: SAVE_VERSION, settings: getOverridesSnapshot() }),
+    );
   } catch {
     // 存不下或用户禁了隐私模式就静默失败
   }
@@ -95,8 +100,12 @@ export function loadFromLocal(): boolean {
   try {
     const raw = localStorage.getItem(LS_SETTINGS);
     if (!raw) return false;
-    const parsed = JSON.parse(raw);
-    mergeSettings(parsed);
+    const parsed = JSON.parse(raw) as { _version?: unknown; settings?: unknown } | null;
+    // 旧格式（裸 SETTINGS / 数字下标实体值）直接忽略，回落默认值
+    if (!parsed || parsed._version !== SAVE_VERSION || !parsed.settings || typeof parsed.settings !== "object") {
+      return false;
+    }
+    replaceOverrides(parsed.settings);
     return true;
   } catch {
     return false;
@@ -359,14 +368,8 @@ export async function loadSettings(): Promise<"dir" | "local" | "default"> {
 
 /** 重置成游戏出厂默认值，自动写回 localStorage + FSA 目录 */
 export async function resetToDefaults(): Promise<void> {
-  // 用 DEFAULT_SETTINGS 的深拷贝覆盖 SETTINGS（DEFAULT_SETTINGS 是 import 时的快照）
-  for (const grp of Object.keys(SETTINGS) as (keyof typeof SETTINGS)[]) {
-    for (const key of Object.keys(SETTINGS[grp])) {
-      (SETTINGS[grp] as Record<string, unknown>)[key] = JSON.parse(
-        JSON.stringify((DEFAULT_SETTINGS[grp] as Record<string, unknown>)[key]),
-      );
-    }
-  }
+  // 清空所有玩家覆盖值，读取时自然回落到实体 / 地图定义默认值
+  clearOverrides();
   saveToLocal();
   await saveToDir();
 }
@@ -379,7 +382,7 @@ function buildSavePayload(): string {
   const payload = {
     _version: SAVE_VERSION,
     _exportedAt: new Date().toISOString(),
-    settings: SETTINGS,
+    settings: getOverridesSnapshot(),
   };
   return JSON.stringify(payload, null, 2);
 }
@@ -406,21 +409,6 @@ function applySaveJSON(text: string): boolean {
     console.warn("存档缺 settings 字段");
     return false;
   }
-  mergeSettings(data.settings as Record<string, unknown>);
+  mergeOverrides(data.settings);
   return true;
-}
-
-/** 把一个扁平/嵌套对象按 path 合并进 SETTINGS，只覆盖 SLIDERS 里声明过的路径（防脏数据） */
-function mergeSettings(src: Record<string, unknown>): void {
-  for (const s of SLIDERS) {
-    const parts = s.path.split(".");
-    let v: unknown = src;
-    for (const p of parts) {
-      v = (v as Record<string, unknown>)?.[p];
-      if (v === undefined) break;
-    }
-    if (typeof v === "number" && Number.isFinite(v)) {
-      setSetting(s.path, v);
-    }
-  }
 }

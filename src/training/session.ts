@@ -5,14 +5,19 @@
  *  - 单位生成 / AI / 弹道 / 伤害全部走现有的 World + systems/ai + systems/combat
  *  - 这里只负责「编辑操作」「统计」「固定步长推进」三件事
  *  - 编辑只写单位自身的可选覆盖字段（Human.speedOverride 等），
- *    永远不修改全局 SETTINGS / WEAPONS，退出训练场即丢弃整个 World
+ *    永远不修改全局设置 / 武器定义，退出训练场即丢弃整个 World
  *
  * 统计通过 World.onDamage / World.onKill 两个钩子采集：
- *  - 伤害按武器下标聚合，得到每个武器的累计伤害、DPS、最近 4 秒 DPS
- *  - 击杀按僵尸类型 + 武器聚合，并记录「从出生到死亡」的击杀耗时
+ *  - 伤害按武器 id 聚合，得到每个武器的累计伤害、DPS、最近 4 秒 DPS
+ *  - 击杀按僵尸类型 id + 武器 id 聚合，并记录「从出生到死亡」的击杀耗时
+ *
+ * 新增僵尸 / 武器时，只要在 data 注册表里加一行，这里的单位库与统计桶会自动出现。
  */
-import { HUMAN_BOUNDS, WEAPONS, WORLD, ZOMBIE_DEFS } from "../config";
-import { World } from "../core/world";
+import { DEFAULT_MAP } from "../data/maps";
+import { effectiveWeapon } from "../data/settings/runtime";
+import { WEAPON_LIST, getWeaponDef } from "../data/weapons";
+import { ZOMBIE_LIST, getZombieDef } from "../data/zombies";
+import { createWorld } from "../core/world";
 import type { DamageSource, Human, Zombie } from "../core/world";
 import { updateHumans, updateZombies } from "../systems/ai";
 import { updateCombat } from "../systems/combat";
@@ -26,7 +31,7 @@ export type TrainTool = "select" | "delete";
 export type UnitKind = "human" | "zombie";
 
 export interface ZombieOption {
-  index: number;
+  id: string;
   name: string;
   color: number;
   hp: number;
@@ -34,7 +39,7 @@ export interface ZombieOption {
 }
 
 export interface HumanOption {
-  index: number;
+  id: string;
   name: string;
   color: number;
   range: number;
@@ -42,17 +47,17 @@ export interface HumanOption {
   cooldown: number;
 }
 
-/** 单位库：直接来自现有配置，新增僵尸/武器类型会自动出现在面板里 */
-export const TRAIN_ZOMBIE_TYPES: ZombieOption[] = ZOMBIE_DEFS.map((d, index) => ({
-  index,
+/** 单位库：直接来自注册表，新增僵尸/武器类型会自动出现在面板里 */
+export const TRAIN_ZOMBIE_TYPES: ZombieOption[] = ZOMBIE_LIST.map((d) => ({
+  id: d.id,
   name: d.name,
   color: d.color,
   hp: d.hp,
   speed: d.speed,
 }));
 
-export const TRAIN_HUMAN_TYPES: HumanOption[] = WEAPONS.map((w, index) => ({
-  index,
+export const TRAIN_HUMAN_TYPES: HumanOption[] = WEAPON_LIST.map((w) => ({
+  id: w.id,
   name: w.name,
   color: w.color,
   range: w.range,
@@ -89,8 +94,16 @@ const BUCKET_WINDOW = BUCKET_SEC * BUCKET_SLOTS;
 /** 飘字数量上限，避免高射速 + 大量单位时 DOM/Text 对象爆掉 */
 const MAX_FLOATERS = 160;
 
+function emptyWeaponStat(): WeaponStat {
+  return { damage: 0, hits: 0, kills: 0, ttkSum: 0, ttkCount: 0 };
+}
+
+function emptyZombieStat(): ZombieTypeStat {
+  return { damage: 0, kills: 0, ttkSum: 0, ttkCount: 0, spawns: 0 };
+}
+
 export class TrainingSession {
-  world = new World();
+  world = createWorld(DEFAULT_MAP);
   paused = false;
   /** 速度倍率：1 = 正常，0.25 = 慢放 */
   speed = 1;
@@ -100,33 +113,31 @@ export class TrainingSession {
   selectedId: number | null = null;
   selectedKind: UnitKind | null = null;
 
-  /** 当前待生成的单位类型；非 null 时点画布 = 生成 */
-  armed: { kind: UnitKind; index: number } | null = null;
+  /** 当前待生成的单位类型 id；非 null 时点画布 = 生成 */
+  armed: { kind: UnitKind; id: string } | null = null;
   /** select = 点选编辑，delete = 点单位删除 */
   tool: TrainTool = "select";
 
   readonly floaters: FloatingText[] = [];
-  readonly weaponStats: WeaponStat[] = WEAPONS.map(() => ({
-    damage: 0,
-    hits: 0,
-    kills: 0,
-    ttkSum: 0,
-    ttkCount: 0,
-  }));
-  readonly zombieStats: ZombieTypeStat[] = ZOMBIE_DEFS.map(() => ({
-    damage: 0,
-    kills: 0,
-    ttkSum: 0,
-    ttkCount: 0,
-    spawns: 0,
-  }));
+  /** 统计桶 key = 武器 id */
+  readonly weaponStats = new Map<string, WeaponStat>(
+    WEAPON_LIST.map((w) => [w.id, emptyWeaponStat()]),
+  );
+  /** 统计桶 key = 僵尸类型 id */
+  readonly zombieStats = new Map<string, ZombieTypeStat>(
+    ZOMBIE_LIST.map((z) => [z.id, emptyZombieStat()]),
+  );
 
   /** 每个丧尸的出生时间（训练场生成 / 波次生成都记），用于算击杀耗时 */
   private spawnTimes = new Map<number, number>();
   private stepPending = false;
   private acc = 0;
-  private buckets: number[][] = WEAPONS.map(() => new Array(BUCKET_SLOTS).fill(0));
-  private stamps: number[][] = WEAPONS.map(() => new Array(BUCKET_SLOTS).fill(-1));
+  private buckets = new Map<string, number[]>(
+    WEAPON_LIST.map((w) => [w.id, new Array<number>(BUCKET_SLOTS).fill(0)]),
+  );
+  private stamps = new Map<string, number[]>(
+    WEAPON_LIST.map((w) => [w.id, new Array<number>(BUCKET_SLOTS).fill(-1)]),
+  );
 
   constructor() {
     this.installHooks();
@@ -134,7 +145,7 @@ export class TrainingSession {
 
   /** 每次进入训练场都重置：新的空 World + 清零的统计，退出即丢弃 */
   reset(): void {
-    this.world = new World();
+    this.world = createWorld(DEFAULT_MAP);
     this.installHooks();
     this.paused = false;
     this.speed = 1;
@@ -152,23 +163,37 @@ export class TrainingSession {
   resetReadings(): void {
     this.activeTime = 0;
     this.floaters.length = 0;
-    for (const s of this.weaponStats) {
-      s.damage = 0;
-      s.hits = 0;
-      s.kills = 0;
-      s.ttkSum = 0;
-      s.ttkCount = 0;
+    for (const s of this.weaponStats.values()) {
+      Object.assign(s, emptyWeaponStat());
     }
-    for (const s of this.zombieStats) {
-      s.damage = 0;
-      s.kills = 0;
-      s.ttkSum = 0;
-      s.ttkCount = 0;
-      s.spawns = 0;
+    for (const s of this.zombieStats.values()) {
+      Object.assign(s, emptyZombieStat());
     }
     for (const z of this.world.zombies) this.spawnTimes.set(z.id, 0);
-    for (const b of this.buckets) b.fill(0);
-    for (const s of this.stamps) s.fill(-1);
+    for (const b of this.buckets.values()) b.fill(0);
+    for (const s of this.stamps.values()) s.fill(-1);
+  }
+
+  /** 取/建某个武器的统计桶，未知 id 也不会崩 */
+  weaponStat(id: string): WeaponStat {
+    let s = this.weaponStats.get(id);
+    if (!s) {
+      s = emptyWeaponStat();
+      this.weaponStats.set(id, s);
+      this.buckets.set(id, new Array<number>(BUCKET_SLOTS).fill(0));
+      this.stamps.set(id, new Array<number>(BUCKET_SLOTS).fill(-1));
+    }
+    return s;
+  }
+
+  /** 取/建某个僵尸类型的统计桶，未知 id 也不会崩 */
+  zombieStat(id: string): ZombieTypeStat {
+    let s = this.zombieStats.get(id);
+    if (!s) {
+      s = emptyZombieStat();
+      this.zombieStats.set(id, s);
+    }
+    return s;
   }
 
   // ============================================================
@@ -182,16 +207,15 @@ export class TrainingSession {
 
   private recordDamage(z: Zombie, amount: number, source?: DamageSource): void {
     if (amount <= 0) return;
-    const typeStat = this.zombieStats[z.kind];
-    typeStat.damage += amount;
+    this.zombieStat(z.kind).damage += amount;
 
     let color = 0xffffff;
-    if (source && source.weapon >= 0 && source.weapon < this.weaponStats.length) {
-      const ws = this.weaponStats[source.weapon];
+    if (source?.weapon) {
+      const ws = this.weaponStat(source.weapon);
       ws.damage += amount;
       ws.hits++;
       this.bucketAdd(source.weapon, amount);
-      color = WEAPONS[source.weapon].color;
+      color = effectiveWeapon(source.weapon).color;
     }
 
     if (this.floaters.length < MAX_FLOATERS) {
@@ -208,7 +232,7 @@ export class TrainingSession {
   }
 
   private recordKill(z: Zombie, source?: DamageSource): void {
-    const typeStat = this.zombieStats[z.kind];
+    const typeStat = this.zombieStat(z.kind);
     typeStat.kills++;
 
     const bornAt = this.spawnTimes.get(z.id);
@@ -217,42 +241,49 @@ export class TrainingSession {
       const ttk = Math.max(0, this.activeTime - bornAt);
       typeStat.ttkSum += ttk;
       typeStat.ttkCount++;
-      if (source && source.weapon >= 0 && source.weapon < this.weaponStats.length) {
-        const ws = this.weaponStats[source.weapon];
+      if (source?.weapon) {
+        const ws = this.weaponStat(source.weapon);
         ws.kills++;
         ws.ttkSum += ttk;
         ws.ttkCount++;
       }
-    } else if (source && source.weapon >= 0 && source.weapon < this.weaponStats.length) {
-      this.weaponStats[source.weapon].kills++;
+    } else if (source?.weapon) {
+      this.weaponStat(source.weapon).kills++;
     }
   }
 
-  private bucketAdd(weapon: number, amount: number): void {
+  private bucketAdd(weapon: string, amount: number): void {
+    const bucket = this.buckets.get(weapon);
+    const stamp = this.stamps.get(weapon);
+    if (!bucket || !stamp) return;
     const slot = Math.floor(this.activeTime / BUCKET_SEC);
     const idx = slot % BUCKET_SLOTS;
-    if (this.stamps[weapon][idx] !== slot) {
-      this.stamps[weapon][idx] = slot;
-      this.buckets[weapon][idx] = 0;
+    if (stamp[idx] !== slot) {
+      stamp[idx] = slot;
+      bucket[idx] = 0;
     }
-    this.buckets[weapon][idx] += amount;
+    bucket[idx] += amount;
   }
 
   /** 最近 4 秒的实时 DPS */
-  recentDps(weapon: number): number {
+  recentDps(weapon: string): number {
+    const bucket = this.buckets.get(weapon);
+    if (!bucket) return 0;
     let sum = 0;
-    for (const v of this.buckets[weapon]) sum += v;
+    for (const v of bucket) sum += v;
     const window = Math.min(BUCKET_WINDOW, Math.max(0.5, this.activeTime));
     return sum / window;
   }
 
   /** 整个会话的平均 DPS */
-  averageDps(weapon: number): number {
-    return this.weaponStats[weapon].damage / Math.max(0.1, this.activeTime);
+  averageDps(weapon: string): number {
+    return this.weaponStat(weapon).damage / Math.max(0.1, this.activeTime);
   }
 
   totalKills(): number {
-    return this.zombieStats.reduce((acc, s) => acc + s.kills, 0);
+    let total = 0;
+    for (const s of this.zombieStats.values()) total += s.kills;
+    return total;
   }
 
   // ============================================================
@@ -324,22 +355,23 @@ export class TrainingSession {
   // 编辑操作
   // ============================================================
 
-  /** 生成一只指定类型的丧尸；落在墙里返回 null */
-  spawnZombie(kind: number, x: number, y: number): Zombie | null {
-    const cx = clamp(x, 8, WORLD.width - 8);
-    const cy = clamp(y, 8, WORLD.height - 8);
+  /** 生成一只指定类型 id 的丧尸；落在墙里返回 null */
+  spawnZombie(kind: string, x: number, y: number): Zombie | null {
+    const cx = clamp(x, 8, this.world.map.width - 8);
+    const cy = clamp(y, 8, this.world.map.height - 8);
     if (this.world.solidAt(cx, cy, 3)) return null;
-    const z = this.world.spawnZombie(cx, cy, kind === 1 ? 1 : 0);
+    const z = this.world.spawnZombie(cx, cy, kind);
     z.maxHp = z.hp;
     this.spawnTimes.set(z.id, this.activeTime);
-    this.zombieStats[z.kind].spawns++;
+    this.zombieStat(z.kind).spawns++;
     return z;
   }
 
-  /** 生成一个指定武器的人类；人类的可行走范围会被夹到房间内 */
-  spawnHuman(weapon: number, x: number, y: number): Human {
-    const cx = clamp(x, HUMAN_BOUNDS.x0, HUMAN_BOUNDS.x1);
-    const cy = clamp(y, HUMAN_BOUNDS.y0, HUMAN_BOUNDS.y1);
+  /** 生成一个指定武器 id 的人类；人类的可行走范围会被夹到房间内 */
+  spawnHuman(weapon: string, x: number, y: number): Human {
+    const bounds = this.world.map.humanBounds;
+    const cx = clamp(x, bounds.x0, bounds.x1);
+    const cy = clamp(y, bounds.y0, bounds.y1);
     const h = this.world.spawnHuman(cx, cy, weapon);
     h.post = -1;
     return h;
@@ -348,8 +380,8 @@ export class TrainingSession {
   /** 画布点击的统一入口：按当前工具决定生成 / 删除 / 选中 */
   handleClick(x: number, y: number): boolean {
     if (this.armed) {
-      if (this.armed.kind === "zombie") return this.spawnZombie(this.armed.index, x, y) !== null;
-      this.spawnHuman(this.armed.index, x, y);
+      if (this.armed.kind === "zombie") return this.spawnZombie(this.armed.id, x, y) !== null;
+      this.spawnHuman(this.armed.id, x, y);
       return true;
     }
     if (this.tool === "delete") {
@@ -447,7 +479,7 @@ export class TrainingSession {
     const sel = this.getSelected();
     if (!sel) return null;
     if (sel.kind === "human") return { x: sel.human.x, y: sel.human.y, radius: 14 };
-    return { x: sel.zombie.x, y: sel.zombie.y, radius: ZOMBIE_DEFS[sel.zombie.kind].radius + 10 };
+    return { x: sel.zombie.x, y: sel.zombie.y, radius: getZombieDef(sel.zombie.kind).radius + 10 };
   }
 
   // ============================================================
@@ -467,9 +499,10 @@ export class TrainingSession {
   }
 
   /** 切换武器时把弹匣 / 冷却 / 喷火状态一并归位，避免弹药数量错位 */
-  setHumanWeapon(h: Human, weapon: number): void {
-    h.weapon = weapon;
-    h.ammo = WEAPONS[weapon].magazine;
+  setHumanWeapon(h: Human, weapon: string): void {
+    const def = getWeaponDef(weapon);
+    h.weapon = def.id;
+    h.ammo = def.magazine;
     h.reloadTimer = 0;
     h.fire = 0;
     h.burst = 0;

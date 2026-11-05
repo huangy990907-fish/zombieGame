@@ -9,16 +9,9 @@
  * 丧尸：房间外用流场涌向最近的开口 -> 贴上完好的门窗就啃 ->
  *       破口后涌入（穿窗会被窗檐减速）-> 直扑最近人类 -> 贴近就咬
  */
-import {
-  HUMAN_BOUNDS,
-  HUMAN_DEF,
-  OPENING_CENTERS,
-  ROOM,
-  SETTINGS,
-  WEAPONS,
-  WORLD,
-  ZOMBIE_DEFS,
-} from "../config";
+import { HUMAN_DEF } from "../data/humans";
+import { ZOMBIE_IDS } from "../data/zombies";
+import { effectiveWeapon, effectiveZombie, openingTuning, settings } from "../data/settings/runtime";
 import { tryFire, updateFlame } from "./combat";
 import { angDiff, clamp, dist2, pointRectDist, randRange, turnToward } from "../utils/math";
 import type { Human, World, Zombie } from "../core/world";
@@ -33,7 +26,7 @@ const queryZ2: Zombie[] = [];
 function convertHuman(world: World, h: Human): void {
   h.alive = false;
   world.infected++;
-  world.spawnZombie(h.x, h.y, 0);
+  world.spawnZombie(h.x, h.y, ZOMBIE_IDS.normal);
   world.effects.push({
     kind: "blast",
     x: h.x,
@@ -74,11 +67,13 @@ const WINDOW_SIGHT_PAD = 12;
 export function updateHumans(world: World, dt: number): void {
   // 守卫（guard）模式暂未实现，行为上回落到防守
   const postedMode = world.mode !== "attack";
+  const s = settings();
+  const bounds = world.map.humanBounds;
 
   for (let i = 0; i < world.humans.length; i++) {
     const h = world.humans[i];
     if (!h.alive) continue;
-    const def = WEAPONS[h.weapon];
+    const def = effectiveWeapon(h.weapon);
     const posted = postedMode && h.post >= 0 && h.post < world.posts.length;
 
     // 冷却与换弹计时。喷火有自己的一套"持续喷射"计时，交给 updateFlame 推进
@@ -113,7 +108,7 @@ export function updateHumans(world: World, dt: number): void {
      */
     h.sight -= dt;
     // 训练场可以给单个单位覆盖视野；普通对局 sightOverride 为 undefined，读全局值
-    const sightR = h.sightOverride ?? SETTINGS.human.sight;
+    const sightR = h.sightOverride ?? s.human.sight;
     let best = h.target;
     if (best !== null) {
       if (
@@ -171,8 +166,8 @@ export function updateHumans(world: World, dt: number): void {
       // 没目标：在房间里闲逛，隔几秒换一个目标点
       h.wTimer -= dt;
       if (h.wTimer <= 0 || dist2(h.x, h.y, h.wx, h.wy) < 900) {
-        h.wx = randRange(HUMAN_BOUNDS.x0, HUMAN_BOUNDS.x1);
-        h.wy = randRange(HUMAN_BOUNDS.y0, HUMAN_BOUNDS.y1);
+        h.wx = randRange(bounds.x0, bounds.x1);
+        h.wy = randRange(bounds.y0, bounds.y1);
         h.wTimer = randRange(2.5, 5.5);
       }
       const wdx = h.wx - h.x;
@@ -231,7 +226,7 @@ export function updateHumans(world: World, dt: number): void {
     }
 
     // 期望方向 -> 平滑加速到目标速度（训练场可覆盖单个人类的移速）
-    const moveSpeed = h.speedOverride ?? SETTINGS.human.speed;
+    const moveSpeed = h.speedOverride ?? s.human.speed;
     const len = Math.hypot(dx, dy);
     if (len > 0.001 && h.turning <= 0) {
       dx /= len;
@@ -246,8 +241,8 @@ export function updateHumans(world: World, dt: number): void {
       h.vy *= 0.82;
     }
 
-    h.x = clamp(h.x + h.vx * dt, HUMAN_BOUNDS.x0, HUMAN_BOUNDS.x1);
-    h.y = clamp(h.y + h.vy * dt, HUMAN_BOUNDS.y0, HUMAN_BOUNDS.y1);
+    h.x = clamp(h.x + h.vx * dt, bounds.x0, bounds.x1);
+    h.y = clamp(h.y + h.vy * dt, bounds.y0, bounds.y1);
 
     if (h.ammo <= 0 && h.reloadTimer <= 0) h.reloadTimer = def.reload;
   }
@@ -275,10 +270,11 @@ function retarget(world: World, z: Zombie): void {
     z.ty = best.y;
   } else {
     // 没有人类了：扑向最近的开口
-    let bx = OPENING_CENTERS[0].x;
-    let by = OPENING_CENTERS[0].y;
+    const centers = world.map.openingCenters;
+    let bx = centers[0].x;
+    let by = centers[0].y;
     let bd = Infinity;
-    for (const c of OPENING_CENTERS) {
+    for (const c of centers) {
       const d = (c.x - z.x) * (c.x - z.x) + (c.y - z.y) * (c.y - z.y);
       if (d < bd) {
         bd = d;
@@ -293,6 +289,9 @@ function retarget(world: World, z: Zombie): void {
 
 export function updateZombies(world: World, dt: number): void {
   const flow = world.flow;
+  const map = world.map;
+  const room = map.room;
+  const s = settings();
   for (let i = 0; i < world.zombies.length; i++) {
     const z = world.zombies[i];
     if (!z.alive) continue;
@@ -309,10 +308,10 @@ export function updateZombies(world: World, dt: number): void {
     let dy: number;
     // 是否还在房间外（墙外圈 6px 内算边界上）
     const outside =
-      z.x < ROOM.left + 6 ||
-      z.y < ROOM.top + 6 ||
-      z.y > ROOM.bottom - 6 ||
-      z.x > ROOM.right - 6;
+      z.x < room.left + 6 ||
+      z.y < room.top + 6 ||
+      z.y > room.bottom - 6 ||
+      z.x > room.right - 6;
     if (outside) {
       // 房间外：查流场方向，涌向最近的开口
       const f = flow.sample(z.x, z.y);
@@ -373,22 +372,23 @@ export function updateZombies(world: World, dt: number): void {
     // 撞墙 / 撞上完好的门窗时被挡住（破口可以钻）
     if (world.solidAt(x, z.y)) x = z.x;
     if (world.solidAt(z.x, y)) y = z.y;
-    z.x = clamp(x, 2, WORLD.width - 2);
-    z.y = clamp(y, 2, WORLD.height - 2);
+    z.x = clamp(x, 2, map.width - 2);
+    z.y = clamp(y, 2, map.height - 2);
 
     // 撕咬冷却就绪时先试着咬人；够不到人就啃贴上的门窗
     if (z.bite <= 0) {
       let bit = false;
       world.humanGrid.query(z.x, z.y, 14, queryH);
-      const reach = ZOMBIE_DEFS[z.kind].radius + HUMAN_DEF.radius + 2;
+      const zdef = effectiveZombie(z.kind);
+      const reach = zdef.radius + HUMAN_DEF.radius + 2;
       for (let k = 0; k < queryH.length; k++) {
         const h = queryH[k];
         if (!h.alive || h.turning > 0 || h.invincible) continue;
         if (dist2(z.x, z.y, h.x, h.y) <= reach * reach) {
-          h.turning = SETTINGS.human.turnTime;
+          h.turning = s.human.turnTime;
           h.vx = 0;
           h.vy = 0;
-          z.bite = z.biteCycle ?? ZOMBIE_DEFS[z.kind].bite;
+          z.bite = z.biteCycle ?? zdef.bite;
           sound.play(SFX.ZOMBIE_BITE); // 啃咬人类
           bit = true;
           break;
@@ -404,15 +404,17 @@ export function updateZombies(world: World, dt: number): void {
  * 血量归零即破损 —— 门碎了全速涌入，窗碎了被窗檐减速挤进来。
  */
 function biteOpening(world: World, z: Zombie): void {
-  const reach = ZOMBIE_DEFS[z.kind].radius + 5;
+  const def = effectiveZombie(z.kind);
+  const tune = openingTuning(world.map);
+  const reach = def.radius + 5;
   for (let i = 0; i < world.openings.length; i++) {
     const o = world.openings[i];
     if (o.broken) continue;
     if (pointRectDist(z.x, z.y, o.rect) > reach) continue;
 
-    o.hp -= SETTINGS.opening.buildBiteDamage;
+    o.hp -= tune.buildBiteDamage;
     // 拆建筑比咬人费劲，啃一口歇更久（训练场可覆盖单个僵尸的撕咬间隔）
-    z.bite = (z.biteCycle ?? ZOMBIE_DEFS[z.kind].bite) * SETTINGS.opening.buildBiteSlow;
+    z.bite = (z.biteCycle ?? def.bite) * tune.buildBiteSlow;
     sound.play(SFX.ZOMBIE_BITE); // 啃门窗（限频 400ms，密集啃咬时形成拆门节奏）
     // 啃咬的小火花，让“建筑正在被拆”看得见
     world.effects.push({

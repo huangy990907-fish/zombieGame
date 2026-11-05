@@ -11,22 +11,20 @@
 import { updateHumans, updateZombies } from "../systems/ai";
 import { updateCombat } from "../systems/combat";
 import { sound, SFX } from "../audio/manager";
-import {
-  applySettings,
-  HUMAN_BOUNDS,
-  LOADOUT,
-  SETTINGS,
-  SPAWN,
-} from "../config";
-import type { HumanMode, Settings } from "../config";
+import { DEFAULT_MAP, type MapDef } from "../data/maps";
+import { applySettings, settings } from "../data/settings/runtime";
+import type { HumanMode, SettingsOverrides } from "../data/types";
+import { LOADOUT, WEAPON_IDS } from "../data/weapons";
+import { ZOMBIE_IDS } from "../data/zombies";
 import { randRange } from "../utils/math";
 import type { Post } from "./world";
-import { World } from "./world";
+import { createWorld } from "./world";
 
 export type Phase = "wave" | "intermission" | "victory" | "defeat";
 
 export class Game {
-  world = new World();
+  readonly map: MapDef = DEFAULT_MAP;
+  world = createWorld(this.map);
   /** 当前关卡 id，undefined = 还没选关卡 */
   levelId: string | undefined = undefined;
   /** 当前波次，1 开始 */
@@ -56,13 +54,13 @@ export class Game {
   /**
    * 开始 / 重开一局。
    * @param levelId 当前关卡 id；后续重开（顶栏按钮）可省略，沿用上次关卡
-   * @param levelSettings 该关卡对 SETTINGS 的覆盖（可选）
+   * @param levelSettings 该关卡对设置的覆盖（可选）
    */
-  start(levelId?: string, levelSettings?: Partial<Settings>): void {
+  start(levelId?: string, levelSettings?: SettingsOverrides): void {
     if (levelId) this.levelId = levelId;
     if (levelSettings) applySettings(levelSettings);
 
-    this.world = new World();
+    this.world = createWorld(this.map);
     this.wave = 0;
     this.phase = "intermission";
     this.paused = false;
@@ -77,17 +75,17 @@ export class Game {
     this.assignPosts();
   }
 
-  /** 按 LOADOUT 配比生成初始人类，并按 SETTINGS.human.start 做归一化 */
+  /** 按 LOADOUT 配比生成初始人类，并按当前初始人数做归一化 */
   private spawnInitialHumans(): void {
-    const total = SETTINGS.human.start;
-    const loadoutSum = LOADOUT.reduce((a, b) => a + b, 0) || 1;
-    const roster: number[] = [];
-    for (let w = 0; w < LOADOUT.length; w++) {
-      const n = Math.round((LOADOUT[w] / loadoutSum) * total);
-      for (let i = 0; i < n; i++) roster.push(w);
+    const total = settings().human.start;
+    const loadoutSum = LOADOUT.reduce((a, b) => a + b.count, 0) || 1;
+    const roster: string[] = [];
+    for (const entry of LOADOUT) {
+      const n = Math.round((entry.count / loadoutSum) * total);
+      for (let i = 0; i < n; i++) roster.push(entry.id);
     }
     // 四舍五入可能差 1-2 个，补齐
-    while (roster.length < total) roster.push(0);
+    while (roster.length < total) roster.push(LOADOUT[0].id);
     while (roster.length > total) roster.pop();
     for (let i = roster.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));
@@ -95,10 +93,11 @@ export class Game {
       roster[i] = roster[j];
       roster[j] = tmp;
     }
+    const bounds = this.map.humanBounds;
     for (const w of roster) {
       this.world.spawnHuman(
-        randRange(HUMAN_BOUNDS.x0, HUMAN_BOUNDS.x1),
-        randRange(HUMAN_BOUNDS.y0, HUMAN_BOUNDS.y1),
+        randRange(bounds.x0, bounds.x1),
+        randRange(bounds.y0, bounds.y1),
         w,
       );
     }
@@ -162,15 +161,15 @@ export class Game {
     }
     ws.posts.push(...reservePosts);
 
-    // 分岗顺序：喷火(1)/霰弹(2) 守门 -> 机枪(0) 填门岗缺额 -> 火箭(3)/
+    // 分岗顺序：喷火/霰弹 守门 -> 机枪填门岗缺额 -> 火箭/
     // 剩余机枪 守窗 -> 再剩下的进预备队
     let di = 0;
     let wi = 0;
     let ri = 0;
     for (const h of ws.humans) {
-      if ((h.weapon === 1 || h.weapon === 2) && di < doorPosts.length) {
+      if ((h.weapon === WEAPON_IDS.flame || h.weapon === WEAPON_IDS.shotgun) && di < doorPosts.length) {
         h.post = di++;
-      } else if (h.weapon === 0 && di < doorPosts.length) {
+      } else if (h.weapon === WEAPON_IDS.mg && di < doorPosts.length) {
         h.post = di++;
       } else if (wi < winPosts.length) {
         h.post = doorPosts.length + wi++;
@@ -183,7 +182,7 @@ export class Game {
   /** 开始第 n 波：算本波规模、狂奔占比，并补充少量兵员 */
   private beginWave(n: number): void {
     this.wave = n;
-    const s = SETTINGS.wave;
+    const s = settings().wave;
     this.waveSize = Math.round(s.base * Math.pow(s.growth, n - 1));
     this.spawnLeft = this.waveSize;
     this.runnersLeft = Math.round(this.waveSize * Math.min(0.55, 0.25 + n * 0.015));
@@ -192,50 +191,54 @@ export class Game {
     sound.play(SFX.WAVE_START);
 
     // 每波少量补充兵员，避免被一波打崩后彻底没法看
-    const add = Math.min(s.reinforce, Math.max(0, SETTINGS.human.cap - this.world.humans.length));
+    const bounds = this.map.humanBounds;
+    const add = Math.min(s.reinforce, Math.max(0, settings().human.cap - this.world.humans.length));
     for (let i = 0; i < add; i++) {
       this.world.spawnHuman(
-        randRange(HUMAN_BOUNDS.x0, HUMAN_BOUNDS.x1),
-        randRange(HUMAN_BOUNDS.y0, HUMAN_BOUNDS.y1),
+        randRange(bounds.x0, bounds.x1),
+        randRange(bounds.y0, bounds.y1),
         this.randomWeapon(),
       );
     }
   }
 
-  /** 按 LOADOUT 配比随机抽一个兵种 */
-  private randomWeapon(): number {
-    const total = LOADOUT.reduce((a, b) => a + b, 0);
+  /** 按 LOADOUT 配比随机抽一个兵种 id */
+  private randomWeapon(): string {
+    const total = LOADOUT.reduce((a, b) => a + b.count, 0);
     let r = Math.random() * total;
-    for (let i = 0; i < LOADOUT.length; i++) {
-      r -= LOADOUT[i];
-      if (r <= 0) return i;
+    for (const entry of LOADOUT) {
+      r -= entry.count;
+      if (r <= 0) return entry.id;
     }
-    return 0;
+    return LOADOUT[0].id;
   }
 
   /** 生成一只丧尸：按剩余比例决定普通/狂奔，血量随波次上浮 */
   private spawnOne(): void {
-    let kind: 0 | 1 = 0;
+    let kind = ZOMBIE_IDS.normal;
     if (this.runnersLeft > 0) {
       const odds = this.runnersLeft / Math.max(1, this.spawnLeft);
       if (Math.random() < odds) {
-        kind = 1;
+        kind = ZOMBIE_IDS.runner;
         this.runnersLeft--;
       }
     }
     // 出生点：一半走左走廊冲门，另一半从上、下两侧逼近窗户
     const r = Math.random();
+    const top = this.map.windowSpawn.top;
+    const bottom = this.map.windowSpawn.bottom;
+    const left = this.map.spawn;
     let x: number;
     let y: number;
     if (r < 0.25) {
-      x = randRange(360, 1000);
-      y = randRange(6, 52);
+      x = randRange(top.x0, top.x1);
+      y = randRange(top.y0, top.y1);
     } else if (r < 0.5) {
-      x = randRange(360, 1000);
-      y = randRange(668, 714);
+      x = randRange(bottom.x0, bottom.x1);
+      y = randRange(bottom.y0, bottom.y1);
     } else {
-      x = randRange(SPAWN.x0, SPAWN.x1);
-      y = randRange(SPAWN.y0, SPAWN.y1);
+      x = randRange(left.x0, left.x1);
+      y = randRange(left.y0, left.y1);
     }
     this.world.spawnZombie(x, y, kind, 1 + (this.wave - 1) * 0.05);
   }
@@ -244,7 +247,7 @@ export class Game {
   private spawnTick(dt: number): void {
     if (this.spawnLeft <= 0) return;
     this.spawnTimer -= dt;
-    const s = SETTINGS.wave;
+    const s = settings().wave;
     const interval = 1 / Math.min(s.spawnMax, s.spawnBase + this.wave * s.spawnPerWave);
     let guard = 0;
     while (
@@ -282,7 +285,7 @@ export class Game {
         return;
       }
       if (this.spawnLeft === 0 && this.world.zombies.length === 0) {
-        if (this.wave >= SETTINGS.wave.count) {
+        if (this.wave >= settings().wave.count) {
           this.phase = "victory";
           sound.play(SFX.VICTORY);
         } else {
@@ -296,11 +299,12 @@ export class Game {
     }
   }
 
-  /** 统计存活人类按兵种的数量，HUD 底栏显示用 */
-  aliveByWeapon(): number[] {
-    const out = new Array(LOADOUT.length).fill(0) as number[];
+  /** 统计存活人类按兵种 id 的数量，HUD 底栏显示用 */
+  aliveByWeapon(): Map<string, number> {
+    const out = new Map<string, number>();
     for (let i = 0; i < this.world.humans.length; i++) {
-      out[this.world.humans[i].weapon]++;
+      const id = this.world.humans[i].weapon;
+      out.set(id, (out.get(id) ?? 0) + 1);
     }
     return out;
   }

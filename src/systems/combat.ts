@@ -7,8 +7,9 @@
  * 命中判定用的是“线段扫掠”而不是点：高速子弹一帧能飞十几像素，
  * 只看当前点会穿透丧尸，所以拿“上一帧位置 -> 当前位置”线段去撞。
  */
-import { EXPLOSION_DAMAGE, WEAPONS, WORLD, ZOMBIE_DEFS } from "../config";
-import type { WeaponDef } from "../config";
+import { effectiveWeapon, effectiveZombie } from "../data/settings/runtime";
+import { WEAPON_IDS } from "../data/weapons";
+import type { WeaponDef } from "../data/types";
 import { dist2, mixColor, pointSegDistSq } from "../utils/math";
 import type { BulletKind, DamageSource, Human, World, Zombie } from "../core/world";
 import { sound, SFX } from "../audio/manager";
@@ -23,7 +24,7 @@ const queryBuf: Zombie[] = [];
  * 所以这里只负责点燃，真正的持续伤害由 updateFlame() 每帧推进。
  */
 export function tryFire(world: World, h: Human, angle: number): void {
-  const def = WEAPONS[h.weapon];
+  const def = effectiveWeapon(h.weapon);
   // 训练场可给单个人类覆盖伤害 / 射速；普通对局两个倍率都是 undefined → 1
   const dmgMul = h.dmgMul ?? 1;
   const cooldown = def.cooldown * (h.cdMul ?? 1);
@@ -72,7 +73,7 @@ export function updateFlame(world: World, h: Human, dt: number): void {
   if (h.fire > 0) h.fire -= dt;
   if (h.burst <= 0) return;
 
-  const def = WEAPONS[h.weapon];
+  const def = effectiveWeapon(h.weapon);
   h.burst -= dt;
   if (h.fire > 0) return;
 
@@ -183,7 +184,7 @@ export function damageZombie(world: World, z: Zombie, dmg: number, source?: Dama
 }
 
 /** 从子弹上还原伤害来源（没有 weapon 字段时返回 undefined） */
-function bulletSource(b: { weapon?: number; ownerId?: number }): DamageSource | undefined {
+function bulletSource(b: { weapon?: string; ownerId?: number }): DamageSource | undefined {
   if (b.weapon === undefined) return undefined;
   return { weapon: b.weapon, humanId: b.ownerId ?? -1 };
 }
@@ -208,13 +209,16 @@ function explode(
     life: 0.42,
   });
   sound.play(SFX.EXPLOSION);
+  const blastDamage = source?.weapon
+    ? effectiveWeapon(source.weapon).blastDamage
+    : effectiveWeapon(WEAPON_IDS.rocket).blastDamage;
   world.zombieGrid.query(x, y, radius, queryBuf);
   for (let i = 0; i < queryBuf.length; i++) {
     const z = queryBuf[i];
     if (!z.alive) continue;
     const d = Math.sqrt(dist2(x, y, z.x, z.y));
     const falloff = 1 - Math.min(1, d / radius) * 0.55;
-    damageZombie(world, z, EXPLOSION_DAMAGE * falloff * dmgMul, source);
+    damageZombie(world, z, blastDamage * falloff * dmgMul, source);
   }
 }
 
@@ -231,7 +235,11 @@ export function updateCombat(world: World, dt: number): void {
     b.life -= dt;
 
     const dead =
-      b.life <= 0 || b.x < 0 || b.y < 0 || b.x > WORLD.width || b.y > WORLD.height;
+      b.life <= 0 ||
+      b.x < 0 ||
+      b.y < 0 ||
+      b.x > world.map.width ||
+      b.y > world.map.height;
 
     // 出界 / 到寿命 / 撞墙：子弹用整段飞行线段做碰撞，防高速穿透；
     // 完好的门挡弹，窗户和门口擦边都能打出去
@@ -253,7 +261,7 @@ export function updateCombat(world: World, dt: number): void {
     for (let k = 0; k < queryBuf.length; k++) {
       const z = queryBuf[k];
       if (!z.alive) continue;
-      const r = ZOMBIE_DEFS[z.kind].radius + 3;
+      const r = effectiveZombie(z.kind).radius + 3;
       const d2 = pointSegDistSq(z.x, z.y, b.px, b.py, b.x, b.y);
       if (d2 <= r * r) {
         hit = z;

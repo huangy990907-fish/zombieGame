@@ -6,7 +6,8 @@
  *
  * 每 0.1 秒刷新一次文本，避免每帧操作 DOM。
  */
-import { LOADOUT, SETTINGS, WEAPONS } from "../config";
+import { settings } from "../data/settings/runtime";
+import { LOADOUT, WEAPON_LIST, getWeaponDef } from "../data/weapons";
 import type { Game } from "../core/game";
 
 function el(id: string): HTMLElement {
@@ -34,18 +35,20 @@ export class Hud {
     // 顶栏：25机枪 + 10喷火 + 10霰弹 + 5火箭 VS N 尸潮
     let html = "";
     for (let i = 0; i < LOADOUT.length; i++) {
+      const entry = LOADOUT[i];
+      const def = getWeaponDef(entry.id);
       if (i > 0) html += '<span class="sep">+</span>';
-      html += `<span class="unit">${LOADOUT[i]}<b style="color:${hexColor(
-        WEAPONS[i].color,
-      )}">${WEAPONS[i].name}</b></span>`;
+      html += `<span class="unit">${entry.count}<b style="color:${hexColor(
+        def.color,
+      )}">${def.name}</b></span>`;
     }
     html += '<span class="vs">VS</span><span class="total" id="waveTotal">0</span> 尸潮';
     this.lineup.innerHTML = html;
 
-    // 底栏兵种计数容器
+    // 底栏兵种计数容器（按注册表生成，新增武器自动出现）
     let sub = "";
-    for (let i = 0; i < WEAPONS.length; i++) {
-      sub += `<span class="item">${WEAPONS[i].name}<b id="wk${i}">0</b></span>`;
+    for (const def of WEAPON_LIST) {
+      sub += `<span class="item">${def.name}<b id="wk-${def.id}">0</b></span>`;
     }
     this.subbar.innerHTML = sub;
   }
@@ -63,11 +66,11 @@ export class Hud {
 
     this.humanCount.textContent = String(humans);
     this.zombieCount.textContent = String(zombies);
-    this.waveLabel.textContent = `第 ${Math.max(1, g.wave)}/${SETTINGS.wave.count} 波`;
+    this.waveLabel.textContent = `第 ${Math.max(1, g.wave)}/${settings().wave.count} 波`;
 
-    for (let i = 0; i < byWeapon.length; i++) {
-      const node = document.getElementById(`wk${i}`);
-      if (node) node.textContent = String(byWeapon[i]);
+    for (const def of WEAPON_LIST) {
+      const node = document.getElementById(`wk-${def.id}`);
+      if (node) node.textContent = String(byWeapon.get(def.id) ?? 0);
     }
     const total = document.getElementById("waveTotal");
     if (total) total.textContent = String(g.waveSize);
@@ -79,7 +82,7 @@ export class Hud {
     else if (g.phase === "intermission") phase = "准备下一波";
     this.phaseLabel.textContent = phase;
 
-    const hp = Math.min(100, (humans / SETTINGS.human.start) * 100);
+    const hp = Math.min(100, (humans / settings().human.start) * 100);
     this.humanBar.style.width = `${hp}%`;
     const zp = Math.min(100, (zombies / Math.max(1, g.waveSize)) * 100);
     this.zombieBar.style.width = `${zp}%`;

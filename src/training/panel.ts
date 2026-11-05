@@ -8,7 +8,9 @@
  *
  * 面板本身不碰游戏逻辑，只调用 TrainingSession 的公开方法。
  */
-import { SETTINGS, WEAPONS, WORLD, ZOMBIE_DEFS } from "../config";
+import { settings } from "../data/settings/runtime";
+import { WEAPON_LIST, getWeaponDef } from "../data/weapons";
+import { ZOMBIE_LIST, getZombieDef } from "../data/zombies";
 import type { Human, Zombie } from "../core/world";
 import {
   TRAIN_HUMAN_TYPES,
@@ -82,8 +84,9 @@ export class TrainingPanel {
     canvas.addEventListener("pointerdown", (e) => {
       if (!this.active) return;
       const rect = canvas.getBoundingClientRect();
-      const x = ((e.clientX - rect.left) / rect.width) * WORLD.width;
-      const y = ((e.clientY - rect.top) / rect.height) * WORLD.height;
+      const map = this.session.world.map;
+      const x = ((e.clientX - rect.left) / rect.width) * map.width;
+      const y = ((e.clientY - rect.top) / rect.height) * map.height;
       this.session.handleClick(x, y);
     });
   }
@@ -212,7 +215,7 @@ export class TrainingPanel {
   private buildLibraries(): void {
     const zombieLib = this.el("tpZombieLib");
     zombieLib.innerHTML = TRAIN_ZOMBIE_TYPES.map(
-      (t) => `<button class="tp-lib-btn" data-kind="zombie" data-index="${t.index}">
+      (t) => `<button class="tp-lib-btn" data-kind="zombie" data-id="${t.id}">
         <span class="tp-dot" style="background:${hexColor(t.color)}"></span>
         <span class="tp-lib-name">${t.name}</span>
         <span class="tp-lib-sub">${t.hp} HP · ${t.speed} 速</span>
@@ -221,7 +224,7 @@ export class TrainingPanel {
 
     const humanLib = this.el("tpHumanLib");
     humanLib.innerHTML = TRAIN_HUMAN_TYPES.map(
-      (t) => `<button class="tp-lib-btn" data-kind="human" data-index="${t.index}">
+      (t) => `<button class="tp-lib-btn" data-kind="human" data-id="${t.id}">
         <span class="tp-dot" style="background:${hexColor(t.color)}"></span>
         <span class="tp-lib-name">${t.name}</span>
         <span class="tp-lib-sub">${t.range} 射程 · ${t.damage} 伤</span>
@@ -234,8 +237,8 @@ export class TrainingPanel {
     for (const btn of this.libButtons) {
       btn.onclick = () => {
         const kind = btn.dataset.kind === "human" ? "human" : "zombie";
-        const index = Number(btn.dataset.index);
-        this.session.armed = { kind, index };
+        const id = btn.dataset.id ?? "";
+        this.session.armed = { kind, id };
         this.session.tool = "select";
         this.refresh(1);
       };
@@ -266,10 +269,10 @@ export class TrainingPanel {
     const armed = this.session.armed;
     for (const btn of this.libButtons) {
       const kind = btn.dataset.kind === "human" ? "human" : "zombie";
-      const index = Number(btn.dataset.index);
+      const id = btn.dataset.id ?? "";
       btn.classList.toggle(
         "active",
-        armed !== null && armed.kind === kind && armed.index === index,
+        armed !== null && armed.kind === kind && armed.id === id,
       );
     }
   }
@@ -295,10 +298,8 @@ export class TrainingPanel {
   private refreshHint(): void {
     const armed = this.session.armed;
     if (armed) {
-      const name =
-        armed.kind === "zombie"
-          ? TRAIN_ZOMBIE_TYPES[armed.index].name
-          : TRAIN_HUMAN_TYPES[armed.index].name;
+      const list = armed.kind === "zombie" ? TRAIN_ZOMBIE_TYPES : TRAIN_HUMAN_TYPES;
+      const name = list.find((t) => t.id === armed.id)?.name ?? armed.id;
       this.hintEl.textContent = `已选「${name}」：点击战场空地连续生成（再次点类型可换）`;
       return;
     }
@@ -335,7 +336,7 @@ export class TrainingPanel {
 
   private buildZombieEditor(sel: Extract<SelectedUnit, { kind: "zombie" }>): void {
     const z = sel.zombie;
-    const def = ZOMBIE_DEFS[z.kind];
+    const def = getZombieDef(z.kind);
     const maxHp = Math.round(z.maxHp ?? z.hp);
     const bite = z.biteCycle ?? def.bite;
 
@@ -377,15 +378,15 @@ export class TrainingPanel {
   }
 
   private buildHumanEditor(h: Human): void {
-    const def = WEAPONS[h.weapon];
-    const speed = Math.round(h.speedOverride ?? SETTINGS.human.speed);
-    const sight = Math.round(h.sightOverride ?? SETTINGS.human.sight);
+    const def = getWeaponDef(h.weapon);
+    const speed = Math.round(h.speedOverride ?? settings().human.speed);
+    const sight = Math.round(h.sightOverride ?? settings().human.sight);
     const dmgMul = h.dmgMul ?? 1;
     const cdMul = h.cdMul ?? 1;
     const maxHp = Math.round(h.maxHp ?? h.hp);
 
-    const weaponOptions = WEAPONS.map(
-      (w, i) => `<option value="${i}" ${i === h.weapon ? "selected" : ""}>${w.name}</option>`,
+    const weaponOptions = WEAPON_LIST.map(
+      (w) => `<option value="${w.id}" ${w.id === h.weapon ? "selected" : ""}>${w.name}</option>`,
     ).join("");
 
     this.editorEl.innerHTML = `
@@ -413,7 +414,7 @@ export class TrainingPanel {
 
     const weaponSelect = document.getElementById("tpHumanWeapon") as HTMLSelectElement;
     weaponSelect.onchange = () => {
-      this.session.setHumanWeapon(h, Number(weaponSelect.value));
+      this.session.setHumanWeapon(h, weaponSelect.value);
       this.editorKey = "";
       this.refresh(1);
     };
@@ -474,26 +475,28 @@ export class TrainingPanel {
 
   private refreshStats(): void {
     const counts = this.session.countUnits();
-    const aliveByKind = ZOMBIE_DEFS.map(() => 0);
-    for (const z of this.session.world.zombies) aliveByKind[z.kind]++;
+    const aliveByKind = new Map<string, number>();
+    for (const z of this.session.world.zombies) {
+      aliveByKind.set(z.kind, (aliveByKind.get(z.kind) ?? 0) + 1);
+    }
 
-    const weaponRows = WEAPONS.map((w, i) => {
-      const s = this.session.weaponStats[i];
+    const weaponRows = WEAPON_LIST.map((w) => {
+      const s = this.session.weaponStat(w.id);
       return `<tr>
         <td><span class="tp-dot" style="background:${hexColor(w.color)}"></span>${w.name}</td>
         <td>${Math.round(s.damage)}</td>
-        <td>${fmt(this.session.averageDps(i), 1)}</td>
-        <td class="tp-hot">${fmt(this.session.recentDps(i), 1)}</td>
+        <td>${fmt(this.session.averageDps(w.id), 1)}</td>
+        <td class="tp-hot">${fmt(this.session.recentDps(w.id), 1)}</td>
         <td>${s.kills}</td>
         <td>${fmtTtk(s.ttkSum, s.ttkCount)}</td>
       </tr>`;
     }).join("");
 
-    const zombieRows = ZOMBIE_DEFS.map((d, i) => {
-      const s = this.session.zombieStats[i];
+    const zombieRows = ZOMBIE_LIST.map((d) => {
+      const s = this.session.zombieStat(d.id);
       return `<tr>
         <td><span class="tp-dot" style="background:${hexColor(d.color)}"></span>${d.name}</td>
-        <td>${aliveByKind[i]}</td>
+        <td>${aliveByKind.get(d.id) ?? 0}</td>
         <td>${Math.round(s.damage)}</td>
         <td>${s.kills}</td>
         <td>${fmtTtk(s.ttkSum, s.ttkCount)}</td>

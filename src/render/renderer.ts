@@ -8,7 +8,9 @@
  *  - 转化中的人类 = 武器颜色渐变到紫色 + 闪烁
  */
 import { Application, Container, Graphics, Sprite, Text, Texture } from "pixi.js";
-import { HUMAN_DEF, ROOM, SETTINGS, WALLS, WEAPONS, WORLD, ZOMBIE_DEFS } from "../config";
+import { HUMAN_DEF } from "../data/humans";
+import { DEFAULT_MAP, type MapDef } from "../data/maps";
+import { effectiveWeapon, effectiveZombie, settings } from "../data/settings/runtime";
 import type { World } from "../core/world";
 import { mixColor } from "../utils/math";
 
@@ -50,12 +52,14 @@ export class Renderer {
   private fxSprites: Sprite[] = [];
   private textPool: Text[] = [];
   private t = 0;
+  private map: MapDef = DEFAULT_MAP;
 
   /** 初始化 PixiJS、生成贴图、画静态场景（地板网格 / 墙体） */
-  async init(host: HTMLElement): Promise<void> {
+  async init(host: HTMLElement, map: MapDef = DEFAULT_MAP): Promise<void> {
+    this.map = map;
     await this.app.init({
-      width: WORLD.width,
-      height: WORLD.height,
+      width: map.width,
+      height: map.height,
       background: 0x07070d,
       antialias: true,
       resolution: Math.min(2, window.devicePixelRatio || 1),
@@ -97,25 +101,24 @@ export class Renderer {
 
   /** 静态内容：地板网格和墙体，只画一次 */
   private buildStatic(): void {
+    const { width, height, room, walls: mapWalls } = this.map;
     const floor = new Graphics();
-    floor.rect(0, 0, WORLD.width, WORLD.height).fill(0x07070d);
-    for (let x = ROOM.left; x < ROOM.right; x += 48) {
-      floor.moveTo(x, ROOM.top).lineTo(x, ROOM.bottom);
+    floor.rect(0, 0, width, height).fill(0x07070d);
+    for (let x = room.left; x < room.right; x += 48) {
+      floor.moveTo(x, room.top).lineTo(x, room.bottom);
     }
-    for (let y = ROOM.top; y < ROOM.bottom; y += 48) {
-      floor.moveTo(ROOM.left, y).lineTo(ROOM.right, y);
+    for (let y = room.top; y < room.bottom; y += 48) {
+      floor.moveTo(room.left, y).lineTo(room.right, y);
     }
     floor.stroke({ width: 1, color: 0x141d2a, alpha: 0.85 });
     this.floorLayer.addChild(floor);
 
     const walls = this.wallLayer;
-    for (const w of WALLS) {
+    for (const w of mapWalls) {
       walls.rect(w.x, w.y, w.w, w.h).fill(0x16202e);
       walls.rect(w.x, w.y, w.w, w.h).stroke({ width: 1, color: 0x3a516b, alpha: 0.95 });
     }
-    walls
-      .rect(0, 0, WORLD.width, WORLD.height)
-      .stroke({ width: 1, color: 0x1b2230, alpha: 1 });
+    walls.rect(0, 0, width, height).stroke({ width: 1, color: 0x1b2230, alpha: 1 });
   }
 
   /**
@@ -124,24 +127,25 @@ export class Renderer {
    */
   private buildTrainingVisual(): void {
     const g = this.trainingLayer;
+    const { width, height, room } = this.map;
     g.clear();
 
     // 全场网格（正式对局网格只画在房间内，这里铺满整张画布，一眼就能看出是训练场）
-    for (let x = 0; x <= WORLD.width; x += 48) g.moveTo(x, 0).lineTo(x, WORLD.height);
-    for (let y = 0; y <= WORLD.height; y += 48) g.moveTo(0, y).lineTo(WORLD.width, y);
+    for (let x = 0; x <= width; x += 48) g.moveTo(x, 0).lineTo(x, height);
+    for (let y = 0; y <= height; y += 48) g.moveTo(0, y).lineTo(width, y);
     g.stroke({ width: 1, color: 0x16414f, alpha: 0.65 });
 
     // 房间区域：青色虚线边框
-    this.dashedRect(g, ROOM.left, ROOM.top, ROOM.right - ROOM.left, ROOM.bottom - ROOM.top, 16, 9);
+    this.dashedRect(g, room.left, room.top, room.right - room.left, room.bottom - room.top, 16, 9);
     g.stroke({ width: 2, color: 0x22d3ee, alpha: 0.38 });
 
     // 四角标记
     const corner = 30;
     const corners: Array<[number, number, number, number]> = [
-      [ROOM.left, ROOM.top, 1, 1],
-      [ROOM.right, ROOM.top, -1, 1],
-      [ROOM.left, ROOM.bottom, 1, -1],
-      [ROOM.right, ROOM.bottom, -1, -1],
+      [room.left, room.top, 1, 1],
+      [room.right, room.top, -1, 1],
+      [room.left, room.bottom, 1, -1],
+      [room.right, room.bottom, -1, -1],
     ];
     for (const [cx, cy, sx, sy] of corners) {
       g.moveTo(cx, cy + sy * corner).lineTo(cx, cy).lineTo(cx + sx * corner, cy);
@@ -149,8 +153,8 @@ export class Renderer {
     g.stroke({ width: 3, color: 0x22d3ee, alpha: 0.5 });
 
     // 靶心：中心大圆 + 四个四分之一位置的小圆环
-    const cx = (ROOM.left + ROOM.right) * 0.5;
-    const cy = (ROOM.top + ROOM.bottom) * 0.5;
+    const cx = (room.left + room.right) * 0.5;
+    const cy = (room.top + room.bottom) * 0.5;
     g.circle(cx, cy, 68).stroke({ width: 2, color: 0x22d3ee, alpha: 0.28 });
     g.circle(cx, cy, 44).stroke({ width: 1, color: 0x22d3ee, alpha: 0.2 });
     g.moveTo(cx - 20, cy).lineTo(cx + 20, cy);
@@ -158,10 +162,10 @@ export class Renderer {
     g.stroke({ width: 2, color: 0x22d3ee, alpha: 0.35 });
 
     for (const [mx, my] of [
-      [ROOM.left + (ROOM.right - ROOM.left) * 0.25, cy],
-      [ROOM.left + (ROOM.right - ROOM.left) * 0.75, cy],
-      [cx, ROOM.top + (ROOM.bottom - ROOM.top) * 0.25],
-      [cx, ROOM.top + (ROOM.bottom - ROOM.top) * 0.75],
+      [room.left + (room.right - room.left) * 0.25, cy],
+      [room.left + (room.right - room.left) * 0.75, cy],
+      [cx, room.top + (room.bottom - room.top) * 0.25],
+      [cx, room.top + (room.bottom - room.top) * 0.75],
     ]) {
       g.circle(mx, my, 20).stroke({ width: 1, color: 0x22d3ee, alpha: 0.22 });
     }
@@ -215,7 +219,7 @@ export class Renderer {
         } else {
           // 破窗：窗框 + 房间内侧的窗檐小凸条
           g.rect(r.x, r.y, r.w, r.h).stroke({ width: 1, color: 0x51708a, alpha: 0.95 });
-          const inward = r.y < WORLD.height * 0.5 ? 1 : -1;
+          const inward = r.y < world.map.height * 0.5 ? 1 : -1;
           const sillY = inward > 0 ? r.y + r.h : r.y - 5;
           g.rect(r.x - 3, sillY, r.w + 6, 5).fill({ color: 0x51708a, alpha: 0.75 });
         }
@@ -247,13 +251,13 @@ export class Renderer {
     for (let i = 0; i < humans.length; i++) {
       const h = humans[i];
       const s = this.hSprites[i];
-      const def = WEAPONS[h.weapon];
+      const def = effectiveWeapon(h.weapon);
       s.position.set(h.x, h.y);
       let color = def.color;
       let scale = HUMAN_DEF.radius / CORE_R;
       if (h.turning > 0) {
         // 转化中：颜色渐变到紫色、体积膨胀、高频闪烁
-        const p = 1 - h.turning / SETTINGS.human.turnTime;
+        const p = 1 - h.turning / settings().human.turnTime;
         color = mixColor(def.color, 0x9b4dff, p * 0.9);
         scale *= 1 + p * 0.35;
         s.alpha = 0.55 + 0.45 * Math.abs(Math.sin(this.t * 14 + h.id));
@@ -269,7 +273,7 @@ export class Renderer {
     for (let i = 0; i < zombies.length; i++) {
       const z = zombies[i];
       const s = this.zSprites[i];
-      const def = ZOMBIE_DEFS[z.kind];
+      const def = effectiveZombie(z.kind);
       s.position.set(z.x, z.y);
       s.tint = def.color;
       s.alpha = 1;

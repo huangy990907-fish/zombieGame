@@ -13,7 +13,8 @@
  * menu/levels 路由下 ticker 继续跑（保证 Pixi 渲染帧稳定），
  * 但 game.tick() 不被调用——战斗逻辑停止，画面冻结成静态背景。
  */
-import { getSetting, setSetting, SLIDER_GROUPS } from "./config";
+import { getSetting, setSetting } from "./data/settings/runtime";
+import { SLIDER_GROUPS } from "./data/settings/sliders";
 import { sound, SFX } from "./audio/manager";
 import {
   FSA_SUPPORTED,
@@ -42,10 +43,10 @@ async function boot(): Promise<void> {
   const host = document.getElementById("screen");
   if (!host) throw new Error("missing #screen");
 
-  // ====== 先加载存档，再构造 Game（SETTINGS 被 loadSettings 改过，Game 启动按新值读） ======
+  // ====== 先加载存档，再构造 Game（覆盖值先就位，Game 启动按合并后的值读） ======
   const loadedFrom = await loadSettings();
 
-  // ====== 初始化 AudioManager（预加载音效文件，音量从 SETTINGS 读） ======
+  // ====== 初始化 AudioManager（预加载音效文件，音量从设置读） ======
   sound.init();
   sound.setMaster(getSetting("audio.master"));
   sound.setSfx(getSetting("audio.sfx"));

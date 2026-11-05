@@ -8,6 +8,26 @@
 
 暂无未发布改动。
 
+## [0.3.0] - 2026-11-05
+
+破坏性结构重构：把原来集中在 `src/config.ts` 的配置拆成按实体分文件的数据层，并把所有「数字下标身份」改为字符串 id。玩法逻辑、数值和手感不变。
+
+### 变更
+
+- 配置拆分为 `src/data/`：`types.ts` 共享类型；`maps/`（地图注册表 + `arena` 默认地图）；`zombies/`（`normal` / `runner` 各一文件）；`weapons/`（`mg` / `flame` / `shotgun` / `rocket` 各一文件）；`humans.ts`；`settings/`（场景默认值、滑块元数据、运行时覆盖值）。
+- 实体身份由数组下标改为字符串 `id`：`Zombie.kind`、`Human.weapon`、`Bullet.weapon`、`LOADOUT` 全部使用 id；每个实体另有中文 `name` 只用于界面显示。
+- `LOADOUT` 由 `[25, 10, 10, 5]` 改为 `[{ id: "mg", count: 25 }, ...]`，兵种配比与开局 50 人不变。
+- 地图参数化：新增 `MapDef` 与 `maps/index.ts` 注册表，`World` 构造时接收地图，`flowField` / `ai` / `combat` / `renderer` 从世界持有的地图读取几何；默认地图 `arena` 的尺寸、墙体、开口、出生区、人类可行走范围与啃建筑参数逐值保持不变。入口仍只用默认地图，暂不提供地图选择 UI。
+- 数值归属改为「定义默认值 + 玩家覆盖值」：实体/地图定义里存默认值，`SETTINGS` 只持久化覆盖值，读取时取「覆盖值 ?? 定义默认值」。新增实体不需要在设置里再写一份同名数值，滑块自动适配。
+- 训练场统计（`weaponStats` / `zombieStats` / DPS 滚动桶 / 击杀耗时）改为按 id 建 `Map`；单位库按钮、统计表列、HUD 兵种配比全部由注册表与 `name` 自动生成。
+- 开启对局时按 `LOADOUT` 的 id 权重分配兵种；`spawnOne` 按僵尸 id 与波次狂奔占比选择类型，不再硬编码 `0` / `1`。
+
+### 移除
+
+- 删除 `src/config.ts`，不保留兼容层；调用方全部迁移到 `src/data/`。
+- 删除 `ZOMBIE_DEFS[i]`、`WEAPONS[i]` 形式的数值下标寻址。
+- 旧版本存档不再兼容：localStorage 设置键迁移为 `zombieGame.settings.v2`，`SAVE_VERSION` 由 1 升到 2；旧格式（数字 kind/weapon、旧设置结构）读入时直接回落默认值，不抛异常、不阻塞启动。导出 JSON 仍可导入，未知字段与非法数值会被忽略。
+
 ## [0.2.1] - 2026-11-05
 
 ### 修复

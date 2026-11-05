@@ -5,18 +5,14 @@
  *  - 四类实体：人类 / 丧尸 / 子弹 / 特效，都用普通数组存放
  *  - 两张空间哈希表（丧尸一张、人类一张），每帧由 rebuildGrids() 重建
  *  - 一张流场表（丧尸找路用）
+ *  - 一张地图定义（所有几何与开口都从这里取，不再读全局常量）
  *
  * 玩法逻辑分别在 systems/ai.ts、systems/combat.ts，
  * 流程调度在 core/game.ts。
  */
-import {
-  OPENINGS,
-  SETTINGS,
-  WALLS,
-  WEAPONS,
-  WORLD,
-} from "../config";
-import type { HumanMode, Rect } from "../config";
+import { DEFAULT_MAP, type MapDef } from "../data/maps";
+import { effectiveHuman, effectiveWeapon, effectiveZombie, openingTuning, settings } from "../data/settings/runtime";
+import type { HumanMode, Rect } from "../data/types";
 import { FlowField } from "../systems/flowField";
 import { gaussClamped, insideRect, randRange, segRectHit } from "../utils/math";
 import { SpatialHash } from "../utils/spatialHash";
@@ -28,8 +24,8 @@ export interface Human {
   vx: number;
   vy: number;
   hp: number;
-  /** WEAPONS 的下标：0 机枪 / 1 喷火 / 2 霰弹 / 3 火箭 */
-  weapon: number;
+  /** 武器 id：如 "mg" / "flame" / "shotgun" / "rocket" */
+  weapon: string;
   /** 当前弹匣剩余弹药 */
   ammo: number;
   /** >0 表示正在换弹，倒计时结束后回满弹药 */
@@ -59,14 +55,14 @@ export interface Human {
   alive: boolean;
   /*
    * 下面这些字段是「训练场」专用的单个单位覆盖值：
-   * 普通对局里全部是 undefined，逻辑层的 `??` 回落到全局 SETTINGS / 武器定义，
+   * 普通对局里全部是 undefined，逻辑层的 `??` 回落到全局设置 / 武器定义，
    * 所以对正式对局的数值和行为没有任何影响。
    */
   /** 血量上限（训练场面板显示 / 重设血量用） */
   maxHp?: number;
-  /** 覆盖全局移动速度（SETTINGS.human.speed） */
+  /** 覆盖全局移动速度 */
   speedOverride?: number;
-  /** 覆盖全局视野（SETTINGS.human.sight） */
+  /** 覆盖全局视野 */
   sightOverride?: number;
   /** 伤害倍率，默认 1 */
   dmgMul?: number;
@@ -80,8 +76,8 @@ export interface Zombie {
   id: number;
   x: number;
   y: number;
-  /** ZOMBIE_DEFS 下标：0 普通 / 1 狂奔 */
-  kind: 0 | 1;
+  /** 僵尸类型 id：如 "normal" / "runner" */
+  kind: string;
   hp: number;
   speed: number;
   /** 随机相位，用于行走摇摆，避免尸群完全同步 */
@@ -96,7 +92,7 @@ export interface Zombie {
   alive: boolean;
   /** 训练场用：血量上限（面板显示 / 重设血量） */
   maxHp?: number;
-  /** 训练场用：覆盖该个体的撕咬间隔（ZOMBIE_DEFS.bite） */
+  /** 训练场用：覆盖该个体的撕咬间隔 */
   biteCycle?: number;
 }
 
@@ -104,8 +100,8 @@ export type BulletKind = "bullet" | "rocket";
 
 /** 伤害来源 —— 训练场做「按武器聚合」的 DPS 统计时用 */
 export interface DamageSource {
-  /** WEAPONS 下标；-1 表示无来源（例如场景伤害） */
-  weapon: number;
+  /** 武器 id；null 表示无来源（例如场景伤害） */
+  weapon: string | null;
   /** 开火的人类 id */
   humanId: number;
 }
@@ -124,14 +120,14 @@ export interface Bullet {
   blast: number;
   life: number;
   alive: boolean;
-  /** 训练场统计用：产生这颗子弹的武器下标 / 人类 id / 伤害倍率 */
-  weapon?: number;
+  /** 训练场统计用：产生这颗子弹的武器 id / 人类 id / 伤害倍率 */
+  weapon?: string;
   ownerId?: number;
   dmgMul?: number;
 }
 
 /**
- * 运行时的门窗实例（配置模板在 config.OPENINGS，每局各复制一份）。
+ * 运行时的门窗实例（配置模板在 MapDef.openings，每局各复制一份）。
  * hp 被丧尸啃到归零后 broken，僵尸即可穿过；窗穿过时还会被窗檐减速。
  */
 export interface Opening {
@@ -172,11 +168,11 @@ export interface Effect {
 const BULLET_GRAZE = 10;
 
 /** 预计算：把墙段朝相邻开口的一侧收缩 BULLET_GRAZE，子弹才不至于全糊在墙沿上 */
-const BULLET_WALLS: Rect[] = (() => {
-  return WALLS.map((w) => {
+function computeBulletWalls(map: MapDef): Rect[] {
+  return map.walls.map((w) => {
     const r = { ...w };
     const horizontal = w.h <= w.w; // 横墙（上/下），开口在左右两端
-    for (const o of OPENINGS) {
+    for (const o of map.openings) {
       if (horizontal) {
         // 开口紧贴墙段右端 / 左端（门窗与墙同厚，坐标严丝合缝）
         if (Math.abs(o.rect.x - (w.x + w.w)) < 1) r.w -= BULLET_GRAZE;
@@ -195,35 +191,22 @@ const BULLET_WALLS: Rect[] = (() => {
     }
     return r;
   });
-})();
+}
 
 export class World {
   humans: Human[] = [];
   zombies: Zombie[] = [];
   bullets: Bullet[] = [];
   effects: Effect[] = [];
-  /**
-   * 本局的门窗实例 —— 重开时按 SETTINGS.opening 重建，
-   * maxHp 受滑块影响；hp 被啃到归零后 broken。
-   */
-  openings: Opening[] = OPENINGS.map((def) => {
-    const maxHp = def.kind === "door" ? SETTINGS.opening.doorHp : SETTINGS.opening.winHp;
-    return {
-      kind: def.kind,
-      rect: def.rect,
-      hp: maxHp,
-      maxHp,
-      passSpeed: def.kind === "window" ? SETTINGS.opening.winPassSpeed : 1,
-      broken: false,
-    };
-  });
+  /** 本局的门窗实例 —— 重开时按地图默认值 + 玩家覆盖值重建 */
+  openings: Opening[];
   /** 防守岗哨点，由 Game.assignPosts() 开局分配 */
   posts: Post[] = [];
   /** 当前行为模式（Game 每帧同步进来） */
   mode: HumanMode = "defend";
-  zombieGrid = new SpatialHash<Zombie>(WORLD.width, WORLD.height, 56);
-  humanGrid = new SpatialHash<Human>(WORLD.width, WORLD.height, 56);
-  flow = new FlowField();
+  zombieGrid: SpatialHash<Zombie>;
+  humanGrid: SpatialHash<Human>;
+  flow: FlowField;
   time = 0;
   /** 统计：击杀数 / 被感染数 */
   kills = 0;
@@ -235,13 +218,33 @@ export class World {
   onDamage?: (z: Zombie, amount: number, source?: DamageSource) => void;
   onKill?: (z: Zombie, source?: DamageSource) => void;
   private nextId = 1;
+  private readonly bulletWalls: Rect[];
+
+  constructor(readonly map: MapDef = DEFAULT_MAP) {
+    const tuning = openingTuning(map);
+    this.openings = map.openings.map((def) => {
+      const maxHp = def.kind === "door" ? tuning.doorHp : tuning.winHp;
+      return {
+        kind: def.kind,
+        rect: def.rect,
+        hp: maxHp,
+        maxHp,
+        passSpeed: def.kind === "window" ? tuning.winPassSpeed : 1,
+        broken: false,
+      };
+    });
+    this.zombieGrid = new SpatialHash<Zombie>(map.width, map.height, 56);
+    this.humanGrid = new SpatialHash<Human>(map.width, map.height, 56);
+    this.flow = new FlowField(map);
+    this.bulletWalls = computeBulletWalls(map);
+  }
 
   /**
    * 点是否卡在墙体或“完好”的门窗里 —— 丧尸移动碰撞用。
    * 破损的门窗不算：僵尸可以从破口钻进来。
    */
   solidAt(x: number, y: number, pad = 0): boolean {
-    for (const w of WALLS) {
+    for (const w of this.map.walls) {
       if (insideRect(x, y, w, pad)) return true;
     }
     for (const o of this.openings) {
@@ -257,7 +260,7 @@ export class World {
    *    的擦边弹放行，否则偏轴守卫的子弹会全部糊在墙沿上
    */
   bulletBlocked(ax: number, ay: number, bx: number, by: number): boolean {
-    for (const w of BULLET_WALLS) {
+    for (const w of this.bulletWalls) {
       if (segRectHit(ax, ay, bx, by, w)) return true;
     }
     for (const o of this.openings) {
@@ -276,7 +279,7 @@ export class World {
    * 子弹调用时 pad 传 0，严格按窗洞算，不会隔墙开枪。
    */
   sightBlocked(ax: number, ay: number, bx: number, by: number, windowPad = 0): boolean {
-    for (const w of WALLS) {
+    for (const w of this.map.walls) {
       if (segRectHit(ax, ay, bx, by, w)) return true;
     }
     for (const o of this.openings) {
@@ -296,8 +299,9 @@ export class World {
     return false;
   }
 
-  spawnHuman(x: number, y: number, weapon: number): Human {
-    const hp = SETTINGS.human.hp;
+  spawnHuman(x: number, y: number, weapon: string): Human {
+    const def = effectiveWeapon(weapon);
+    const hp = effectiveHuman().hp;
     const human: Human = {
       id: this.nextId++,
       x,
@@ -306,8 +310,8 @@ export class World {
       vy: 0,
       hp,
       maxHp: hp,
-      weapon,
-      ammo: WEAPONS[weapon].magazine,
+      weapon: def.id,
+      ammo: def.magazine,
       reloadTimer: 0,
       fire: 0,
       burst: 0,
@@ -326,20 +330,20 @@ export class World {
   }
 
   /**
-   * 生成一只丧尸 —— 属性按正态分布在 SETTINGS.zombie.jitter 幅度内随机。
-   * 均值用 SETTINGS.zombie.normal / runner，极端值自动夹住下限（避免非正 hp/speed）。
+   * 生成一只丧尸 —— 属性按正态分布在僵尸随机幅度内随机。
+   * 均值来自实体定义 + 玩家覆盖值，极端值自动夹住下限（避免非正 hp/speed）。
    * 返回新建的个体，训练场需要它来做「生成后重设血量」等操作。
    */
-  spawnZombie(x: number, y: number, kind: 0 | 1, hpScale = 1): Zombie {
-    const zType = SETTINGS.zombie[kind === 0 ? "normal" : "runner"];
-    const j = SETTINGS.zombie.jitter;
-    const hp = gaussClamped(zType.hp, j, zType.hp * 0.2, zType.hp * 2) * hpScale;
-    const speed = gaussClamped(zType.speed, j, zType.speed * 0.45, zType.speed * 1.8);
+  spawnZombie(x: number, y: number, kind: string, hpScale = 1): Zombie {
+    const def = effectiveZombie(kind);
+    const j = settings().zombie.jitter;
+    const hp = gaussClamped(def.hp, j, def.hp * 0.2, def.hp * 2) * hpScale;
+    const speed = gaussClamped(def.speed, j, def.speed * 0.45, def.speed * 1.8);
     const zombie: Zombie = {
       id: this.nextId++,
       x,
       y,
-      kind,
+      kind: def.id,
       hp,
       maxHp: hp,
       speed,
@@ -386,6 +390,11 @@ export class World {
       }
     }
   }
+}
+
+/** 按地图创建一个独立世界；默认地图保持原入口行为 */
+export function createWorld(map: MapDef = DEFAULT_MAP): World {
+  return new World(map);
 }
 
 /** 原地压缩数组：保留 alive 的项，顺序不保证（视觉上无所谓） */

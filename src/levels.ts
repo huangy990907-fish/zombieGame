@@ -2,7 +2,7 @@
  * 关卡定义 —— 每关有独立的 settings 覆盖，以及可选的开场/胜利文案。
  * 现在只有一关，但结构按可扩展设计。
  */
-import type { SETTINGS } from "./config";
+import type { SettingsOverrides } from "./data/types";
 
 /** 关卡难度星数 1~5 */
 export type Difficulty = 1 | 2 | 3 | 4 | 5;
@@ -21,11 +21,11 @@ export interface LevelDef {
   /** 难度星数 */
   difficulty: Difficulty;
   /**
-   * 这关专属的 SETTINGS 覆盖。只写要改的字段，没写的沿用全局默认值。
-   * 比如第 1 关僵尸弱，就只覆盖 zombie.normal.hp / speed；第 2 关波次更长，覆盖 wave.count。
-   * 空对象就是"用默认 settings 不做任何改动"。
+   * 这关专属的设置覆盖。只写要改的字段，没写的沿用实体定义默认值。
+   * 比如第 1 关僵尸弱，就只覆盖 zombie.types.normal.hp / speed；第 2 关波次更长，覆盖 wave.count。
+   * 空对象就是"用默认设置不做任何改动"。
    */
-  settings: Partial<typeof SETTINGS>;
+  settings: SettingsOverrides;
   /** 通关弹窗显示的祝贺文案 */
   victoryText?: string;
 }
@@ -45,7 +45,7 @@ export const LEVELS: LevelDef[] = [
     settings: {
       wave: { count: 8, base: 120, growth: 1.06, spawnBase: 12, spawnPerWave: 2, spawnMax: 80, maxAlive: 400, reinforce: 1 },
       human: { start: 50, cap: 50, hp: 100, speed: 54, sight: 420, turnTime: 2.8 },
-      zombie: { jitter: 0.2, normal: { hp: 80, speed: 48, bite: 0.55 }, runner: { hp: 40, speed: 85, bite: 0.7 } },
+      zombie: { jitter: 0.2, types: { normal: { hp: 80, speed: 48, bite: 0.55 }, runner: { hp: 40, speed: 85, bite: 0.7 } } },
       opening: { doorHp: 450, winHp: 100, winPassSpeed: 0.45, buildBiteDamage: 4, buildBiteSlow: 1.5 },
     },
     victoryText: "第 1 关已通关！你守住了第一次尸潮。",

@@ -1,7 +1,7 @@
 /**
  * 纯函数数学工具 —— 不依赖游戏状态，可独立测试。
  */
-import type { Rect } from "../config";
+import type { Rect } from "../data/types";
 
 /** 把 v 限制在 [lo, hi] 区间 */
 export function clamp(v: number, lo: number, hi: number): number {

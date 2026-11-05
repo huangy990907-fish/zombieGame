@@ -817,3 +817,344 @@ body {
   border-color: #a78bfa;
 }
 
+/* ===== 训练场 ===== */
+.menu-btn.training {
+  border-color: #0e7490;
+  color: #a5f3fc;
+}
+
+.menu-btn.training:hover {
+  border-color: #22d3ee;
+  box-shadow: 0 4px 20px rgba(34, 211, 238, 0.25);
+}
+
+.training-panel {
+  position: fixed;
+  top: 0;
+  right: 0;
+  height: 100vh;
+  width: 372px;
+  z-index: 25;
+  padding: 16px 18px 28px;
+  overflow-y: auto;
+  font-size: 12px;
+  color: #dfe6f0;
+  background: rgba(5, 12, 18, 0.98);
+  border-left: 1px solid #16414f;
+  box-shadow: -12px 0 36px rgba(0, 0, 0, 0.55);
+  transform: translateX(100%);
+  transition: transform 0.25s ease-out;
+}
+
+.training-panel.open {
+  transform: translateX(0);
+}
+
+.training-panel .tp-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding-bottom: 10px;
+  margin-bottom: 10px;
+  border-bottom: 1px solid #16414f;
+}
+
+.training-panel .tp-title {
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  color: #a5f3fc;
+}
+
+.training-panel .tp-title i {
+  font-style: normal;
+  font-size: 10px;
+  color: #22d3ee;
+  opacity: 0.6;
+  margin-left: 4px;
+  letter-spacing: 2px;
+}
+
+.training-panel .tp-back {
+  background: transparent;
+  border: 1px solid #16414f;
+  border-radius: 4px;
+  color: #7dd3fc;
+  font: inherit;
+  font-size: 11px;
+  padding: 4px 10px;
+  cursor: pointer;
+}
+
+.training-panel .tp-back:hover {
+  border-color: #22d3ee;
+  color: #fff;
+}
+
+.training-panel .tp-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.training-panel .tp-tools button,
+.training-panel .tp-rhythm button {
+  background: #0d1b24;
+  color: #b7c9d6;
+  border: 1px solid #1d3b4d;
+  border-radius: 4px;
+  font: inherit;
+  font-size: 11px;
+  padding: 5px 9px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.training-panel .tp-tools button:hover,
+.training-panel .tp-rhythm button:hover {
+  border-color: #22d3ee;
+  color: #fff;
+}
+
+.training-panel .tp-tools button.active,
+.training-panel .tp-rhythm button.active {
+  background: #0e3a4a;
+  border-color: #22d3ee;
+  color: #a5f3fc;
+  box-shadow: inset 0 0 12px rgba(34, 211, 238, 0.18);
+}
+
+.training-panel .tp-section h3 {
+  margin: 16px 0 8px;
+  padding-bottom: 5px;
+  border-bottom: 1px solid #122c38;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 1.5px;
+  color: #7dd3fc;
+}
+
+.training-panel .tp-lib {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin-bottom: 8px;
+}
+
+.training-panel .tp-lib-btn {
+  display: grid;
+  grid-template-columns: 14px 1fr auto;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: #0b1720;
+  border: 1px solid #17303c;
+  border-radius: 4px;
+  color: #cfd8e6;
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.training-panel .tp-lib-btn:hover {
+  border-color: #22d3ee;
+}
+
+.training-panel .tp-lib-btn.active {
+  background: #0e3a4a;
+  border-color: #22d3ee;
+  color: #fff;
+}
+
+.training-panel .tp-dot {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  box-shadow: 0 0 8px currentColor;
+  vertical-align: middle;
+  margin-right: 4px;
+}
+
+.training-panel .tp-lib-name {
+  font-weight: 600;
+}
+
+.training-panel .tp-lib-sub {
+  font-size: 10px;
+  color: #6b8a9b;
+}
+
+.training-panel .tp-hint {
+  font-size: 10px;
+  line-height: 1.6;
+  color: #7b96a6;
+  margin-top: 6px;
+}
+
+.training-panel .tp-empty {
+  padding: 14px 10px;
+  border: 1px dashed #17303c;
+  border-radius: 5px;
+  color: #6b8a9b;
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+.training-panel .tp-unit-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.training-panel .tp-unit-name {
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.training-panel .tp-chip {
+  padding: 2px 6px;
+  border-radius: 3px;
+  background: #0d1b24;
+  border: 1px solid #17303c;
+  color: #7b96a6;
+  font-size: 10px;
+}
+
+.training-panel .tp-chip.tp-live {
+  color: #a5f3fc;
+  border-color: #16414f;
+}
+
+.training-panel .tp-row {
+  display: grid;
+  grid-template-columns: 72px 1fr 52px;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 7px;
+}
+
+.training-panel .tp-row label {
+  color: #b7c9d6;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.training-panel .tp-row input[type="range"] {
+  width: 100%;
+  accent-color: #22d3ee;
+}
+
+.training-panel .tp-val {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: #cfd8e6;
+  font-size: 11px;
+}
+
+.training-panel .tp-select {
+  width: 100%;
+  background: #0b1720;
+  color: #cfd8e6;
+  border: 1px solid #17303c;
+  border-radius: 4px;
+  font: inherit;
+  font-size: 11px;
+  padding: 4px 6px;
+}
+
+.training-panel .tp-check {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 8px 0 10px;
+  color: #b7c9d6;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.training-panel .tp-check input {
+  accent-color: #22d3ee;
+}
+
+.training-panel .tp-del {
+  width: 100%;
+  margin-top: 4px;
+  padding: 6px;
+  background: #251117;
+  border: 1px solid #5a2f3a;
+  border-radius: 4px;
+  color: #fca5a5;
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.training-panel .tp-del:hover {
+  border-color: #ef4444;
+  color: #fff;
+}
+
+.training-panel .tp-rhythm {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.training-panel .tp-statline {
+  margin-bottom: 8px;
+  color: #9fb6c4;
+  font-size: 11px;
+  padding: 7px 9px;
+  background: #0b1720;
+  border: 1px solid #17303c;
+  border-radius: 4px;
+}
+
+.training-panel .tp-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 10px;
+  margin-bottom: 10px;
+}
+
+.training-panel .tp-table th {
+  color: #6b8a9b;
+  font-weight: 500;
+  text-align: right;
+  padding: 3px 3px 5px;
+  border-bottom: 1px solid #17303c;
+}
+
+.training-panel .tp-table th:first-child,
+.training-panel .tp-table td:first-child {
+  text-align: left;
+}
+
+.training-panel .tp-table td {
+  padding: 3px;
+  text-align: right;
+  color: #cfd8e6;
+  font-variant-numeric: tabular-nums;
+  border-bottom: 1px solid #0f2430;
+}
+
+.training-panel .tp-table td.tp-hot {
+  color: #a5f3fc;
+}
+
+/* 训练场时给右侧面板让位，画布等比缩小 */
+body.training .frame {
+  width: min(880px, calc(100vw - 380px));
+}
+
+body.training .screen canvas {
+  max-height: calc(100vh - 30px);
+}
+

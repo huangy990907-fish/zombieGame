@@ -7,11 +7,28 @@
  *  - Sprite 按数组下标复用（sync() 池化），不随实体生死反复创建销毁
  *  - 转化中的人类 = 武器颜色渐变到紫色 + 闪烁
  */
-import { Application, Container, Graphics, Sprite, Texture } from "pixi.js";
+import { Application, Container, Graphics, Sprite, Text, Texture } from "pixi.js";
 import { HUMAN_DEF, ROOM, SETTINGS, WALLS, WEAPONS, WORLD, ZOMBIE_DEFS } from "../config";
-import type { Game } from "../core/game";
 import type { World } from "../core/world";
 import { mixColor } from "../utils/math";
+
+/** 单条伤害飘字（训练场用，渲染层只负责画，生命周期由训练场会话管理） */
+export interface FloatingText {
+  x: number;
+  y: number;
+  text: string;
+  color: number;
+  age: number;
+  life: number;
+  /** 每秒上飘速度（像素/秒） */
+  vy: number;
+}
+
+/** 渲染附加信息：正式对局不传，训练场用它画选中框和飘字 */
+export interface RenderExtra {
+  selection?: { x: number; y: number; radius: number } | null;
+  floating?: FloatingText[];
+}
 
 /** 圆点贴图的实心核心半径，缩放时以此为基准 */
 const CORE_R = 11;
@@ -19,15 +36,19 @@ const CORE_R = 11;
 export class Renderer {
   readonly app = new Application();
   private floorLayer = new Container();
+  private trainingLayer = new Graphics();
   private unitLayer = new Container();
   private wallLayer = new Graphics();
   private openingLayer = new Graphics();
   private fxLayer = new Container();
+  private selectionLayer = new Graphics();
+  private textLayer = new Container();
   private dot!: Texture;
   private hSprites: Sprite[] = [];
   private zSprites: Sprite[] = [];
   private bSprites: Sprite[] = [];
   private fxSprites: Sprite[] = [];
+  private textPool: Text[] = [];
   private t = 0;
 
   /** 初始化 PixiJS、生成贴图、画静态场景（地板网格 / 墙体） */
@@ -43,15 +64,25 @@ export class Renderer {
     host.appendChild(this.app.canvas);
     this.dot = this.makeDotTexture();
     this.buildStatic();
-    // 层级从下到上：地板 -> 单位 -> 特效 -> 门窗 -> 墙体
+    this.buildTrainingVisual();
+    // 层级从下到上：训练场装饰 -> 地板 -> 单位 -> 特效 -> 门窗 -> 墙体 -> 选中框 -> 飘字
     // 门窗在特效之上：火焰飞过门口会被盖住；墙体最后画，遮住飞出去的特效
     this.app.stage.addChild(
       this.floorLayer,
+      this.trainingLayer,
       this.unitLayer,
       this.fxLayer,
       this.openingLayer,
       this.wallLayer,
+      this.selectionLayer,
+      this.textLayer,
     );
+    this.trainingLayer.visible = false;
+  }
+
+  /** 切到训练场时显示训练场专属地面装饰；正式对局隐藏 */
+  setTrainingVisual(active: boolean): void {
+    this.trainingLayer.visible = active;
   }
 
   /** 用几层同心圆画一张“外圈发光、中心实心”的圆点贴图 */
@@ -85,6 +116,76 @@ export class Renderer {
     walls
       .rect(0, 0, WORLD.width, WORLD.height)
       .stroke({ width: 1, color: 0x1b2230, alpha: 1 });
+  }
+
+  /**
+   * 训练场地面装饰：全场冷青色网格 + 场地虚线圈 + 靶心标记。
+   * 和正式对局「只有房间内暗蓝网格」区分开，但保持同一套深色底 + 霓虹线条风格。
+   */
+  private buildTrainingVisual(): void {
+    const g = this.trainingLayer;
+    g.clear();
+
+    // 全场网格（正式对局网格只画在房间内，这里铺满整张画布，一眼就能看出是训练场）
+    for (let x = 0; x <= WORLD.width; x += 48) g.moveTo(x, 0).lineTo(x, WORLD.height);
+    for (let y = 0; y <= WORLD.height; y += 48) g.moveTo(0, y).lineTo(WORLD.width, y);
+    g.stroke({ width: 1, color: 0x16414f, alpha: 0.65 });
+
+    // 房间区域：青色虚线边框
+    this.dashedRect(g, ROOM.left, ROOM.top, ROOM.right - ROOM.left, ROOM.bottom - ROOM.top, 16, 9);
+    g.stroke({ width: 2, color: 0x22d3ee, alpha: 0.38 });
+
+    // 四角标记
+    const corner = 30;
+    const corners: Array<[number, number, number, number]> = [
+      [ROOM.left, ROOM.top, 1, 1],
+      [ROOM.right, ROOM.top, -1, 1],
+      [ROOM.left, ROOM.bottom, 1, -1],
+      [ROOM.right, ROOM.bottom, -1, -1],
+    ];
+    for (const [cx, cy, sx, sy] of corners) {
+      g.moveTo(cx, cy + sy * corner).lineTo(cx, cy).lineTo(cx + sx * corner, cy);
+    }
+    g.stroke({ width: 3, color: 0x22d3ee, alpha: 0.5 });
+
+    // 靶心：中心大圆 + 四个四分之一位置的小圆环
+    const cx = (ROOM.left + ROOM.right) * 0.5;
+    const cy = (ROOM.top + ROOM.bottom) * 0.5;
+    g.circle(cx, cy, 68).stroke({ width: 2, color: 0x22d3ee, alpha: 0.28 });
+    g.circle(cx, cy, 44).stroke({ width: 1, color: 0x22d3ee, alpha: 0.2 });
+    g.moveTo(cx - 20, cy).lineTo(cx + 20, cy);
+    g.moveTo(cx, cy - 20).lineTo(cx, cy + 20);
+    g.stroke({ width: 2, color: 0x22d3ee, alpha: 0.35 });
+
+    for (const [mx, my] of [
+      [ROOM.left + (ROOM.right - ROOM.left) * 0.25, cy],
+      [ROOM.left + (ROOM.right - ROOM.left) * 0.75, cy],
+      [cx, ROOM.top + (ROOM.bottom - ROOM.top) * 0.25],
+      [cx, ROOM.top + (ROOM.bottom - ROOM.top) * 0.75],
+    ]) {
+      g.circle(mx, my, 20).stroke({ width: 1, color: 0x22d3ee, alpha: 0.22 });
+    }
+  }
+
+  /** 手动画虚线矩形（Pixi Graphics 没有内置 dashed stroke） */
+  private dashedRect(
+    g: Graphics,
+    x: number,
+    y: number,
+    w: number,
+    h: number,
+    dash: number,
+    gap: number,
+  ): void {
+    const step = dash + gap;
+    for (let px = x; px < x + w; px += step) {
+      g.moveTo(px, y).lineTo(Math.min(px + dash, x + w), y);
+      g.moveTo(px, y + h).lineTo(Math.min(px + dash, x + w), y + h);
+    }
+    for (let py = y; py < y + h; py += step) {
+      g.moveTo(x, py).lineTo(x, Math.min(py + dash, y + h));
+      g.moveTo(x + w, py).lineTo(x + w, Math.min(py + dash, y + h));
+    }
   }
 
   /**
@@ -137,9 +238,9 @@ export class Renderer {
   }
 
   /** 每帧把 World 的状态同步到 Sprite（位置 / 颜色 / 缩放 / 透明度） */
-  render(game: Game, dt: number): void {
+  render(world: World, dt: number, extra?: RenderExtra): void {
     this.t += dt;
-    const w = game.world;
+    const w = world;
 
     const humans = w.humans;
     this.sync(this.hSprites, humans.length, this.unitLayer);
@@ -214,5 +315,59 @@ export class Renderer {
     }
 
     this.renderOpenings(w);
+    this.renderSelection(extra?.selection ?? null);
+    this.renderFloatingText(extra?.floating);
+  }
+
+  /**
+   * 选中框：青色虚线圆环 + 十字刻度。
+   * 只在训练场传入 selection 时出现，正式对局不传即整层清空。
+   */
+  private renderSelection(sel: { x: number; y: number; radius: number } | null): void {
+    const g = this.selectionLayer;
+    g.clear();
+    if (!sel) return;
+    const r = sel.radius + 4;
+    for (let i = 0; i < 8; i++) {
+      const start = (i * Math.PI) / 4;
+      g.arc(sel.x, sel.y, r, start, start + Math.PI / 5);
+    }
+    g.stroke({ width: 2, color: 0x7fb4ff, alpha: 0.9 });
+    g.circle(sel.x, sel.y, r + 7).stroke({ width: 1, color: 0x7fb4ff, alpha: 0.25 });
+  }
+
+  /** 伤害飘字：使用 Text 对象池，实体数量按需补齐、多余隐藏 */
+  private renderFloatingText(list?: FloatingText[]): void {
+    const items = list ?? [];
+    while (this.textPool.length < items.length) {
+      const text = new Text({
+        text: "",
+        style: {
+          fontFamily: "monospace",
+          fontSize: 14,
+          fontWeight: "700",
+          fill: 0xffffff,
+          stroke: { color: 0x000000, width: 3 },
+        },
+      });
+      text.anchor.set(0.5);
+      this.textLayer.addChild(text);
+      this.textPool.push(text);
+    }
+    for (let i = 0; i < this.textPool.length; i++) {
+      const s = this.textPool[i];
+      if (i >= items.length) {
+        s.visible = false;
+        continue;
+      }
+      const f = items[i];
+      const p = Math.min(1, f.age / f.life);
+      s.visible = true;
+      s.text = f.text;
+      s.position.set(f.x, f.y);
+      s.tint = f.color;
+      s.alpha = p < 0.65 ? 1 : (1 - p) / 0.35;
+      s.scale.set(1 + p * 0.22);
+    }
   }
 }

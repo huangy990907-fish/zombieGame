@@ -1,0 +1,518 @@
+/**
+ * 训练场控制面板 —— 右侧滑出的 DOM 面板。
+ *
+ * 负责三块 UI：
+ *  1. 单位库 + 工具（生成 / 删除 / 清场）
+ *  2. 选中单位的属性编辑器（直接写回单位字段，立即生效）
+ *  3. 节奏控制与实时读数（DPS / 击杀耗时 / 承受伤害）
+ *
+ * 面板本身不碰游戏逻辑，只调用 TrainingSession 的公开方法。
+ */
+import { SETTINGS, WEAPONS, WORLD, ZOMBIE_DEFS } from "../config";
+import type { Human, Zombie } from "../core/world";
+import {
+  TRAIN_HUMAN_TYPES,
+  TRAIN_ZOMBIE_TYPES,
+  TrainingSession,
+  type SelectedUnit,
+} from "./session";
+
+function hexColor(c: number): string {
+  return `#${c.toString(16).padStart(6, "0")}`;
+}
+
+function fmt(n: number, digits = 0): string {
+  return n.toFixed(digits);
+}
+
+function fmtTime(sec: number): string {
+  const s = Math.floor(sec);
+  return `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
+}
+
+function fmtTtk(sum: number, count: number): string {
+  return count > 0 ? `${(sum / count).toFixed(1)}s` : "—";
+}
+
+/** 通用滑块行 HTML（id 用来绑定事件和刷新数值） */
+function sliderRow(
+  label: string,
+  id: string,
+  value: number,
+  min: number,
+  max: number,
+  step: number,
+  digits = 0,
+): string {
+  return `<div class="tp-row">
+    <label for="${id}">${label}</label>
+    <input id="${id}" type="range" min="${min}" max="${max}" step="${step}" value="${value}" />
+    <span class="tp-val" id="${id}Val">${fmt(value, digits)}</span>
+  </div>`;
+}
+
+export class TrainingPanel {
+  private root: HTMLElement;
+  private editorEl!: HTMLElement;
+  private statsEl!: HTMLElement;
+  private hintEl!: HTMLElement;
+  private rhythmHintEl!: HTMLElement;
+  private selectBtn!: HTMLButtonElement;
+  private deleteBtn!: HTMLButtonElement;
+  private pauseBtn!: HTMLButtonElement;
+  private slowBtn!: HTMLButtonElement;
+  private normalBtn!: HTMLButtonElement;
+  private libButtons: HTMLButtonElement[] = [];
+  private active = false;
+  private acc = 0;
+  private editorKey = "";
+
+  constructor(
+    private readonly session: TrainingSession,
+    private readonly onBack: () => void,
+  ) {
+    const root = document.getElementById("trainingPanel");
+    if (!root) throw new Error("missing element #trainingPanel");
+    this.root = root;
+    this.build();
+  }
+
+  /** 把画布点击事件接进来：屏幕坐标 -> 逻辑坐标 */
+  attachCanvas(canvas: HTMLCanvasElement): void {
+    canvas.addEventListener("pointerdown", (e) => {
+      if (!this.active) return;
+      const rect = canvas.getBoundingClientRect();
+      const x = ((e.clientX - rect.left) / rect.width) * WORLD.width;
+      const y = ((e.clientY - rect.top) / rect.height) * WORLD.height;
+      this.session.handleClick(x, y);
+    });
+  }
+
+  activate(): void {
+    this.active = true;
+    this.root.classList.add("open");
+    this.editorKey = "";
+    this.refresh(1);
+  }
+
+  deactivate(): void {
+    this.active = false;
+    this.root.classList.remove("open");
+  }
+
+  // ============================================================
+  // 静态骨架
+  // ============================================================
+
+  private build(): void {
+    this.root.innerHTML = `
+      <div class="tp-head">
+        <span class="tp-title">🧪 训练场 <i>SANDBOX</i></span>
+        <button class="tp-back" id="tpBack">← 主菜单</button>
+      </div>
+
+      <div class="tp-tools">
+        <button id="tpToolSelect" class="active">🖱 选择/编辑</button>
+        <button id="tpToolDelete">🗑 删除</button>
+        <button id="tpClear">🧹 清场</button>
+        <button id="tpResetStats">↺ 读数清零</button>
+      </div>
+
+      <div class="tp-section">
+        <h3>僵尸单位</h3>
+        <div class="tp-lib" id="tpZombieLib"></div>
+        <h3>人类单位</h3>
+        <div class="tp-lib" id="tpHumanLib"></div>
+        <div class="tp-hint" id="tpHint"></div>
+      </div>
+
+      <div class="tp-section">
+        <h3>选中单位</h3>
+        <div id="tpEditor"></div>
+      </div>
+
+      <div class="tp-section">
+        <h3>节奏控制</h3>
+        <div class="tp-rhythm">
+          <button id="tpPause">⏸ 暂停</button>
+          <button id="tpStep">⏭ 单步</button>
+          <button id="tpSlow">0.25x 慢放</button>
+          <button id="tpNormal">1x 正常</button>
+        </div>
+        <div class="tp-hint" id="tpRhythmHint"></div>
+      </div>
+
+      <div class="tp-section">
+        <h3>实时读数</h3>
+        <div id="tpStats"></div>
+      </div>
+    `;
+
+    this.editorEl = this.el("tpEditor");
+    this.statsEl = this.el("tpStats");
+    this.hintEl = this.el("tpHint");
+    this.rhythmHintEl = this.el("tpRhythmHint");
+
+    this.buildLibraries();
+
+    (this.el("tpBack") as HTMLButtonElement).onclick = () => this.onBack();
+    this.selectBtn = this.el("tpToolSelect") as HTMLButtonElement;
+    this.deleteBtn = this.el("tpToolDelete") as HTMLButtonElement;
+    this.selectBtn.onclick = () => {
+      this.session.tool = "select";
+      this.session.armed = null;
+      this.refresh(1);
+    };
+    this.deleteBtn.onclick = () => {
+      this.session.tool = "delete";
+      this.session.armed = null;
+      this.refresh(1);
+    };
+    (this.el("tpClear") as HTMLButtonElement).onclick = () => {
+      this.session.clearUnits();
+      this.editorKey = "";
+      this.refresh(1);
+    };
+    (this.el("tpResetStats") as HTMLButtonElement).onclick = () => {
+      this.session.resetReadings();
+      this.refresh(1);
+    };
+
+    this.pauseBtn = this.el("tpPause") as HTMLButtonElement;
+    this.slowBtn = this.el("tpSlow") as HTMLButtonElement;
+    this.normalBtn = this.el("tpNormal") as HTMLButtonElement;
+    this.pauseBtn.onclick = () => {
+      this.session.paused = !this.session.paused;
+      this.refresh(1);
+    };
+    (this.el("tpStep") as HTMLButtonElement).onclick = () => {
+      this.session.requestStep();
+      this.refresh(1);
+    };
+    this.slowBtn.onclick = () => {
+      this.session.speed = 0.25;
+      this.session.paused = false;
+      this.refresh(1);
+    };
+    this.normalBtn.onclick = () => {
+      this.session.speed = 1;
+      this.session.paused = false;
+      this.refresh(1);
+    };
+
+    this.refresh(1);
+  }
+
+  private el(id: string): HTMLElement {
+    const node = document.getElementById(id);
+    if (!node) throw new Error(`missing element #${id}`);
+    return node;
+  }
+
+  private buildLibraries(): void {
+    const zombieLib = this.el("tpZombieLib");
+    zombieLib.innerHTML = TRAIN_ZOMBIE_TYPES.map(
+      (t) => `<button class="tp-lib-btn" data-kind="zombie" data-index="${t.index}">
+        <span class="tp-dot" style="background:${hexColor(t.color)}"></span>
+        <span class="tp-lib-name">${t.name}</span>
+        <span class="tp-lib-sub">${t.hp} HP · ${t.speed} 速</span>
+      </button>`,
+    ).join("");
+
+    const humanLib = this.el("tpHumanLib");
+    humanLib.innerHTML = TRAIN_HUMAN_TYPES.map(
+      (t) => `<button class="tp-lib-btn" data-kind="human" data-index="${t.index}">
+        <span class="tp-dot" style="background:${hexColor(t.color)}"></span>
+        <span class="tp-lib-name">${t.name}</span>
+        <span class="tp-lib-sub">${t.range} 射程 · ${t.damage} 伤</span>
+      </button>`,
+    ).join("");
+
+    this.libButtons = Array.from(
+      this.root.querySelectorAll<HTMLButtonElement>(".tp-lib-btn"),
+    );
+    for (const btn of this.libButtons) {
+      btn.onclick = () => {
+        const kind = btn.dataset.kind === "human" ? "human" : "zombie";
+        const index = Number(btn.dataset.index);
+        this.session.armed = { kind, index };
+        this.session.tool = "select";
+        this.refresh(1);
+      };
+    }
+  }
+
+  // ============================================================
+  // 周期刷新
+  // ============================================================
+
+  /** 由主循环每帧调用，内部按 0.12s 节流，避免每帧重排 DOM */
+  refresh(dt: number): void {
+    if (!this.active) return;
+    this.acc += dt;
+    if (this.acc < 0.12) return;
+    this.acc = 0;
+
+    this.rebuildEditorIfNeeded();
+    this.refreshLibraries();
+    this.refreshToolButtons();
+    this.refreshRhythm();
+    this.refreshHint();
+    this.refreshLiveHp();
+    this.refreshStats();
+  }
+
+  private refreshLibraries(): void {
+    const armed = this.session.armed;
+    for (const btn of this.libButtons) {
+      const kind = btn.dataset.kind === "human" ? "human" : "zombie";
+      const index = Number(btn.dataset.index);
+      btn.classList.toggle(
+        "active",
+        armed !== null && armed.kind === kind && armed.index === index,
+      );
+    }
+  }
+
+  private refreshToolButtons(): void {
+    const armed = this.session.armed;
+    this.selectBtn.classList.toggle("active", this.session.tool === "select" && armed === null);
+    this.deleteBtn.classList.toggle("active", this.session.tool === "delete");
+  }
+
+  private refreshRhythm(): void {
+    this.pauseBtn.textContent = this.session.paused ? "▶ 继续" : "⏸ 暂停";
+    this.pauseBtn.classList.toggle("active", this.session.paused);
+    this.slowBtn.classList.toggle("active", this.session.speed === 0.25 && !this.session.paused);
+    this.normalBtn.classList.toggle("active", this.session.speed === 1 && !this.session.paused);
+    this.rhythmHintEl.textContent = this.session.paused
+      ? "已暂停 · 可点「单步」前进 1/60 秒"
+      : this.session.speed === 0.25
+        ? "0.25x 慢放 · 观察弹道与命中"
+        : "1x 正常运行";
+  }
+
+  private refreshHint(): void {
+    const armed = this.session.armed;
+    if (armed) {
+      const name =
+        armed.kind === "zombie"
+          ? TRAIN_ZOMBIE_TYPES[armed.index].name
+          : TRAIN_HUMAN_TYPES[armed.index].name;
+      this.hintEl.textContent = `已选「${name}」：点击战场空地连续生成（再次点类型可换）`;
+      return;
+    }
+    if (this.session.tool === "delete") {
+      this.hintEl.textContent = "删除模式：点击战场上的单位删除它";
+      return;
+    }
+    this.hintEl.textContent = "点击战场上的单位选中并编辑；先点上方类型再点空地生成";
+  }
+
+  // ============================================================
+  // 选中单位编辑器
+  // ============================================================
+
+  private rebuildEditorIfNeeded(): void {
+    const sel = this.session.getSelected();
+    const key = sel
+      ? sel.kind === "human"
+        ? `h:${sel.human.id}`
+        : `z:${sel.zombie.id}`
+      : "";
+    if (key === this.editorKey) return;
+    this.editorKey = key;
+
+    if (!sel) {
+      this.editorEl.innerHTML =
+        '<div class="tp-empty">未选中单位。点击战场单位，或从上方单位库选类型后生成。</div>';
+      return;
+    }
+
+    if (sel.kind === "zombie") this.buildZombieEditor(sel);
+    else this.buildHumanEditor(sel.human);
+  }
+
+  private buildZombieEditor(sel: Extract<SelectedUnit, { kind: "zombie" }>): void {
+    const z = sel.zombie;
+    const def = ZOMBIE_DEFS[z.kind];
+    const maxHp = Math.round(z.maxHp ?? z.hp);
+    const bite = z.biteCycle ?? def.bite;
+
+    this.editorEl.innerHTML = `
+      <div class="tp-unit-head">
+        <span class="tp-unit-name" style="color:${hexColor(def.color)}">${def.name}</span>
+        <span class="tp-chip">僵尸 #${z.id}</span>
+        <span class="tp-chip tp-live" id="tpLiveHp"></span>
+      </div>
+      ${sliderRow("血量", "tpZombieHp", maxHp, 1, 1000, 5)}
+      ${sliderRow("移动速度", "tpZombieSpeed", Math.round(z.speed), 5, 200, 1)}
+      ${sliderRow("撕咬间隔", "tpZombieBite", bite, 0.1, 3, 0.05, 2)}
+      <div class="tp-hint">撕咬间隔越小，啃人/拆门窗越快</div>
+      <button class="tp-del" id="tpDeleteUnit">删除该单位</button>
+    `;
+
+    const bind = (id: string, apply: (v: number) => void, digits = 0): void => {
+      const input = document.getElementById(id) as HTMLInputElement;
+      const val = document.getElementById(`${id}Val`) as HTMLSpanElement;
+      input.oninput = () => {
+        const v = Number(input.value);
+        apply(v);
+        val.textContent = fmt(v, digits);
+      };
+    };
+    bind("tpZombieHp", (v) => this.session.setZombieHp(z, v));
+    bind("tpZombieSpeed", (v) => {
+      z.speed = v;
+    });
+    bind("tpZombieBite", (v) => {
+      z.biteCycle = v;
+    }, 2);
+
+    (document.getElementById("tpDeleteUnit") as HTMLButtonElement).onclick = () => {
+      this.session.deleteSelected();
+      this.editorKey = "";
+      this.refresh(1);
+    };
+  }
+
+  private buildHumanEditor(h: Human): void {
+    const def = WEAPONS[h.weapon];
+    const speed = Math.round(h.speedOverride ?? SETTINGS.human.speed);
+    const sight = Math.round(h.sightOverride ?? SETTINGS.human.sight);
+    const dmgMul = h.dmgMul ?? 1;
+    const cdMul = h.cdMul ?? 1;
+    const maxHp = Math.round(h.maxHp ?? h.hp);
+
+    const weaponOptions = WEAPONS.map(
+      (w, i) => `<option value="${i}" ${i === h.weapon ? "selected" : ""}>${w.name}</option>`,
+    ).join("");
+
+    this.editorEl.innerHTML = `
+      <div class="tp-unit-head">
+        <span class="tp-unit-name" style="color:${hexColor(def.color)}">${def.name}</span>
+        <span class="tp-chip">人类 #${h.id}</span>
+        <span class="tp-chip tp-live" id="tpLiveHp"></span>
+      </div>
+      <div class="tp-row">
+        <label for="tpHumanWeapon">武器</label>
+        <select id="tpHumanWeapon" class="tp-select">${weaponOptions}</select>
+        <span class="tp-val">切换</span>
+      </div>
+      ${sliderRow("血量", "tpHumanHp", maxHp, 1, 500, 5)}
+      ${sliderRow("移动速度", "tpHumanSpeed", speed, 10, 150, 1)}
+      ${sliderRow("视野", "tpHumanSight", sight, 100, 900, 10)}
+      ${sliderRow("伤害倍率", "tpHumanDmg", dmgMul, 0.2, 5, 0.05, 2)}
+      ${sliderRow("射速倍率", "tpHumanCd", cdMul, 0.2, 5, 0.05, 2)}
+      <label class="tp-check">
+        <input type="checkbox" id="tpHumanInvincible" ${h.invincible ? "checked" : ""} />
+        无敌（不会被丧尸咬成僵尸）
+      </label>
+      <button class="tp-del" id="tpDeleteUnit">删除该单位</button>
+    `;
+
+    const weaponSelect = document.getElementById("tpHumanWeapon") as HTMLSelectElement;
+    weaponSelect.onchange = () => {
+      this.session.setHumanWeapon(h, Number(weaponSelect.value));
+      this.editorKey = "";
+      this.refresh(1);
+    };
+
+    const bind = (id: string, apply: (v: number) => void, digits = 0): void => {
+      const input = document.getElementById(id) as HTMLInputElement;
+      const val = document.getElementById(`${id}Val`) as HTMLSpanElement;
+      input.oninput = () => {
+        const v = Number(input.value);
+        apply(v);
+        val.textContent = fmt(v, digits);
+      };
+    };
+    bind("tpHumanHp", (v) => this.session.setHumanHp(h, v));
+    bind("tpHumanSpeed", (v) => {
+      h.speedOverride = v;
+    });
+    bind("tpHumanSight", (v) => {
+      h.sightOverride = v;
+    });
+    bind("tpHumanDmg", (v) => {
+      h.dmgMul = v;
+    }, 2);
+    bind("tpHumanCd", (v) => {
+      h.cdMul = v;
+    }, 2);
+
+    const inv = document.getElementById("tpHumanInvincible") as HTMLInputElement;
+    inv.onchange = () => {
+      h.invincible = inv.checked;
+    };
+
+    (document.getElementById("tpDeleteUnit") as HTMLButtonElement).onclick = () => {
+      this.session.deleteSelected();
+      this.editorKey = "";
+      this.refresh(1);
+    };
+  }
+
+  /** 单独刷新血量读数（滑块不回写，避免和拖拽冲突） */
+  private refreshLiveHp(): void {
+    const live = document.getElementById("tpLiveHp");
+    if (!live) return;
+    const sel = this.session.getSelected();
+    if (!sel) return;
+    if (sel.kind === "zombie") {
+      const z: Zombie = sel.zombie;
+      live.textContent = `HP ${Math.max(0, Math.ceil(z.hp))} / ${Math.round(z.maxHp ?? z.hp)}`;
+    } else {
+      const h: Human = sel.human;
+      live.textContent = `HP ${Math.round(h.hp)} / ${Math.round(h.maxHp ?? h.hp)}`;
+    }
+  }
+
+  // ============================================================
+  // 读数面板
+  // ============================================================
+
+  private refreshStats(): void {
+    const counts = this.session.countUnits();
+    const aliveByKind = ZOMBIE_DEFS.map(() => 0);
+    for (const z of this.session.world.zombies) aliveByKind[z.kind]++;
+
+    const weaponRows = WEAPONS.map((w, i) => {
+      const s = this.session.weaponStats[i];
+      return `<tr>
+        <td><span class="tp-dot" style="background:${hexColor(w.color)}"></span>${w.name}</td>
+        <td>${Math.round(s.damage)}</td>
+        <td>${fmt(this.session.averageDps(i), 1)}</td>
+        <td class="tp-hot">${fmt(this.session.recentDps(i), 1)}</td>
+        <td>${s.kills}</td>
+        <td>${fmtTtk(s.ttkSum, s.ttkCount)}</td>
+      </tr>`;
+    }).join("");
+
+    const zombieRows = ZOMBIE_DEFS.map((d, i) => {
+      const s = this.session.zombieStats[i];
+      return `<tr>
+        <td><span class="tp-dot" style="background:${hexColor(d.color)}"></span>${d.name}</td>
+        <td>${aliveByKind[i]}</td>
+        <td>${Math.round(s.damage)}</td>
+        <td>${s.kills}</td>
+        <td>${fmtTtk(s.ttkSum, s.ttkCount)}</td>
+      </tr>`;
+    }).join("");
+
+    this.statsEl.innerHTML = `
+      <div class="tp-statline">
+        ⏱ ${fmtTime(this.session.activeTime)} · 人类 ${counts.humans} · 僵尸 ${counts.zombies} · 击杀 ${this.session.totalKills()}
+      </div>
+      <table class="tp-table">
+        <thead><tr><th>武器</th><th>总伤</th><th>DPS</th><th>近4s</th><th>击杀</th><th>均杀</th></tr></thead>
+        <tbody>${weaponRows}</tbody>
+      </table>
+      <table class="tp-table">
+        <thead><tr><th>僵尸类型</th><th>存活</th><th>承伤</th><th>击杀</th><th>均杀</th></tr></thead>
+        <tbody>${zombieRows}</tbody>
+      </table>
+      <div class="tp-hint">DPS = 累计伤害 / 运行时间；「近4s」是最近 4 秒滚动窗口</div>
+    `;
+  }
+}

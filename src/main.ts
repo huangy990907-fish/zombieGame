@@ -32,6 +32,8 @@ import {
 import { Game } from "./core/game";
 import { Hud } from "./ui/hud";
 import { Renderer } from "./render/renderer";
+import { TrainingSession } from "./training/session";
+import { TrainingPanel } from "./training/panel";
 import { LEVELS, findLevel, type LevelDef } from "./levels";
 import { router, type Route } from "./router";
 
@@ -53,6 +55,12 @@ async function boot(): Promise<void> {
   const renderer = new Renderer();
   await renderer.init(host);
   const hud = new Hud(game);
+
+  // ====== 训练场：一个和正常对局完全独立的沙盒 World ======
+  // 面板常驻 DOM，只在 #/training 路由滑出；退出时整个会话被丢弃，不残留任何修改。
+  const training = new TrainingSession();
+  const trainingPanel = new TrainingPanel(training, () => router.go("menu"));
+  trainingPanel.attachCanvas(renderer.app.canvas as HTMLCanvasElement);
 
   // DOM 引用
   const topbar = document.getElementById("topbar") as HTMLElement;
@@ -271,6 +279,11 @@ async function boot(): Promise<void> {
     resultOverlay.classList.add("hidden");
     resultOverlay.classList.remove("active");
 
+    // 先统一收起训练场的 UI / 专属地面装饰；training 分支再重新打开
+    trainingPanel.deactivate();
+    renderer.setTrainingVisual(false);
+    document.body.classList.remove("training");
+
     switch (route) {
       case "menu":
         showOverlay("menu");
@@ -301,6 +314,18 @@ async function boot(): Promise<void> {
         refreshButtons();
         refreshPanelValues();
         sound.resumeAudio(); // 进入战斗场景恢复声音（AudioContext resume 在这里发生）
+        break;
+      case "training":
+        showOverlay(null);
+        topbar.classList.add("hidden");
+        bottom.classList.add("hidden");
+        settingsPanel.classList.remove("open");
+        // 每次进入都是全新沙盒：不继承上一次的单位、统计和改动
+        training.reset();
+        trainingPanel.activate();
+        renderer.setTrainingVisual(true);
+        document.body.classList.add("training");
+        sound.resumeAudio();
         break;
     }
   };
@@ -361,13 +386,25 @@ async function boot(): Promise<void> {
       }
       // 检测胜利/失败
       checkResultPhase();
-    } else {
-      // menu / levels：完全冻结逻辑
-      acc = 0;
+      renderer.render(game.world, real);
+      hud.update(real);
+      return;
     }
 
-    renderer.render(game, real);
-    hud.update(real);
+    if (route === "training") {
+      // 训练场自己管理暂停 / 单步 / 慢放，固定 1/60 步长
+      training.advance(real);
+      trainingPanel.refresh(real);
+      renderer.render(training.world, real, {
+        selection: training.selectionRing(),
+        floating: training.floaters,
+      });
+      return;
+    }
+
+    // menu / levels：完全冻结逻辑
+    acc = 0;
+    renderer.render(game.world, real);
   });
 
   // ============================================================
@@ -434,6 +471,7 @@ async function boot(): Promise<void> {
   // ====== 主菜单按钮 ======
   const newGameBtn = document.getElementById("btnNewGame") as HTMLButtonElement;
   const loadGameBtn = document.getElementById("btnLoadGame") as HTMLButtonElement;
+  const trainingBtn = document.getElementById("btnTraining") as HTMLButtonElement;
   const menuMuteBtn = document.getElementById("btnMenuMute") as HTMLButtonElement;
   const updateMuteIcon = () => {
     menuMuteBtn.textContent = sound.isMuted() ? "🔇" : "🔊";
@@ -444,6 +482,7 @@ async function boot(): Promise<void> {
   };
   newGameBtn.onclick = () => { sound.resume(); sound.play(SFX.UI_CLICK); router.go("levels"); };
   loadGameBtn.onclick = () => { sound.resume(); sound.play(SFX.UI_CLICK); router.go("levels"); };
+  trainingBtn.onclick = () => { sound.resume(); sound.play(SFX.UI_CLICK); router.go("training"); };
   updateMuteIcon();
 
   // ====== 选关页返回按钮 ======
@@ -492,6 +531,24 @@ async function boot(): Promise<void> {
       } else if (e.key === "r" || e.key === "R") {
         restartBtn.click();
       }
+    } else if (router.get() === "training") {
+      // 训练场快捷键：空格暂停 / . 单步 / 1 正常 / 0 慢放
+      if (e.code === "Space") {
+        e.preventDefault();
+        training.paused = !training.paused;
+        trainingPanel.refresh(1);
+      } else if (e.key === "." || e.key === "n" || e.key === "N") {
+        training.requestStep();
+        trainingPanel.refresh(1);
+      } else if (e.key === "1") {
+        training.speed = 1;
+        training.paused = false;
+        trainingPanel.refresh(1);
+      } else if (e.key === "0") {
+        training.speed = 0.25;
+        training.paused = false;
+        trainingPanel.refresh(1);
+      }
     }
   });
 
@@ -506,6 +563,7 @@ async function boot(): Promise<void> {
   if (import.meta.env.DEV) {
     (window as unknown as { __game: Game; __router: typeof router }).__game = game;
     (window as unknown as { __game: Game; __router: typeof router }).__router = router;
+    (window as unknown as { __training: TrainingSession }).__training = training;
   }
 }
 

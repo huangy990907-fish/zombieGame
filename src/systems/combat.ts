@@ -10,7 +10,7 @@
 import { EXPLOSION_DAMAGE, WEAPONS, WORLD, ZOMBIE_DEFS } from "../config";
 import type { WeaponDef } from "../config";
 import { dist2, mixColor, pointSegDistSq } from "../utils/math";
-import type { BulletKind, Human, World, Zombie } from "../core/world";
+import type { BulletKind, DamageSource, Human, World, Zombie } from "../core/world";
 import { sound, SFX } from "../audio/manager";
 
 const queryBuf: Zombie[] = [];
@@ -24,6 +24,9 @@ const queryBuf: Zombie[] = [];
  */
 export function tryFire(world: World, h: Human, angle: number): void {
   const def = WEAPONS[h.weapon];
+  // 训练场可给单个人类覆盖伤害 / 射速；普通对局两个倍率都是 undefined → 1
+  const dmgMul = h.dmgMul ?? 1;
+  const cooldown = def.cooldown * (h.cdMul ?? 1);
 
   if (def.kind === "flame") {
     if (h.burst > 0 || h.reloadTimer > 0 || h.ammo <= 0) return;
@@ -35,7 +38,7 @@ export function tryFire(world: World, h: Human, angle: number): void {
 
   if (h.fire > 0 || h.reloadTimer > 0 || h.ammo <= 0) return;
 
-  h.fire = def.cooldown;
+  h.fire = cooldown;
   h.ammo--;
 
   // —— 武器音效触发（每种武器独立限频，密集开火自然形成火力密度）——
@@ -47,13 +50,13 @@ export function tryFire(world: World, h: Human, angle: number): void {
     // 霰弹：一发多颗弹丸，每颗独立散布
     for (let i = 0; i < def.pellets; i++) {
       const a = angle + (Math.random() - 0.5) * def.spread * 2;
-      spawnBullet(world, h, a, def.speed, def.damage, "bullet", 0, def.range / def.speed);
+      spawnBullet(world, h, a, def.speed, def.damage * dmgMul, "bullet", 0, def.range / def.speed);
     }
   } else {
     // 机枪 / 火箭：单发弹道
     const a = angle + (Math.random() - 0.5) * def.spread * 2;
     const kind: BulletKind = def.kind === "rocket" ? "rocket" : "bullet";
-    spawnBullet(world, h, a, def.speed, def.damage, kind, def.blast, def.range / def.speed);
+    spawnBullet(world, h, a, def.speed, def.damage * dmgMul, kind, def.blast, def.range / def.speed);
   }
 
   if (h.ammo <= 0) h.reloadTimer = def.reload;
@@ -73,7 +76,8 @@ export function updateFlame(world: World, h: Human, dt: number): void {
   h.burst -= dt;
   if (h.fire > 0) return;
 
-  h.fire = def.cooldown;
+  // 射速倍率对喷火同样生效：倍率越大，伤害结算越频繁
+  h.fire = def.cooldown * (h.cdMul ?? 1);
   sound.play(SFX.FLAME); // 持续喷火每轮结算都响（限频 60ms）
   flameTick(world, h, def);
   if (h.burst <= 0) h.reloadTimer = def.reload;
@@ -117,6 +121,8 @@ function flameTick(world: World, h: Human, def: WeaponDef): void {
   // 锥形范围持续伤害：用点积判断丧尸是否落在以 facing 为中心的扇形里
   world.zombieGrid.query(h.x, h.y, def.range, queryBuf);
   const minDot = Math.cos(def.spread);
+  const dmgMul = h.dmgMul ?? 1;
+  const source: DamageSource = { weapon: h.weapon, humanId: h.id };
   for (let i = 0; i < queryBuf.length; i++) {
     const z = queryBuf[i];
     if (!z.alive) continue;
@@ -125,7 +131,7 @@ function flameTick(world: World, h: Human, def: WeaponDef): void {
     const d = Math.hypot(dx, dy);
     if (d < 1 || d > def.range) continue;
     if ((dx * dirX + dy * dirY) / d < minDot) continue;
-    damageZombie(world, z, def.damage);
+    damageZombie(world, z, def.damage * dmgMul, source);
   }
 }
 
@@ -153,23 +159,44 @@ function spawnBullet(
     blast,
     life,
     alive: true,
+    // 记录来源，训练场据此把伤害/击杀归到具体武器
+    weapon: h.weapon,
+    ownerId: h.id,
+    dmgMul: h.dmgMul ?? 1,
   });
 }
 
-/** 对丧尸造成伤害，死亡时计数 */
-export function damageZombie(world: World, z: Zombie, dmg: number): void {
+/** 对丧尸造成伤害，死亡时计数（source 仅供训练场统计，正式对局不传） */
+export function damageZombie(world: World, z: Zombie, dmg: number, source?: DamageSource): void {
   if (!z.alive) return;
+  // 实际生效伤害（不超过剩余血量），DPS 统计更准确
+  const applied = Math.min(dmg, z.hp);
   z.hp -= dmg;
+  world.onDamage?.(z, applied, source);
   sound.play(SFX.ZOMBIE_HIT);
   if (z.hp <= 0) {
     z.alive = false;
     world.kills++;
+    world.onKill?.(z, source);
     sound.play(SFX.ZOMBIE_KILL);
   }
 }
 
+/** 从子弹上还原伤害来源（没有 weapon 字段时返回 undefined） */
+function bulletSource(b: { weapon?: number; ownerId?: number }): DamageSource | undefined {
+  if (b.weapon === undefined) return undefined;
+  return { weapon: b.weapon, humanId: b.ownerId ?? -1 };
+}
+
 /** 火箭爆炸：范围伤害 + 距离衰减，只伤丧尸不伤人类 */
-function explode(world: World, x: number, y: number, radius: number): void {
+function explode(
+  world: World,
+  x: number,
+  y: number,
+  radius: number,
+  source?: DamageSource,
+  dmgMul = 1,
+): void {
   world.effects.push({
     kind: "blast",
     x,
@@ -187,7 +214,7 @@ function explode(world: World, x: number, y: number, radius: number): void {
     if (!z.alive) continue;
     const d = Math.sqrt(dist2(x, y, z.x, z.y));
     const falloff = 1 - Math.min(1, d / radius) * 0.55;
-    damageZombie(world, z, EXPLOSION_DAMAGE * falloff);
+    damageZombie(world, z, EXPLOSION_DAMAGE * falloff * dmgMul, source);
   }
 }
 
@@ -210,7 +237,9 @@ export function updateCombat(world: World, dt: number): void {
     // 完好的门挡弹，窗户和门口擦边都能打出去
     if (dead || world.bulletBlocked(b.px, b.py, b.x, b.y)) {
       b.alive = false;
-      if (b.kind === "rocket") explode(world, b.x, b.y, b.blast);
+      if (b.kind === "rocket") {
+        explode(world, b.x, b.y, b.blast, bulletSource(b), b.dmgMul ?? 1);
+      }
       continue;
     }
 
@@ -233,8 +262,11 @@ export function updateCombat(world: World, dt: number): void {
     }
 
     if (hit) {
-      if (b.kind === "rocket") explode(world, hit.x, hit.y, b.blast);
-      else damageZombie(world, hit, b.damage);
+      if (b.kind === "rocket") {
+        explode(world, hit.x, hit.y, b.blast, bulletSource(b), b.dmgMul ?? 1);
+      } else {
+        damageZombie(world, hit, b.damage, bulletSource(b));
+      }
       b.alive = false;
     }
   }

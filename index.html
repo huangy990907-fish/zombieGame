@@ -58,10 +58,14 @@
         <div class="menu-buttons">
           <button class="menu-btn primary" id="btnNewGame">🎮 新游戏</button>
           <button class="menu-btn" id="btnLoadGame">📂 载入游戏</button>
+          <button class="menu-btn training" id="btnTraining">🧪 训练场</button>
         </div>
-        <p class="menu-footer">选择关卡开始战斗 · 设置面板可调难度参数</p>
+        <p class="menu-footer">选择关卡开始战斗 · 训练场可自由生成单位、测武器 DPS</p>
       </div>
     </div>
+
+    <!-- ===== 训练场控制面板 —— 只在 #/training 路由显示 ===== -->
+    <aside id="trainingPanel" class="training-panel"></aside>
 
     <!-- ===== 选关页 overlay —— 横向节点式地图 ===== -->
     <div id="levelsOverlay" class="overlay levels-overlay">

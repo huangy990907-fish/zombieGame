@@ -92,13 +92,17 @@ export function updateHumans(world: World, dt: number): void {
       }
     }
 
-    // 被咬：原地停下，倒计时归零即倒戈
+    // 被咬：原地停下，倒计时归零即倒戈（训练场开了无敌就不转化）
     if (h.turning > 0) {
-      h.turning -= dt;
-      if (h.turning <= 0) {
-        sound.play(SFX.HUMAN_TURN); // 人类倒戈成丧尸
-        convertHuman(world, h);
-        continue;
+      if (h.invincible) {
+        h.turning = 0;
+      } else {
+        h.turning -= dt;
+        if (h.turning <= 0) {
+          sound.play(SFX.HUMAN_TURN); // 人类倒戈成丧尸
+          convertHuman(world, h);
+          continue;
+        }
       }
     }
 
@@ -108,18 +112,20 @@ export function updateHumans(world: World, dt: number): void {
      * 目标死亡、跑出视野或视线被挡住就立刻丢掉重找。
      */
     h.sight -= dt;
+    // 训练场可以给单个单位覆盖视野；普通对局 sightOverride 为 undefined，读全局值
+    const sightR = h.sightOverride ?? SETTINGS.human.sight;
     let best = h.target;
     if (best !== null) {
       if (
         !best.alive ||
-        dist2(h.x, h.y, best.x, best.y) > SETTINGS.human.sight * SETTINGS.human.sight ||
+        dist2(h.x, h.y, best.x, best.y) > sightR * sightR ||
         world.sightBlocked(h.x, h.y, best.x, best.y, WINDOW_SIGHT_PAD)
       ) {
         best = null;
       }
     }
     if (best === null && h.sight <= 0) {
-      best = nearestZombie(world, h, Math.max(def.range, SETTINGS.human.sight));
+      best = nearestZombie(world, h, Math.max(def.range, sightR));
       h.target = best;
       h.sight = 0.25 + Math.random() * 0.15;
     }
@@ -224,13 +230,14 @@ export function updateHumans(world: World, dt: number): void {
       }
     }
 
-    // 期望方向 -> 平滑加速到目标速度
+    // 期望方向 -> 平滑加速到目标速度（训练场可覆盖单个人类的移速）
+    const moveSpeed = h.speedOverride ?? SETTINGS.human.speed;
     const len = Math.hypot(dx, dy);
     if (len > 0.001 && h.turning <= 0) {
       dx /= len;
       dy /= len;
-      const vx = dx * SETTINGS.human.speed * speedFactor;
-      const vy = dy * SETTINGS.human.speed * speedFactor;
+      const vx = dx * moveSpeed * speedFactor;
+      const vy = dy * moveSpeed * speedFactor;
       const k = Math.min(1, dt * 8);
       h.vx += (vx - h.vx) * k;
       h.vy += (vy - h.vy) * k;
@@ -376,12 +383,12 @@ export function updateZombies(world: World, dt: number): void {
       const reach = ZOMBIE_DEFS[z.kind].radius + HUMAN_DEF.radius + 2;
       for (let k = 0; k < queryH.length; k++) {
         const h = queryH[k];
-        if (!h.alive || h.turning > 0) continue;
+        if (!h.alive || h.turning > 0 || h.invincible) continue;
         if (dist2(z.x, z.y, h.x, h.y) <= reach * reach) {
           h.turning = SETTINGS.human.turnTime;
           h.vx = 0;
           h.vy = 0;
-          z.bite = ZOMBIE_DEFS[z.kind].bite;
+          z.bite = z.biteCycle ?? ZOMBIE_DEFS[z.kind].bite;
           sound.play(SFX.ZOMBIE_BITE); // 啃咬人类
           bit = true;
           break;
@@ -404,8 +411,8 @@ function biteOpening(world: World, z: Zombie): void {
     if (pointRectDist(z.x, z.y, o.rect) > reach) continue;
 
     o.hp -= SETTINGS.opening.buildBiteDamage;
-    // 拆建筑比咬人费劲，啃一口歇更久
-    z.bite = ZOMBIE_DEFS[z.kind].bite * SETTINGS.opening.buildBiteSlow;
+    // 拆建筑比咬人费劲，啃一口歇更久（训练场可覆盖单个僵尸的撕咬间隔）
+    z.bite = (z.biteCycle ?? ZOMBIE_DEFS[z.kind].bite) * SETTINGS.opening.buildBiteSlow;
     sound.play(SFX.ZOMBIE_BITE); // 啃门窗（限频 400ms，密集啃咬时形成拆门节奏）
     // 啃咬的小火花，让“建筑正在被拆”看得见
     world.effects.push({

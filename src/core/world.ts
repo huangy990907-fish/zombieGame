@@ -57,6 +57,23 @@ export interface Human {
    */
   post: number;
   alive: boolean;
+  /*
+   * 下面这些字段是「训练场」专用的单个单位覆盖值：
+   * 普通对局里全部是 undefined，逻辑层的 `??` 回落到全局 SETTINGS / 武器定义，
+   * 所以对正式对局的数值和行为没有任何影响。
+   */
+  /** 血量上限（训练场面板显示 / 重设血量用） */
+  maxHp?: number;
+  /** 覆盖全局移动速度（SETTINGS.human.speed） */
+  speedOverride?: number;
+  /** 覆盖全局视野（SETTINGS.human.sight） */
+  sightOverride?: number;
+  /** 伤害倍率，默认 1 */
+  dmgMul?: number;
+  /** 射速倍率，默认 1（越大射击间隔越短） */
+  cdMul?: number;
+  /** 无敌：不会被丧尸咬成僵尸 */
+  invincible?: boolean;
 }
 
 export interface Zombie {
@@ -77,9 +94,21 @@ export interface Zombie {
   tx: number;
   ty: number;
   alive: boolean;
+  /** 训练场用：血量上限（面板显示 / 重设血量） */
+  maxHp?: number;
+  /** 训练场用：覆盖该个体的撕咬间隔（ZOMBIE_DEFS.bite） */
+  biteCycle?: number;
 }
 
 export type BulletKind = "bullet" | "rocket";
+
+/** 伤害来源 —— 训练场做「按武器聚合」的 DPS 统计时用 */
+export interface DamageSource {
+  /** WEAPONS 下标；-1 表示无来源（例如场景伤害） */
+  weapon: number;
+  /** 开火的人类 id */
+  humanId: number;
+}
 
 export interface Bullet {
   x: number;
@@ -95,6 +124,10 @@ export interface Bullet {
   blast: number;
   life: number;
   alive: boolean;
+  /** 训练场统计用：产生这颗子弹的武器下标 / 人类 id / 伤害倍率 */
+  weapon?: number;
+  ownerId?: number;
+  dmgMul?: number;
 }
 
 /**
@@ -195,6 +228,12 @@ export class World {
   /** 统计：击杀数 / 被感染数 */
   kills = 0;
   infected = 0;
+  /*
+   * 训练场统计钩子 —— 默认 undefined，正式对局不会调用，零开销。
+   * 训练场挂上这两个回调来收集伤害来源、击杀与击杀耗时。
+   */
+  onDamage?: (z: Zombie, amount: number, source?: DamageSource) => void;
+  onKill?: (z: Zombie, source?: DamageSource) => void;
   private nextId = 1;
 
   /**
@@ -257,14 +296,16 @@ export class World {
     return false;
   }
 
-  spawnHuman(x: number, y: number, weapon: number): void {
-    this.humans.push({
+  spawnHuman(x: number, y: number, weapon: number): Human {
+    const hp = SETTINGS.human.hp;
+    const human: Human = {
       id: this.nextId++,
       x,
       y,
       vx: 0,
       vy: 0,
-      hp: SETTINGS.human.hp,
+      hp,
+      maxHp: hp,
       weapon,
       ammo: WEAPONS[weapon].magazine,
       reloadTimer: 0,
@@ -279,24 +320,28 @@ export class World {
       wTimer: 0,
       post: -1,
       alive: true,
-    });
+    };
+    this.humans.push(human);
+    return human;
   }
 
   /**
    * 生成一只丧尸 —— 属性按正态分布在 SETTINGS.zombie.jitter 幅度内随机。
    * 均值用 SETTINGS.zombie.normal / runner，极端值自动夹住下限（避免非正 hp/speed）。
+   * 返回新建的个体，训练场需要它来做「生成后重设血量」等操作。
    */
-  spawnZombie(x: number, y: number, kind: 0 | 1, hpScale = 1): void {
+  spawnZombie(x: number, y: number, kind: 0 | 1, hpScale = 1): Zombie {
     const zType = SETTINGS.zombie[kind === 0 ? "normal" : "runner"];
     const j = SETTINGS.zombie.jitter;
     const hp = gaussClamped(zType.hp, j, zType.hp * 0.2, zType.hp * 2) * hpScale;
     const speed = gaussClamped(zType.speed, j, zType.speed * 0.45, zType.speed * 1.8);
-    this.zombies.push({
+    const zombie: Zombie = {
       id: this.nextId++,
       x,
       y,
       kind,
       hp,
+      maxHp: hp,
       speed,
       phase: randRange(0, Math.PI * 2),
       bite: 0,
@@ -304,7 +349,9 @@ export class World {
       tx: x,
       ty: y,
       alive: true,
-    });
+    };
+    this.zombies.push(zombie);
+    return zombie;
   }
 
   /** 每帧开头重建两张空间索引表 */

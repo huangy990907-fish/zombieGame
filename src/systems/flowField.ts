@@ -10,10 +10,15 @@
  *
  * 使用：丧尸在房间外时调用 sample(x, y)，取返回对象的 x/y 作为移动方向。
  */
-import type { MapDef } from "../data/types";
+import type { MapDef, Rect } from "../data/types";
 
 export const CELL = 16;
 const UNREACHABLE = 65535;
+
+/** 开口净宽：门是 12×80 → 80，窗是 36×12 → 36（取长边） */
+export function openingNetWidth(rect: Rect): number {
+  return Math.max(rect.w, rect.h);
+}
 
 export class FlowField {
   /** 1 = 墙体不可走 */
@@ -24,11 +29,21 @@ export class FlowField {
   private dirY: Float32Array;
   private cols: number;
   private rows: number;
+  /** 可通行开口中心（体型过滤后的 BFS 源 + fallback 目标） */
+  private sources: { x: number; y: number }[];
   /** sample() 的输出：该位置应移动的单位方向 */
   x = 0;
   y = 0;
 
-  constructor(private readonly map: MapDef) {
+  /**
+   * @param bodyDiameter 通行直径。>0 时，净宽小于它的开口视为不可通行：
+   *   其矩形覆盖的格子标成阻挡、也不再作为 BFS 源，流场会自然绕到别的开口。
+   *   0 表示不做体型过滤（原行为：所有开口都可用）。
+   */
+  constructor(
+    map: MapDef,
+    bodyDiameter = 0,
+  ) {
     this.cols = Math.ceil(map.width / CELL);
     this.rows = Math.ceil(map.height / CELL);
     const cells = this.cols * this.rows;
@@ -37,7 +52,17 @@ export class FlowField {
     this.dirX = new Float32Array(cells);
     this.dirY = new Float32Array(cells);
 
-    // 先把所有被墙体覆盖的格子标记为不可走（门窗开口不算墙）
+    const passable = map.openings
+      .map((o) => ({ o, width: openingNetWidth(o.rect) }))
+      .filter(({ width }) => bodyDiameter <= 0 || width >= bodyDiameter);
+    this.sources = passable.map(({ o }) => ({
+      x: o.rect.x + o.rect.w * 0.5,
+      y: o.rect.y + o.rect.h * 0.5,
+    }));
+    if (this.sources.length === 0) this.sources = map.openingCenters;
+
+    // 先把所有被墙体覆盖的格子标记为不可走（门窗开口不算墙）；
+    // 体型过不去的开口同样按阻挡处理，避免胖子顺着流场顶到窗边。
     for (let gy = 0; gy < this.rows; gy++) {
       for (let gx = 0; gx < this.cols; gx++) {
         const cx = (gx + 0.5) * CELL;
@@ -47,6 +72,17 @@ export class FlowField {
           if (cx >= w.x && cx <= w.x + w.w && cy >= w.y && cy <= w.y + w.h) {
             solid = true;
             break;
+          }
+        }
+        if (!solid) {
+          for (const o of map.openings) {
+            if (bodyDiameter > 0 && openingNetWidth(o.rect) < bodyDiameter) {
+              const r = o.rect;
+              if (cx >= r.x && cx <= r.x + r.w && cy >= r.y && cy <= r.y + r.h) {
+                solid = true;
+                break;
+              }
+            }
           }
         }
         if (solid) this.blocked[gy * this.cols + gx] = 1;
@@ -64,7 +100,7 @@ export class FlowField {
     const queue = new Int32Array(cols * rows);
     let head = 0;
     let tail = 0;
-    for (const c of this.map.openingCenters) {
+    for (const c of this.sources) {
       const gx = Math.floor(c.x / CELL);
       const gy = Math.floor(c.y / CELL);
       const i = gy * cols + gx;
@@ -151,10 +187,10 @@ export class FlowField {
 
   /** 兜底：直线朝最近的开口中心走 */
   private fallback(x: number, y: number): FlowField {
-    let bx = this.map.openingCenters[0].x;
-    let by = this.map.openingCenters[0].y;
+    let bx = this.sources[0].x;
+    let by = this.sources[0].y;
     let bd = Infinity;
-    for (const c of this.map.openingCenters) {
+    for (const c of this.sources) {
       const d = (c.x - x) * (c.x - x) + (c.y - y) * (c.y - y);
       if (d < bd) {
         bd = d;

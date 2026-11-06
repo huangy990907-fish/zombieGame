@@ -59,6 +59,12 @@ export function zombieSpriteId(kind: string): string {
   return id;
 }
 
+/** 倒地精灵按类型 id 取（zombie-fat-death / ...），缺图时退回通用倒地帧 */
+export function zombieDeathSpriteId(kind: string): string {
+  const id = `zombie-${kind}-death`;
+  return getSprite(id) ? id : "zombie-death";
+}
+
 /** 缩放系数：单位直径 / 32；渲染时 anchor 已对齐躯干中心 */
 export function spriteScale(diameter: number): number {
   return diameter / SPRITE_SIZE;

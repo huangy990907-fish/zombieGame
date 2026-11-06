@@ -7,7 +7,8 @@
  * 命中判定用的是“线段扫掠”而不是点：高速子弹一帧能飞十几像素，
  * 只看当前点会穿透丧尸，所以拿“上一帧位置 -> 当前位置”线段去撞。
  */
-import { effectiveWeapon, effectiveZombie } from "../data/settings/runtime";
+import { effectiveWeapon } from "../data/settings/runtime";
+import { MAX_ZOMBIE_RADIUS } from "../data/zombies";
 import { WEAPON_IDS } from "../data/weapons";
 import type { WeaponDef } from "../data/types";
 import { dist2, mixColor, pointSegDistSq } from "../utils/math";
@@ -259,13 +260,14 @@ export function updateCombat(world: World, dt: number): void {
     const segLen = Math.hypot(b.x - b.px, b.y - b.py);
     const midX = (b.x + b.px) * 0.5;
     const midY = (b.y + b.py) * 0.5;
-    world.zombieGrid.query(midX, midY, segLen * 0.5 + 10, queryBuf);
+    // 查询边距 = 线段半长 + 最大僵尸半径 + 擦边容差，胖子的大判定圈不会被漏查
+    world.zombieGrid.query(midX, midY, segLen * 0.5 + MAX_ZOMBIE_RADIUS + 3, queryBuf);
 
     let hit: Zombie | null = null;
     for (let k = 0; k < queryBuf.length; k++) {
       const z = queryBuf[k];
       if (!z.alive) continue;
-      const r = effectiveZombie(z.kind).radius + 3;
+      const r = z.radius + 3;
       const d2 = pointSegDistSq(z.x, z.y, b.px, b.py, b.x, b.y);
       if (d2 <= r * r) {
         hit = z;

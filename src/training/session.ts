@@ -16,7 +16,7 @@
 import { DEFAULT_MAP } from "../data/maps";
 import { effectiveWeapon } from "../data/settings/runtime";
 import { WEAPON_LIST, getWeaponDef } from "../data/weapons";
-import { ZOMBIE_LIST, getZombieDef } from "../data/zombies";
+import { ZOMBIE_LIST } from "../data/zombies";
 import { createWorld } from "../core/world";
 import type { DamageSource, Human, Zombie } from "../core/world";
 import { updateHumans, updateZombies } from "../systems/ai";
@@ -479,7 +479,8 @@ export class TrainingSession {
     const sel = this.getSelected();
     if (!sel) return null;
     if (sel.kind === "human") return { x: sel.human.x, y: sel.human.y, radius: 14 };
-    return { x: sel.zombie.x, y: sel.zombie.y, radius: getZombieDef(sel.zombie.kind).radius + 10 };
+    // 选中圈套住整个体型（胖子视觉半径 22），不是只套碰撞核心
+    return { x: sel.zombie.x, y: sel.zombie.y, radius: sel.zombie.bodyDiameter * 0.5 + 10 };
   }
 
   // ============================================================

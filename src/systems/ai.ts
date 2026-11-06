@@ -10,8 +10,9 @@
  *       破口后涌入（穿窗会被窗檐减速）-> 直扑最近人类 -> 贴近就咬
  */
 import { HUMAN_DEF } from "../data/humans";
-import { WANDER_TUNING, ZOMBIE_IDS } from "../data/zombies";
+import { MAX_ZOMBIE_RADIUS, WANDER_TUNING, ZOMBIE_IDS } from "../data/zombies";
 import { effectiveWeapon, effectiveZombie, openingTuning, settings } from "../data/settings/runtime";
+import { openingNetWidth } from "./flowField";
 import { tryFire, updateFlame } from "./combat";
 import { angDiff, clamp, dist2, pointRectDist, randRange, turnToward } from "../utils/math";
 import type { Human, World, Zombie } from "../core/world";
@@ -251,8 +252,10 @@ export function updateHumans(world: World, dt: number): void {
 /** 丧尸索敌：直接遍历人类数组（只有几十个人，比查空间哈希更快） */
 function retarget(world: World, z: Zombie): void {
   // 全局限频 3 秒一次咆哮 —— 不用每只独立响，全局偶尔一声足够，
-  // 但僵尸密集时刚好每隔几秒就响一声，自然营造"尸群包围"的氛围
-  sound.play(SFX.ZOMBIE_GROWL);
+  // 但僵尸密集时刚好每隔几秒就响一声，自然营造"尸群包围"的氛围。
+  // 胖子用自己的低频低吼，与普通/狂奔的叫声区分。
+  if (z.kind === ZOMBIE_IDS.fat) sound.play(SFX.ZOMBIE_GROWL_FAT);
+  else sound.play(SFX.ZOMBIE_GROWL);
   let best: Human | null = null;
   let bestD = Infinity;
   const humans = world.humans;
@@ -323,7 +326,6 @@ function bounceWander(z: Zombie, blockedX: boolean, blockedY: boolean): void {
 }
 
 export function updateZombies(world: World, dt: number): void {
-  const flow = world.flow;
   const map = world.map;
   const room = map.room;
   const s = settings();
@@ -376,8 +378,9 @@ export function updateZombies(world: World, dt: number): void {
         z.y > room.bottom - 6 ||
         z.x > room.right - 6;
       if (outside) {
-        // 房间外：查流场方向，涌向最近的开口
-        const f = flow.sample(z.x, z.y);
+        // 房间外：查流场方向，涌向最近的“自己能通过”的开口。
+        // 胖子体型 44 > 窗宽 36，走的是按体型过滤后的流场，只会绕向门。
+        const f = world.flowFor(z.bodyDiameter).sample(z.x, z.y);
         dx = f.x;
         dy = f.y;
       } else {
@@ -397,8 +400,9 @@ export function updateZombies(world: World, dt: number): void {
     dx += nx * wob * 0.5;
     dy += ny * wob * 0.5;
 
-    // 局部分离，避免完全重叠成一坨
-    world.zombieGrid.query(z.x, z.y, 11, queryZ2);
+    // 局部分离，避免完全重叠成一坨。
+    // 查询半径按“本半径 + 全表最大半径”推导，分离距离按两者半径之和，兼容胖子。
+    world.zombieGrid.query(z.x, z.y, z.radius + MAX_ZOMBIE_RADIUS, queryZ2);
     let px = 0;
     let py = 0;
     let cnt = 0;
@@ -408,10 +412,11 @@ export function updateZombies(world: World, dt: number): void {
       const ox = z.x - o.x;
       const oy = z.y - o.y;
       const d2 = ox * ox + oy * oy;
-      if (d2 > 0.01 && d2 < 121) {
+      const sep = z.radius + o.radius;
+      if (d2 > 0.01 && d2 < sep * sep) {
         const d = Math.sqrt(d2);
-        px += (ox / d) * (1 - d / 11);
-        py += (oy / d) * (1 - d / 11);
+        px += (ox / d) * (1 - d / sep);
+        py += (oy / d) * (1 - d / sep);
         cnt++;
         if (cnt >= 5) break;
       }
@@ -437,14 +442,71 @@ export function updateZombies(world: World, dt: number): void {
     // 撞墙 / 撞上完好的门窗时被挡住（破口可以钻）
     let blockedX = false;
     let blockedY = false;
-    if (world.solidAt(x, z.y)) {
+    // 体型过窄的开口（如 36px 窗 vs 胖子 44px 身体）按墙处理，防止从破损窗钻过去
+    if (world.solidAt(x, z.y, 0, z.bodyDiameter)) {
       x = z.x;
       blockedX = true;
     }
-    if (world.solidAt(z.x, y)) {
+    if (world.solidAt(z.x, y, 0, z.bodyDiameter)) {
       y = z.y;
       blockedY = true;
     }
+
+    /*
+     * 沿墙滑动：流场是 16px 网格，拐角处希望方向可能几乎正对墙面，
+     * 此时两个轴只剩一个分量，单位会顶在墙角不动（胖子绕墙走向门时就撞上过）。
+     * 这里在被挡住的轴不动的前提下，向左右/上下探一小步，哪边能继续走就往哪边挪。
+     * 通用碰撞处理，不针对某一种僵尸。
+     */
+    if (z.mode === "hunt") {
+      const ux = dx / len;
+      const uy = dy / len;
+      const step = speed * dt;
+      // 前方探针距离：至少 8px，体型越大探得越远，足够绕过 12px 厚的墙
+      const probe = Math.max(8, z.bodyDiameter * 0.6);
+      const reach = Math.max(probe, z.bodyDiameter);
+      if (blockedY && Math.abs(ux) < 0.35 && Math.abs(uy) > 0.2) {
+        const signs = ux < 0 ? [-1, 1] : [1, -1];
+        for (const sg of signs) {
+          let free = false;
+          // 横向找一个“前方能继续往下走”的落点，再朝那个方向挪一小步
+          for (let off = step; off <= reach; off += 2) {
+            const px = z.x + sg * off;
+            if (
+              !world.solidAt(px, z.y, 0, z.bodyDiameter) &&
+              !world.solidAt(px, z.y + uy * probe, 0, z.bodyDiameter)
+            ) {
+              free = true;
+              break;
+            }
+          }
+          if (free) {
+            x = z.x + sg * step;
+            break;
+          }
+        }
+      } else if (blockedX && Math.abs(uy) < 0.35 && Math.abs(ux) > 0.2) {
+        const signs = uy < 0 ? [-1, 1] : [1, -1];
+        for (const sg of signs) {
+          let free = false;
+          for (let off = step; off <= reach; off += 2) {
+            const py = z.y + sg * off;
+            if (
+              !world.solidAt(z.x, py, 0, z.bodyDiameter) &&
+              !world.solidAt(z.x + ux * probe, py, 0, z.bodyDiameter)
+            ) {
+              free = true;
+              break;
+            }
+          }
+          if (free) {
+            y = z.y + sg * step;
+            break;
+          }
+        }
+      }
+    }
+
     const cx = clamp(x, 2, map.width - 2);
     const cy = clamp(y, 2, map.height - 2);
     if (cx !== x) blockedX = true;
@@ -461,9 +523,9 @@ export function updateZombies(world: World, dt: number): void {
     // 漫游状态下完全不碰建筑：不扣门窗血量、也不触发咬合音效。
     if (z.mode === "hunt" && z.bite <= 0) {
       let bit = false;
-      world.humanGrid.query(z.x, z.y, 14, queryH);
       const zdef = effectiveZombie(z.kind);
-      const reach = zdef.radius + HUMAN_DEF.radius + 2;
+      const reach = z.radius + HUMAN_DEF.radius + 2;
+      world.humanGrid.query(z.x, z.y, reach, queryH);
       for (let k = 0; k < queryH.length; k++) {
         const h = queryH[k];
         if (!h.alive || h.turning > 0 || h.invincible) continue;
@@ -489,10 +551,12 @@ export function updateZombies(world: World, dt: number): void {
 function biteOpening(world: World, z: Zombie): void {
   const def = effectiveZombie(z.kind);
   const tune = openingTuning(world.map);
-  const reach = def.radius + 5;
+  const reach = z.radius + 5;
   for (let i = 0; i < world.openings.length; i++) {
     const o = world.openings[i];
     if (o.broken) continue;
+    // 自己体型过不去的开口不啃：胖子不会把窗啃破再卡在窗外
+    if (openingNetWidth(o.rect) < z.bodyDiameter) continue;
     if (pointRectDist(z.x, z.y, o.rect) > reach) continue;
 
     o.hp -= tune.buildBiteDamage;

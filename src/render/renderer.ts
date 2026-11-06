@@ -11,9 +11,9 @@
 import { Application, CanvasSource, Container, Graphics, Sprite, Text, Texture } from "pixi.js";
 import { COMBO_SPRITES, SPRITE_LIST, SPRITE_SIZE, getNativeFrame, getSprite, type SpriteDef } from "../art";
 import { DEFAULT_MAP, type MapDef } from "../data/maps";
-import { effectiveZombie, settings } from "../data/settings/runtime";
+import { settings } from "../data/settings/runtime";
 import type { Human, World, Zombie } from "../core/world";
-import { HUMAN_DIAMETER, humanSpriteId, spriteDef, spriteRotation, spriteScale, VISUAL_SCALE, zombieSpriteId } from "./pixel";
+import { HUMAN_DIAMETER, humanSpriteId, spriteDef, spriteRotation, spriteScale, VISUAL_SCALE, zombieDeathSpriteId, zombieSpriteId } from "./pixel";
 
 /** 单条伤害飘字（训练场用，渲染层只负责画，生命周期由训练场会话管理） */
 export interface FloatingText {
@@ -71,6 +71,8 @@ interface UnitAnim {
   prevFire: number;
   /** 当前贴图键，只在变化时切纹理 */
   frame: string;
+  /** 僵尸类型 id（倒地时按它选对应配色 / 体型） */
+  kind: string;
   /** 本帧是否被访问过（清理用） */
   seen: boolean;
 }
@@ -81,6 +83,8 @@ interface DeathMark {
   y: number;
   angle: number;
   age: number;
+  /** 僵尸类型 id：胖子用自己的倒地配色与体型 */
+  kind: string;
 }
 
 export class Renderer {
@@ -348,6 +352,7 @@ export class Renderer {
         fire: 0,
         prevFire: fire,
         frame: "",
+        kind: "",
         seen: true,
       };
       map.set(entity.id, st);
@@ -422,12 +427,14 @@ export class Renderer {
         z.mode === "wander" ? z.wanderAngle : Math.atan2(z.ty - z.y, z.tx - z.x);
       const st = this.stateFor(this.zAnim, z, dt, angle);
       st.seen = true;
+      st.kind = z.kind;
 
       const def = spriteDef(zombieSpriteId(z.kind));
       const frame = st.moving ? (st.step ? "walk2" : "walk1") : "idle";
       s.position.set(z.x, z.y);
       s.rotation = spriteRotation(st.angle);
-      s.scale.set(spriteScale(effectiveZombie(z.kind).radius * 2 * VISUAL_SCALE));
+      // 渲染直径 = 体型直径 * 视觉放大（普通 11→16.5，胖子 44→66）
+      s.scale.set(spriteScale(z.bodyDiameter * VISUAL_SCALE));
       s.alpha = 1;
       this.applyFrame(s, st, def, frame);
     }
@@ -443,7 +450,7 @@ export class Renderer {
       for (const [id, st] of this.zAnim) {
         if (st.seen) continue;
         if (record && this.deaths.length < DEATH_POOL_CAP) {
-          this.deaths.push({ x: st.lx, y: st.ly, angle: st.angle, age: 0 });
+          this.deaths.push({ x: st.lx, y: st.ly, angle: st.angle, age: 0, kind: st.kind });
         }
         this.zAnim.delete(id);
       }
@@ -456,14 +463,21 @@ export class Renderer {
       this.deaths[i].age += dt;
       if (this.deaths[i].age >= DEATH_LIFE) this.deaths.splice(i, 1);
     }
-    const def = spriteDef("zombie-death");
-    const textures = DEATH_FRAMES.map((name) => this.texture(def.id, name));
-    const scale = spriteScale(def.footprintRadius * 2 * VISUAL_SCALE);
-    const anchorX = def.anchor.x / SPRITE_SIZE;
-    const anchorY = def.anchor.y / SPRITE_SIZE;
+    const defaultDef = spriteDef("zombie-death");
+    const texturesBySprite = new Map<string, Texture[]>();
+    const framesOf = (id: string): Texture[] => {
+      const def = spriteDef(id);
+      let texs = texturesBySprite.get(def.id);
+      if (!texs) {
+        texs = DEATH_FRAMES.map((name) => this.texture(def.id, name));
+        texturesBySprite.set(def.id, texs);
+      }
+      return texs;
+    };
+    const defaultTextures = framesOf(defaultDef.id);
     while (this.deathSprites.length < this.deaths.length) {
-      const s = new Sprite(textures[0]);
-      s.anchor.set(anchorX, anchorY);
+      const s = new Sprite(defaultTextures[0]);
+      s.anchor.set(defaultDef.anchor.x / SPRITE_SIZE, defaultDef.anchor.y / SPRITE_SIZE);
       this.deathLayer.addChild(s);
       this.deathSprites.push(s);
     }
@@ -474,10 +488,14 @@ export class Renderer {
         continue;
       }
       const d = this.deaths[i];
+      // 按僵尸类型选倒地精灵：胖子用自己的暗粉配色 + 44px 体型
+      const def = spriteDef(zombieDeathSpriteId(d.kind));
+      const textures = framesOf(def.id);
+      s.anchor.set(def.anchor.x / SPRITE_SIZE, def.anchor.y / SPRITE_SIZE);
       s.visible = true;
       s.position.set(d.x, d.y);
       s.rotation = spriteRotation(d.angle);
-      s.scale.set(scale);
+      s.scale.set(spriteScale(def.footprintRadius * 2 * VISUAL_SCALE));
       // 播完停在末帧；超出序列的部分自然落在 death-3
       const frame = Math.min(DEATH_FRAMES.length - 1, Math.floor(d.age / DEATH_FRAME));
       s.texture = textures[frame];

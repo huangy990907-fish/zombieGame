@@ -1,4 +1,5 @@
 import type { ZombieDef } from "../types";
+import { fat } from "./fat";
 import { normal } from "./normal";
 import { runner } from "./runner";
 
@@ -9,10 +10,24 @@ import { runner } from "./runner";
 export const ZOMBIE_DEFS: Record<string, ZombieDef> = {
   normal,
   runner,
+  fat,
 };
 
 /** 有序列表（插入顺序）—— 只影响默认展示顺序，身份始终用 id */
 export const ZOMBIE_LIST: ZombieDef[] = Object.values(ZOMBIE_DEFS);
+
+/** 全部僵尸里最大的物理碰撞半径 —— 空间查询边距按它推导，避免写死常量 */
+export const MAX_ZOMBIE_RADIUS = Math.max(...ZOMBIE_LIST.map((z) => z.radius));
+
+/** 体型半径：显式 visualRadius 优先，否则就是物理半径 */
+export function zombieBodyRadius(def: ZombieDef): number {
+  return def.visualRadius ?? def.radius;
+}
+
+/** 通行判定用的身体直径：开口净宽小于它时不可通过 */
+export function zombieBodyDiameter(def: ZombieDef): number {
+  return zombieBodyRadius(def) * 2;
+}
 
 /**
  * 零人类时丧尸的漫游参数（行为层 systems/ai.ts 读取）。
@@ -34,6 +49,7 @@ export const WANDER_TUNING = {
 export const ZOMBIE_IDS = {
   normal: normal.id,
   runner: runner.id,
+  fat: fat.id,
 } as const;
 
 /** 按 id 取定义；未知 id 回落到普通丧尸，保证旧存档 / 脏数据不崩溃 */

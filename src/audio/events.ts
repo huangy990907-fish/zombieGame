@@ -13,6 +13,7 @@ export const SFX = {
 
   // —— 僵尸 ——
   ZOMBIE_GROWL: "zombie-growl",  // 追击咆哮（全局限频，体现僵尸多）
+  ZOMBIE_GROWL_FAT: "zombie-growl-fat", // 胖子的专属低频低吼
   ZOMBIE_BITE: "zombie-bite",    // 啃咬（人类或门窗）
   ZOMBIE_HIT: "zombie-hit",      // 被子弹命中扣血
   ZOMBIE_KILL: "zombie-kill",    // 倒地击杀
@@ -42,6 +43,7 @@ export const SFX_MAP: Record<SfxKey, string> = {
   [SFX.RELOAD]: "audio/weapon-reload.mp3",
 
   [SFX.ZOMBIE_GROWL]: "audio/zombie-growl.mp3",
+  [SFX.ZOMBIE_GROWL_FAT]: "audio/zombie-growl-fat.mp3",
   [SFX.ZOMBIE_BITE]: "audio/zombie-bite.mp3",
   [SFX.ZOMBIE_HIT]: "audio/zombie-hit.mp3",
   [SFX.ZOMBIE_KILL]: "audio/zombie-kill.mp3",
@@ -66,6 +68,7 @@ export const SFX_THROTTLE: Record<SfxKey, number> = {
   [SFX.RELOAD]: 1000,
 
   [SFX.ZOMBIE_GROWL]: 3000,
+  [SFX.ZOMBIE_GROWL_FAT]: 2200,
   [SFX.ZOMBIE_BITE]: 400,
   [SFX.ZOMBIE_HIT]: 80,
   [SFX.ZOMBIE_KILL]: 60,

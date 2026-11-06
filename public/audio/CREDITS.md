@@ -1,6 +1,6 @@
 # 音效授权台账（public/audio）
 
-本目录 16 个 mp3 已**全部替换为 freesound.org 的 CC0 素材**（检索时用 `license:"Creative Commons 0"` 过滤，逐条核对 API 返回的 license 字段），不再包含程序化合成文件。
+本目录 17 个 mp3 均来自 **CC0 素材**（检索时用 `license:"Creative Commons 0"` 过滤，逐条核对 API 返回的 license 字段），或由这些 CC0 素材直接派生，不再包含程序化合成文件。`zombie-growl-fat.mp3` 是 0.4.2 新增的派生成品：从本目录已有的 CC0 `zombie-growl.mp3` 降调、降速得到，不引入新的授权来源。
 
 - 许可证：**CC0 1.0（Creative Commons Zero）**，可复制、修改、商用，无需署名。
   官方文本：<https://creativecommons.org/publicdomain/zero/1.0/>
@@ -17,6 +17,7 @@
 | `weapon-explosion.mp3` | 0.57s | 9.4 KB | 67469 | Fragmentation Grenade Explosion Military M67 1.flac | qubodup | CC0 1.0 | https://freesound.org/s/67469/ | 真实 M67 破片手雷爆炸，完整 0.54s，无长尾 |
 | `weapon-reload.mp3` | 0.47s | 7.8 KB | 455921 | Pistol (magazine reload only) | bolkmar | CC0 1.0 | https://freesound.org/s/455921/ | 弹匣拔出/插入两声金属咔哒，截取 0.44s。**仍未被游戏代码调用** |
 | `zombie-growl.mp3` | 0.73s | 11.9 KB | 754441 | Zombie Groan 3 | OwNathan | CC0 1.0 | https://freesound.org/s/754441/ | 僵尸低吼，去掉 0.12s 静音头后的完整 0.73s（略低于清单 0.8s 下限） |
+| `zombie-growl-fat.mp3` | 0.99s | 17.2 KB | —（派生） | Zombie Groan 3（派生） | OwNathan | CC0 1.0 | https://freesound.org/s/754441/ | 0.4.2 胖子专属低吼：`asetrate=44100*0.7` 降调 + 拉长，音量 1.15，首尾淡入淡出；无新增授权 |
 | `zombie-bite.mp3` | 0.26s | 4.5 KB | 682094 | Bite 1.wav | HenKonen | CC0 1.0 | https://freesound.org/s/682094/ | 脆咬声（咀嚼水果），0.22s，卡通化的“咔嚓”质感 |
 | `zombie-hit.mp3` | 0.10s | 2.1 KB | 877027 | Meat Slime Hit Layer 3 | qubodup | CC0 1.0 | https://freesound.org/s/877027/ | 肉感史莱姆受击层，取前 60ms 瞬态，极短去混响 |
 | `zombie-kill.mp3` | 0.50s | 8.2 KB | 555412 | Zombie Death 1.wav | tonsil5 | CC0 1.0 | https://freesound.org/s/555412/ | 僵尸死亡/倒地呻吟，0.02–0.47s，与中弹音色区分 |
@@ -31,10 +32,11 @@
 
 - 所有条目均为 **CC0 1.0**，API 返回的 `license` 字段均为 `http://creativecommons.org/publicdomain/zero/1.0/`；未使用 CC-BY、NC 或来源不明的素材。
 - 使用的是 freesound 官方 preview-hq-mp3 预览文件（由 CC0 原始素材转码），版权状态与原始素材一致。
-- 合计 **16 个文件、约 234 KB**；单文件最大 63.7 KB（`defeat.mp3`），均小于 100 KB，总量远低于 1.5 MB。
+- 合计 **17 个文件、约 251 KB**；单文件最大 63.7 KB（`defeat.mp3`），均小于 100 KB，总量远低于 1.5 MB。
+- `zombie-growl-fat.mp3` 不是独立素材，而是 `zombie-growl.mp3` 的派生物，授权随原文件（CC0）。
 
 ## 备注
 
 - `weapon-reload`、`human-hurt` 两个事件在 [events.ts](file:///Users/huangyu/agentSpace/trae/zombieGame/src/audio/events.ts) 已声明，但游戏代码仍无调用点；文件已备好，接线后即可发声（本次未改游戏逻辑）。
 - 所有文件按 `src/audio/events.ts` 的 `SFX_MAP` 命名，小写、连字符、`.mp3`，放入本目录即被预加载。
-- 本次没有“未替换”项：16 个事件都在 CC0 池里找到了合格素材。
+- 本次没有“未替换”项：17 个文件全部来自 CC0 或其派生。

@@ -12,8 +12,9 @@
  */
 import { DEFAULT_MAP, type MapDef } from "../data/maps";
 import { effectiveHuman, effectiveWeapon, effectiveZombie, openingTuning, settings } from "../data/settings/runtime";
+import { zombieBodyDiameter } from "../data/zombies";
 import type { HumanMode, Rect, ZombieMode } from "../data/types";
-import { FlowField } from "../systems/flowField";
+import { FlowField, openingNetWidth } from "../systems/flowField";
 import { gaussClamped, insideRect, randRange, segRectHit } from "../utils/math";
 import { SpatialHash } from "../utils/spatialHash";
 
@@ -76,10 +77,14 @@ export interface Zombie {
   id: number;
   x: number;
   y: number;
-  /** 僵尸类型 id：如 "normal" / "runner" */
+  /** 僵尸类型 id：如 "normal" / "runner" / "fat" */
   kind: string;
   hp: number;
   speed: number;
+  /** 物理碰撞半径（生成时快照，设置面板不覆盖半径） */
+  radius: number;
+  /** 通行直径 = 体型直径；开口净宽小于它时不可通过（胖子 44 > 窗 36） */
+  bodyDiameter: number;
   /** 随机相位，用于行走摇摆，避免尸群完全同步 */
   phase: number;
   /** 撕咬冷却 */
@@ -215,6 +220,10 @@ export class World {
   zombieGrid: SpatialHash<Zombie>;
   humanGrid: SpatialHash<Human>;
   flow: FlowField;
+  /** 按通行直径缓存的流场：普通 11 / 狂奔 9 都共用 flow，胖子另建一张绕开窗洞 */
+  private flowCache = new Map<number, FlowField>();
+  /** 全场最窄开口的净宽：通行直径不超过它的单位直接复用 flow */
+  private readonly minOpeningWidth: number;
   time = 0;
   /**
    * 每帧刷新一次的存活人类数量（含正在转化倒计时中的）。
@@ -249,19 +258,34 @@ export class World {
     this.zombieGrid = new SpatialHash<Zombie>(map.width, map.height, 56);
     this.humanGrid = new SpatialHash<Human>(map.width, map.height, 56);
     this.flow = new FlowField(map);
+    this.minOpeningWidth = Math.min(...map.openings.map((o) => openingNetWidth(o.rect)));
     this.bulletWalls = computeBulletWalls(map);
+  }
+
+  /** 按通行直径取流场；所有开口都能过时直接复用共享流场（保持原行为） */
+  flowFor(bodyDiameter: number): FlowField {
+    if (bodyDiameter <= this.minOpeningWidth) return this.flow;
+    let field = this.flowCache.get(bodyDiameter);
+    if (!field) {
+      field = new FlowField(this.map, bodyDiameter);
+      this.flowCache.set(bodyDiameter, field);
+    }
+    return field;
   }
 
   /**
    * 点是否卡在墙体或“完好”的门窗里 —— 丧尸移动碰撞用。
    * 破损的门窗不算：僵尸可以从破口钻进来。
+   * bodyDiameter > 0 时，破损但净宽小于该直径的开口也算实体墙：
+   * 这是通用体型规则，不为某一种僵尸写特例（胖子 44 进不了 36 的窗）。
    */
-  solidAt(x: number, y: number, pad = 0): boolean {
+  solidAt(x: number, y: number, pad = 0, bodyDiameter = 0): boolean {
     for (const w of this.map.walls) {
       if (insideRect(x, y, w, pad)) return true;
     }
     for (const o of this.openings) {
-      if (!o.broken && insideRect(x, y, o.rect, pad)) return true;
+      const tooNarrow = bodyDiameter > 0 && openingNetWidth(o.rect) < bodyDiameter;
+      if ((!o.broken || tooNarrow) && insideRect(x, y, o.rect, pad)) return true;
     }
     return false;
   }
@@ -360,6 +384,8 @@ export class World {
       hp,
       maxHp: hp,
       speed,
+      radius: def.radius,
+      bodyDiameter: zombieBodyDiameter(def),
       phase: randRange(0, Math.PI * 2),
       bite: 0,
       retarget: randRange(0, 0.3),

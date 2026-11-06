@@ -17,7 +17,7 @@
  */
 import { getSetting, setSetting } from "./data/settings/runtime";
 import { SLIDER_GROUPS } from "./data/settings/sliders";
-import { loadBuiltinMaps, registerRuntimeMap } from "./data/maps";
+import { loadBuiltinMaps, getMap, registerRuntimeMap } from "./data/maps";
 import { sound, SFX } from "./audio/manager";
 import { WorkshopPage } from "./workshop/page";
 import { WORKSHOP_PREVIEW_MAP_ID, compileWorkshopPreview } from "./workshop/storage";
@@ -44,6 +44,24 @@ import { LEVELS, findLevel, type LevelDef } from "./levels";
 import { router, type Route } from "./router";
 
 const STEP = 1 / 60;
+
+/** 地图名来自 manifest / 工坊 JSON，写进 HTML 前转义 */
+function escapeHtml(s: string): string {
+  return s.replace(/[&<>"']/g, (ch) => {
+    switch (ch) {
+      case "&":
+        return "&amp;";
+      case "<":
+        return "&lt;";
+      case ">":
+        return "&gt;";
+      case '"':
+        return "&quot;";
+      default:
+        return "&#39;";
+    }
+  });
+}
 
 async function boot(): Promise<void> {
   const host = document.getElementById("screen");
@@ -76,8 +94,14 @@ async function boot(): Promise<void> {
 
   // ====== 训练场：一个和正常对局完全独立的沙盒 World ======
   // 面板常驻 DOM，只在 #/training 路由滑出；退出时整个会话被丢弃，不残留任何修改。
+  // 换图由面板下拉触发：重建 World + 静态层；reset 同时清空单位与读数，避免跨图混算。
   const training = new TrainingSession(mapOverrideId);
-  const trainingPanel = new TrainingPanel(training, () => router.go("menu"));
+  const switchTrainingMap = (id: string): void => {
+    training.reset(id);
+    reportMapFallback(training.mapFallback, training.requestedMapId, training.world.map.name);
+    renderer.setMap(training.world.map);
+  };
+  const trainingPanel = new TrainingPanel(training, () => router.go("menu"), switchTrainingMap);
   trainingPanel.attachCanvas(renderer.app.canvas as HTMLCanvasElement);
 
   // ====== 工坊编辑器：整页 DOM overlay，仅 #/workshop 路由显示 ======
@@ -246,12 +270,14 @@ async function boot(): Promise<void> {
       const selected = lvl.id === selectedId;
       const cls = beaten ? "beaten" : unlocked ? "unlocked" : "locked";
       const nodeLabel = beaten ? '<span class="check">✓</span>' : `<span class="node-num">${lvl.id.replace("level-", "")}</span>`;
+      const map = getMap(lvl.mapId);
       nodesHtml += `<button class="level-node ${cls} ${selected ? "selected" : ""}"
                             data-id="${lvl.id}"
                             style="left:${lvl.nodeX}%; top:${lvl.nodeY}%;"
                             ${unlocked ? "" : "disabled"}
-                            title="${lvl.title}">
+                            title="${escapeHtml(lvl.title)} · 地图 ${escapeHtml(map.name)}">
         ${nodeLabel}
+        <span class="node-map">${escapeHtml(map.name)}</span>
       </button>`;
     }
     levelsNodesEl.innerHTML = nodesHtml;
@@ -273,14 +299,16 @@ async function boot(): Promise<void> {
     if (selected) {
       const diffStars = "★".repeat(selected.difficulty) + "☆".repeat(5 - selected.difficulty);
       const unlocked = progress.unlocked.includes(selected.id);
+      const map = getMap(selected.mapId);
       levelsDetailEl.innerHTML = `
         <div class="detail-left">
           <div class="detail-title">${selected.title}</div>
           <div class="detail-diff">难度 ${diffStars}</div>
+          <div class="detail-map">🗺 地图：${escapeHtml(map.name)}（${escapeHtml(map.id)}） · ${map.width}×${map.height}</div>
           <div class="detail-desc">${selected.description}</div>
         </div>
         <button class="start-btn" id="btnLevelStart" ${unlocked ? "" : "disabled"}>
-          ${unlocked ? "▶ 开始战斗" : "🔒 未解锁"}
+          ${unlocked ? `▶ 开始战斗 · ${escapeHtml(map.name)}` : "🔒 未解锁"}
         </button>
       `;
       const startBtn = document.getElementById("btnLevelStart") as HTMLButtonElement | null;

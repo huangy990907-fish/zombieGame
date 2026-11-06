@@ -60,7 +60,7 @@
 ### 地图工坊（瓦片地图编辑器）
 
 - 优先级：待定
-- 状态：进行中（阶段 0 地图 JSON 化、阶段 1A 地图注入、阶段 2 工坊编辑器本体、阶段 3 训练场选图与关卡绑定均已完成；剩余阶段 4 开发者模式入口）
+- 状态：已完成（阶段 0 地图 JSON 化、阶段 1A 地图注入、阶段 1B 任意户型守岗与出怪、阶段 2 工坊编辑器本体、阶段 3 训练场选图与关卡绑定、阶段 4 开发者模式入口均已交付，随 0.5.0 发布）；后续瓦片类型（草丛 / 水池）拆到 0.5.1
 - 分层定位：工坊是**内容生产工具**，不是玩家功能。开发者模式可见并可新增地图；玩家模式只提供已发布地图的游玩，界面不出现工坊入口。
 - 权限边界：纯浏览器游戏没有后端账号，开发者模式只能做到「界面隐藏」，**不是安全边界**——玩家改 localStorage 或直接访问 URL 仍可进入。若未来需要真隔离，得走服务端发布或维护两套构建产物；文档里写明这一点，避免后来者误以为有权限校验。
 - 数据形态：瓦片 JSON 只作编辑 / 存储格式，加载时编译回 `walls[] + openings[]` 的 `MapDef`；运行时读 `public/maps/*.json` + manifest。开发者产出走「导出 JSON → 进仓库 `public/maps/` + 更新 manifest → 随版本发布」；localStorage 只作草稿，不能当成发布。
@@ -73,8 +73,8 @@
   5. **存储**：`public/maps/*.json` + manifest，运行时加载；localStorage 只作草稿（后续阶段用）。
   6. **校验**：编辑期提示 + 保存前强校验 + 加载期非法回退默认图，错误能定位到格子。
   7. **只读内置图**：`arena` 作为内置只读地图，工坊只能另存副本。
-  8. **开发者模式**：设置里输入密码切换；密码明文可接受；放 gitignore 文件（可用 `.env.local` 的 `VITE_` 前缀）；默认密码 `zb9993`。密码与切换 UI 属后续阶段，本轮只记录决定。
-- 开发顺序：①地图 JSON 化（阶段 0，已完成）→ ①.5 地图注入（阶段 1A，已完成）→ ②工坊编辑器（阶段 2，已完成）→ ③训练场选图与关卡绑定（阶段 3，已完成）→ ④开发者模式入口 / 闯关模式（关卡 = 地图 + 波次 + 目标，工坊只管前半段）。
+  8. **开发者模式**：设置里输入密码切换；密码明文可接受；放 gitignore 文件（可用 `.env.local` 的 `VITE_` 前缀）；默认密码 `zb9993`。已按阶段 4 完成：`src/core/devMode.ts` + 主菜单设置区块 + 工坊入口显隐 + `#/workshop` 路由守卫。
+- 开发顺序：①地图 JSON 化（阶段 0，已完成）→ ①.5 地图注入（阶段 1A，已完成）→ ②工坊编辑器（阶段 2，已完成）→ ③训练场选图与关卡绑定（阶段 3，已完成）→ ④开发者模式入口（阶段 4，已完成）/ 闯关模式（关卡 = 地图 + 波次 + 目标，工坊只管前半段）。
 - 涉及模块：`src/data/maps/schema.ts`、`src/data/maps/compile.ts`、`src/data/maps/index.ts`、`src/core/world.ts`、`src/systems/flowField.ts`、`src/core/game.ts`、`src/render/renderer.ts`、`src/training/`、`src/levels.ts`、`src/main.ts`、`index.html`、`src/style.css`。
 
 ### 建筑模组：草丛与水池（0.5.1，整块推迟但需求已确认）
@@ -93,10 +93,10 @@
   - 不影响视野。
 - 涉及模块：`src/data/maps/schema.ts`、`src/data/maps/compile.ts`、`src/core/world.ts`（通行与实心判定）、`src/systems/ai.ts`（人类索敌 / 移速）、`src/systems/combat.ts`（喷火清草、子弹与射线放行）、`src/systems/flowField.ts`、`src/render/renderer.ts`、`src/training/`。
 
-### 开发者模式（密码切换，后续阶段）
+### 开发者模式（密码切换）—— 已完成
 
-- 优先级：待定（阶段 4；工坊编辑器本体已在阶段 2 完成）
-- 状态：待办
-- 说明：设置面板增加开发者模式开关；玩家模式输入密码后切换。密码明文可接受，默认 `zb9993`；优先放 `.env.local` 的 `VITE_DEV_PASSWORD`（`.env.local` 已在 gitignore 中，打包后仍会出现在产物里，属于已接受的取舍）。
+- 优先级：已完成（0.5.0 阶段 4）
+- 状态：已完成
+- 说明：主菜单「设置」新增开发者模式区块，输入密码后开启；状态存 localStorage（`zombieGame.devMode.v1`）并跨刷新保持，可手动退出。开发者模式显示主菜单「地图工坊」入口；玩家模式入口不出现，直达 `#/workshop` 会被挡回主菜单。密码优先读 `.env.local` 的 `VITE_DEV_PASSWORD`，缺失回退 `zb9993`。
 - 边界：仅 UI 隐藏，不构成安全边界；不对外宣传密码。
-- 涉及模块：`src/main.ts`、`index.html`、`src/style.css`、`src/data/settings/`。
+- 涉及模块：`src/core/devMode.ts`、`src/main.ts`、`index.html`、`src/style.css`、`src/router.ts`。

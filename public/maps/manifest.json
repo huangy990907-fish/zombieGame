@@ -10,6 +10,11 @@
       "id": "test-yard",
       "file": "test-yard.json",
       "readOnly": true
+    },
+    {
+      "id": "test-multi",
+      "file": "test-multi.json",
+      "readOnly": true
     }
   ]
 }

@@ -3,7 +3,7 @@
  *
  * 只做几何翻译，不产生任何玩法规则：
  *  - `#` 瓦片按“行内连续段 + 纵向同段合并”整理成矩形墙
- *  - `openings` 元数据直接生成带 id 的开口，门排在最前（守岗仍依赖这个顺序）
+ *  - `openings` 元数据直接生成带 id 的开口，门排在最前（渲染/HUD 稳定顺序）
  *  - room 由墙体包围盒推导，像素坐标一律 = 格 × TILE_SIZE
  */
 import type { MapDef, OpeningDef, Rect } from "../types";
@@ -148,8 +148,8 @@ export function compileTilesToMapDef(json: MapJson): MapDef {
     })),
     spawn: toPxRegion(json.spawn),
     windowSpawn: {
-      top: toPxRegion(json.windowSpawn.top),
-      bottom: toPxRegion(json.windowSpawn.bottom),
+      top: json.windowSpawn?.top ? toPxRegion(json.windowSpawn.top) : undefined,
+      bottom: json.windowSpawn?.bottom ? toPxRegion(json.windowSpawn.bottom) : undefined,
     },
     humanBounds: toPxRegion(json.humanZone),
     buildBiteDamage: json.buildBiteDamage,

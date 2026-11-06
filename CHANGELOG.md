@@ -10,13 +10,14 @@
 
 - 地图数据 JSON 化（0.5.0 阶段 0）：新增瓦片 schema（`schemaVersion = 1`）、`validateMapJson()` 与 `compileTilesToMapDef()`，地图以 `public/maps/*.json` + `public/maps/manifest.json` 为运行时来源，启动时加载并编译回现有 `walls[] + openings[]` 的 `MapDef`；`World` / 流场 / 渲染结构不变。
 - 固定瓦片网格 `74 × 45`、`16px` 一格（逻辑画布 `1184 × 720`）；瓦片字符 `.` 空地 / `#` 墙 / `w` 窗 / `d` 门，门窗矩形在 `openings` 中带独立 `id`、宽高（整数格）、`maxHp` 与 `passSpeed`。
-- 地图显式标记 `humanZone`（人类可行区）、`spawn`（左侧出生区）与 `windowSpawn.top/bottom`（上下窗出生区）；不推断墙内/墙外。
-- 校验覆盖：schema 版本、固绘画布、行宽/字符合法性、开口 id 唯一与瓦片对应、1 门 2 窗的阶段 0 限制、出生区可通行且不与人类区重叠、出生点可达所有开口、开口可达人类区；错误尽量带 `(x,y)` 格坐标。加载期非法地图会回退 `arena.ts` 的 TS 兜底并输出 warning。
+- 地图显式标记 `humanZone`（人类可行区）、`spawn`（主出生区）与可选 `windowSpawn.top/bottom`（窗侧出生区）；不推断墙内/墙外。
+- 校验覆盖：schema 版本、固绘画布、行宽/字符合法性、开口 id 唯一与瓦片对应、任意数量门窗（至少 1 扇门）、出生区可通行且不与人类区重叠、出生点可达所有开口、开口可达人类区；错误尽量带 `(x,y)` 格坐标。加载期非法地图会回退 `arena.ts` 的 TS 兜底并输出 warning。
 - `arena` 等价导出为 `public/maps/arena.json`，注册为内置只读地图（`READONLY_MAP_IDS`），后续工坊只能另存副本。
-- 内置第二张只读地图 `test-yard`（测试庭院）：房间更窄且右移，门在左墙、上下墙各一扇窗，用于验证换图后墙壁、门窗、流场与训练场装饰的完整重建；仍沿用「1 门 + 2 窗」结构，不改变现有守岗与出怪口径。
+- 内置第二张只读地图 `test-yard`（测试庭院）：房间更窄且右移，门在左墙、上下墙各一扇窗，用于验证换图后墙壁、门窗、流场与训练场装饰的完整重建。
 - 地图注入：`Game` 与 `TrainingSession` 构造 / `reset()` 均可传 `MapDef` 或地图 id；`Game.start()` 按「显式选择 > 关卡 `mapId` > 当前地图」解析，地图 id 不存在时回退默认图。
 - 临时选图入口 `?map=<id>`（如 `?map=test-yard#/play`、`?map=test-yard#/training`），正式选图 UI 留到阶段 3。
 - 地图回退可见提示：请求的地图 id 不存在时，页面顶部显示 `.map-notice` 提示并保留 console warning，不再静默回退。
+- 内置第三张只读地图 `test-multi`（测试双门庭院）：2 门 3 窗、门窗各自带不同的默认血量与通行速度，用于 1B 的任意户型回归（`?map=test-multi#/play`）。
 
 ### 变更
 
@@ -27,6 +28,8 @@
 - `LevelDef` 新增 `mapId`，`level-1` 指向内置 `arena`；`Game` 不再写死 `readonly map = DEFAULT_MAP`，重开时按关卡 / 显式选择重新解析地图并重建 `World`（流场与空间索引随 `createWorld()` 重建）。
 - `Renderer` 新增 `setMap()`：切换地图时 `clear()` 后重画地板网格、墙体与训练场装饰，并清空门窗层；门窗仍每帧从 `world.openings` 重画，不残留旧图几何。
 - `.frame` 宽度由 `min(1180px, …)` 改为 `min(1184px, …)`，与固定逻辑画布对齐，避免 CSS 等比缩 0.34% 导致像素精灵发糊。
+- 守岗泛化（阶段 1B）：`assignPosts()` 不再按下标取门/窗，也不假设“左门、上下窗”。开口按中心到四面墙的距离判定贴墙侧，岗位沿内侧法线推导；窗岗人数按窗净宽推导（16px 窗 → 4 人，间距 12px），门岗剩余名额按门洞长度分给每扇门，预备队与列位置由人类区中心推导。`arena` 仍为 32 门岗 / 8 窗岗 / 10 预备，共 50，全部在人类区内且不卡墙（预备队行位置由写死坐标改为按房间中心，最大约 60px 位移）。
+- 出怪泛化（阶段 1B）：`spawnOne()` 只从地图显式提供的 `spawn` / `windowSpawn` 区域抽签，缺失的窗侧区域直接跳过；按区域面积加权（`arena` 由固定 50/25/25 变为约 55/22.5/22.5，波次速率不变）。
 
 ## [0.4.3] - 2026-11-06
 

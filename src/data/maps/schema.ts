@@ -67,8 +67,11 @@ export interface MapJson {
   humanZone: TileRect;
   /** 出生区：丧尸从任意格出生，必须可通行且不与人类区重叠 */
   spawn: TileRect;
-  /** 上 / 下窗的出生区（沿用当前 Game 的出生口径） */
-  windowSpawn: { top: TileRect; bottom: TileRect };
+  /**
+   * 窗侧出生区（可选）：按方位显式提供，缺哪个就用不到哪个，不报错。
+   * 没有对应方位的窗口由 spawn 区兜底，靠流场绕行到窗口。
+   */
+  windowSpawn?: { top?: TileRect; bottom?: TileRect };
   buildBiteDamage: number;
   buildBiteSlow: number;
 }
@@ -285,7 +288,6 @@ export function validateMapJson(raw: unknown): MapValidationError[] {
   const covered = new Map<string, string>();
   const openings: Array<{ id: string; kind: "door" | "window"; rect: TileRect }> = [];
   let doorCount = 0;
-  let windowCount = 0;
 
   if (!Array.isArray(raw.openings)) {
     errors.push({ message: "openings 必须是数组" });
@@ -321,7 +323,6 @@ export function validateMapJson(raw: unknown): MapValidationError[] {
       }
 
       if (kind === "door") doorCount++;
-      else windowCount++;
       openings.push({ id: id || `${kind}-${i}`, kind, rect });
 
       if (grid) {
@@ -355,11 +356,9 @@ export function validateMapJson(raw: unknown): MapValidationError[] {
       }
     }
 
-    // 阶段 0 的守岗仍按“1 门 + 2 窗”固定口径，先在这里挡住任意户型
-    if (doorCount !== 1 || windowCount !== 2) {
-      errors.push({
-        message: `阶段 0 只支持 1 扇门 + 2 扇窗（当前 ${doorCount} 门 / ${windowCount} 窗），守岗泛化后续再做`,
-      });
+    // 任意数量的门窗：守岗按类型 / 朝向 / 房间几何推导（1B 起）
+    if (doorCount === 0) {
+      errors.push({ message: "地图至少需要 1 扇门（胖子只能走门）" });
     }
   }
 
@@ -386,12 +385,20 @@ export function validateMapJson(raw: unknown): MapValidationError[] {
   const humanZone = readRect(raw.humanZone, "humanZone", errors);
   const spawn = readRect(raw.spawn, "spawn", errors);
   const winSpawnRaw = raw.windowSpawn;
-  const winTop = isRecord(winSpawnRaw)
-    ? readRect(winSpawnRaw.top, "windowSpawn.top", errors)
-    : (errors.push({ message: "windowSpawn 必须是 {top, bottom} 对象" }), null);
-  const winBottom = isRecord(winSpawnRaw)
-    ? readRect(winSpawnRaw.bottom, "windowSpawn.bottom", errors)
-    : null;
+  let winTop: TileRect | null = null;
+  let winBottom: TileRect | null = null;
+  if (winSpawnRaw !== undefined) {
+    if (!isRecord(winSpawnRaw)) {
+      errors.push({ message: "windowSpawn 必须是 {top?, bottom?} 对象" });
+    } else {
+      if (winSpawnRaw.top !== undefined) {
+        winTop = readRect(winSpawnRaw.top, "windowSpawn.top", errors);
+      }
+      if (winSpawnRaw.bottom !== undefined) {
+        winBottom = readRect(winSpawnRaw.bottom, "windowSpawn.bottom", errors);
+      }
+    }
+  }
 
   if (grid && humanZone) {
     checkEmptyRegion("人类活动区", humanZone, grid, errors);
@@ -450,8 +457,9 @@ export function validateMapJson(raw: unknown): MapValidationError[] {
   }
 
   // ===== 连通性 =====
-  if (grid && openings.length > 0 && spawn && winTop && winBottom && humanZone) {
-    checkReachability(grid, openings, [spawn, winTop, winBottom], humanZone, errors);
+  if (grid && openings.length > 0 && spawn && humanZone) {
+    const spawnRects = [spawn, winTop, winBottom].filter((r): r is TileRect => r !== null);
+    checkReachability(grid, openings, spawnRects, humanZone, errors);
   }
 
   return errors;

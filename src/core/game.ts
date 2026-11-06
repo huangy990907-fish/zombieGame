@@ -11,17 +11,67 @@
 import { updateHumans, updateZombies } from "../systems/ai";
 import { updateCombat } from "../systems/combat";
 import { sound, SFX } from "../audio/manager";
+import { HUMAN_DEF } from "../data/humans";
 import { DEFAULT_MAP, resolveMap, type MapDef } from "../data/maps";
 import { applySettings, settings } from "../data/settings/runtime";
 import type { HumanMode, SettingsOverrides } from "../data/types";
 import { LOADOUT, WEAPON_IDS } from "../data/weapons";
 import { ZOMBIE_IDS } from "../data/zombies";
 import { findLevel } from "../levels";
-import { randRange } from "../utils/math";
+import { clamp, randRange } from "../utils/math";
 import type { Post } from "./world";
 import { createWorld } from "./world";
 
 export type Phase = "wave" | "intermission" | "victory" | "defeat";
+
+/** 岗位间距：人类身体直径（2 × 碰撞半径） */
+const POST_SPACING = HUMAN_DEF.radius * 2;
+/** 门岗火力线到墙内侧的距离：给门口的“通过时间”留出杀伤窗口 */
+const DOOR_FIRELINE = 90;
+/** 门岗沿门洞两侧各外扩的距离，覆盖门框 */
+const DOOR_POST_MARGIN = 8;
+/** 窗岗火力线到窗中心的距离（紧贴窗洞后方，偏离太多会被墙沿挡子弹） */
+const WINDOW_FIRELINE = 40;
+/** 预备队占开局人数的比例（arena 50 人 → 10 人） */
+const RESERVE_RATIO = 0.2;
+/** 预备队行列间距上限，小房间按可用空间压缩 */
+const RESERVE_ROW_GAP = 70;
+const RESERVE_COL_GAP = 70;
+
+type WallSide = "left" | "right" | "top" | "bottom";
+
+/** 开口贴在哪面墙上：按开口中心到四面墙的距离取最近的一侧 */
+function sideOfOpening(map: MapDef, rect: { x: number; y: number; w: number; h: number }): WallSide {
+  const { room } = map;
+  const cx = rect.x + rect.w * 0.5;
+  const cy = rect.y + rect.h * 0.5;
+  const options: Array<{ side: WallSide; d: number }> = [
+    { side: "left", d: Math.abs(cx - room.left) },
+    { side: "right", d: Math.abs(room.right - cx) },
+    { side: "top", d: Math.abs(cy - room.top) },
+    { side: "bottom", d: Math.abs(room.bottom - cy) },
+  ];
+  options.sort((a, b) => a.d - b.d);
+  return options[0].side;
+}
+
+/** 按长度比例把岗位名额分给多扇门；每扇门至少 1 个（名额够时） */
+function splitByLength(total: number, lengths: number[]): number[] {
+  const n = lengths.length;
+  if (n === 0) return [];
+  if (total <= 0) return lengths.map(() => 0);
+  if (total < n) return lengths.map((_, i) => (i < total ? 1 : 0));
+  const extra = total - n;
+  const sum = lengths.reduce((a, b) => a + b, 0) || 1;
+  const raws = lengths.map((len) => (extra * len) / sum);
+  const counts = raws.map((v) => 1 + Math.floor(v));
+  let remain = total - counts.reduce((a, b) => a + b, 0);
+  const fractions = raws
+    .map((v, i) => ({ i, frac: v - Math.floor(v) }))
+    .sort((a, b) => b.frac - a.frac);
+  for (let k = 0; remain > 0; k++, remain--) counts[fractions[k % n].i]++;
+  return counts;
+}
 
 export class Game {
   /** 当前地图；随 start() 按关卡 mapId / 显式选择切换 */
@@ -132,65 +182,132 @@ export class Game {
   }
 
   /**
-   * 防守分岗：门是主动脉（走廊出生的丧尸全走门），配 32 人重兵
-   * （喷火 + 霰弹 + 大量机枪），每扇窗 4 个机枪岗（隔玻璃点射 +
-   * 窗檐减速的漏网），剩下的火箭/机枪进中央预备队线。
-   * 窗净宽 18px 后火力线从 6 人收窄到 4 人（间距 12px = 人类身体直径），
-   * 省下的 4 人补进预备队，总岗位数仍与开局人数对齐。
-   * 岗位坐标按开口位置摊开，(ox,oy) 记下各自看守的开口中心。
+   * 防守分岗（1B 泛化）：不再依赖开口下标，也不假设“左门 / 上下窗”。
+   *
+   * 名额规则：
+   *  - 预备队 = 开局人数 × 20%（arena 50 人 → 10）
+   *  - 每扇窗按净宽推导人数与间距：线宽 = 窗净宽 + 2 × 身体直径，
+   *    人数 = floor(线宽 / 间距) + 1（arena 16px 窗 → 4 人，间距 12px）
+   *  - 剩余名额按门洞长度比例分给所有门（arena 1 门 → 32）
+   *  - 岗位坐标由开口中心、墙内侧法线与房间几何推导，并夹在人类活动区内
    */
   private assignPosts(): void {
     const ws = this.world;
     ws.posts.length = 0;
-    const door = ws.openings[0];
-    const wins = [ws.openings[1], ws.openings[2]];
+    const b = this.map.humanBounds;
+    const clampPost = (p: Post): Post => ({
+      x: clamp(p.x, b.x0, b.x1),
+      y: clamp(p.y, b.y0, b.y1),
+      ox: p.ox,
+      oy: p.oy,
+    });
 
-    // 门口：散兵线离门 90px —— 僵尸出 door 后要在火线上跑约 2 秒才摸到人，
-    // 这段“通过时间”就是门口火力杀伤的窗口
-    const doorPosts: Post[] = [];
-    const postX = door.rect.x + door.rect.w + 90;
-    const doorCx = door.rect.x + door.rect.w * 0.5;
-    const doorCy = door.rect.y + door.rect.h * 0.5;
-    for (let i = 0; i < 32; i++) {
-      doorPosts.push({
-        x: postX + randRange(-4, 4),
-        y: door.rect.y - 8 + (i * (door.rect.h + 16)) / 31,
-        ox: doorCx,
-        oy: doorCy,
-      });
-    }
+    const doors = ws.openings.filter((o) => o.kind === "door");
+    const windows = ws.openings.filter((o) => o.kind === "window");
+    const start = Math.max(0, settings().human.start);
+    const reserveTotal = Math.max(1, Math.round(start * RESERVE_RATIO));
 
-    // 窗口：紧贴窗洞正后方排开（横向 ±18px），偏太多子弹会被墙沿挡住
-    const winPosts: Post[] = [];
-    for (const w of wins) {
-      const wcx = w.rect.x + w.rect.w * 0.5;
-      const wcy = w.rect.y + w.rect.h * 0.5;
-      const inward = w.rect.y < 360 ? 1 : -1; // 顶窗往房间里(+y)，底窗往上(-y)
-      const postY = wcy + inward * 40;
-      for (let i = 0; i < 4; i++) {
-        winPosts.push({
-          x: wcx + (i - 1.5) * 12 + randRange(-2, 2),
-          y: postY + randRange(-2, 2),
-          ox: wcx,
-          oy: wcy,
-        });
+    // 窗岗：紧贴窗洞正后方，人数随净宽增长
+    const windowPosts: Post[] = [];
+    for (const w of windows) {
+      const cx = w.rect.x + w.rect.w * 0.5;
+      const cy = w.rect.y + w.rect.h * 0.5;
+      const side = sideOfOpening(this.map, w.rect);
+      const vertical = side === "left" || side === "right";
+      const inward = side === "left" ? 1 : side === "right" ? -1 : side === "top" ? 1 : -1;
+      const netLen = vertical ? w.rect.h : w.rect.w;
+      const count = Math.max(2, Math.floor((netLen + POST_SPACING * 2) / POST_SPACING) + 1);
+      for (let i = 0; i < count; i++) {
+        const along = (i - (count - 1) * 0.5) * POST_SPACING;
+        const x = vertical ? cx + inward * WINDOW_FIRELINE : cx + along;
+        const y = vertical ? cy + along : cy + inward * WINDOW_FIRELINE;
+        windowPosts.push(
+          clampPost({
+            x: x + randRange(-2, 2),
+            y: y + randRange(-2, 2),
+            ox: cx,
+            oy: cy,
+          }),
+        );
       }
     }
 
-    ws.posts.push(...doorPosts, ...winPosts);
+    // 门岗：剩余名额按门洞长度分配，火力线在墙内侧 90px
+    const doorTotal = Math.max(0, start - reserveTotal - windowPosts.length);
+    const doorSides = doors.map((d) => sideOfOpening(this.map, d.rect));
+    const doorLengths = doors.map((d, i) => {
+      const vertical = doorSides[i] === "left" || doorSides[i] === "right";
+      return vertical ? d.rect.h : d.rect.w;
+    });
+    const doorCounts = splitByLength(doorTotal, doorLengths);
+    const doorPosts: Post[] = [];
+    doors.forEach((d, di) => {
+      const side = doorSides[di];
+      const vertical = side === "left" || side === "right";
+      const inward = side === "left" ? 1 : side === "right" ? -1 : side === "top" ? 1 : -1;
+      const cx = d.rect.x + d.rect.w * 0.5;
+      const cy = d.rect.y + d.rect.h * 0.5;
+      const netLen = vertical ? d.rect.h : d.rect.w;
+      const anchor = vertical
+        ? side === "left"
+          ? d.rect.x + d.rect.w
+          : d.rect.x
+        : side === "top"
+          ? d.rect.y + d.rect.h
+          : d.rect.y;
+      const line = anchor + inward * DOOR_FIRELINE;
+      const count = doorCounts[di];
+      for (let i = 0; i < count; i++) {
+        const along =
+          count > 1
+            ? -DOOR_POST_MARGIN + (i / (count - 1)) * (netLen + DOOR_POST_MARGIN * 2)
+            : netLen * 0.5;
+        doorPosts.push(
+          clampPost({
+            x: vertical ? line + inward * randRange(-4, 4) : cx + along,
+            y: vertical ? cy + along : line + inward * randRange(-4, 4),
+            ox: cx,
+            oy: cy,
+          }),
+        );
+      }
+    });
 
-    // 中央预备队线：房间中部作第二道防线，不主动出击
-    // 窗口缩编后空出的 4 人补到这里（6 → 10），总岗位数仍为 50
+    // 预备队：房间中部 2 列，行距按可用高度压缩；目标取最近的门中心
     const reservePosts: Post[] = [];
-    for (let i = 0; i < 10; i++) {
-      reservePosts.push({
-        x: 620 + (i % 2) * 70 + randRange(-3, 3),
-        y: 210 + Math.floor(i / 2) * 70 + randRange(-3, 3),
-        ox: doorCx,
-        oy: doorCy,
-      });
+    const rowGap = Math.min(RESERVE_ROW_GAP, (b.y1 - b.y0) / Math.max(1, Math.ceil(reserveTotal / 2) - 1));
+    const rows = Math.ceil(reserveTotal / 2);
+    const cx = (b.x0 + b.x1) * 0.5;
+    const cy = (b.y0 + b.y1) * 0.5;
+    const startY = cy - ((rows - 1) * rowGap) / 2;
+    const targets = doors.length > 0 ? doors : windows.length > 0 ? windows : ws.openings;
+    for (let i = 0; i < reserveTotal; i++) {
+      const px = cx + (i % 2 === 0 ? -RESERVE_COL_GAP : RESERVE_COL_GAP) * 0.5;
+      const py = startY + Math.floor(i / 2) * rowGap;
+      let tx = (this.map.room.left + this.map.room.right) * 0.5;
+      let ty = (this.map.room.top + this.map.room.bottom) * 0.5;
+      let best = Infinity;
+      for (const o of targets) {
+        const ox = o.rect.x + o.rect.w * 0.5;
+        const oy = o.rect.y + o.rect.h * 0.5;
+        const d2 = (px - ox) ** 2 + (py - oy) ** 2;
+        if (d2 < best) {
+          best = d2;
+          tx = ox;
+          ty = oy;
+        }
+      }
+      reservePosts.push(
+        clampPost({
+          x: px + randRange(-3, 3),
+          y: py + randRange(-3, 3),
+          ox: tx,
+          oy: ty,
+        }),
+      );
     }
-    ws.posts.push(...reservePosts);
+
+    ws.posts.push(...doorPosts, ...windowPosts, ...reservePosts);
 
     // 分岗顺序：喷火/霰弹 守门 -> 机枪填门岗缺额 ->
     // 其余武器（火箭/电击枪/剩余机枪）补窗岗 -> 再剩下的进预备队
@@ -202,10 +319,10 @@ export class Game {
         h.post = di++;
       } else if (h.weapon === WEAPON_IDS.mg && di < doorPosts.length) {
         h.post = di++;
-      } else if (wi < winPosts.length) {
+      } else if (wi < windowPosts.length) {
         h.post = doorPosts.length + wi++;
       } else if (ri < reservePosts.length) {
-        h.post = doorPosts.length + winPosts.length + ri++;
+        h.post = doorPosts.length + windowPosts.length + ri++;
       }
     }
   }
@@ -254,24 +371,29 @@ export class Game {
         this.runnersLeft--;
       }
     }
-    // 出生点：一半走左走廊冲门，另一半从上、下两侧逼近窗户
-    const r = Math.random();
-    const top = this.map.windowSpawn.top;
-    const bottom = this.map.windowSpawn.bottom;
-    const left = this.map.spawn;
-    let x: number;
-    let y: number;
-    if (r < 0.25) {
-      x = randRange(top.x0, top.x1);
-      y = randRange(top.y0, top.y1);
-    } else if (r < 0.5) {
-      x = randRange(bottom.x0, bottom.x1);
-      y = randRange(bottom.y0, bottom.y1);
-    } else {
-      x = randRange(left.x0, left.x1);
-      y = randRange(left.y0, left.y1);
+    // 出生点完全按地图显式区域选择：spawn 为主区域，缺哪个窗侧区域就不参与
+    // 抽签，不假设“左 / 上 / 下”的方位。按面积加权，大出生区放更多丧尸。
+    const regions = [this.map.spawn];
+    if (this.map.windowSpawn.top) regions.push(this.map.windowSpawn.top);
+    if (this.map.windowSpawn.bottom) regions.push(this.map.windowSpawn.bottom);
+    let totalArea = 0;
+    for (const r of regions) totalArea += (r.x1 - r.x0) * (r.y1 - r.y0);
+    let roll = Math.random() * totalArea;
+    let region = regions[regions.length - 1];
+    for (const r of regions) {
+      const area = (r.x1 - r.x0) * (r.y1 - r.y0);
+      if (roll < area) {
+        region = r;
+        break;
+      }
+      roll -= area;
     }
-    this.world.spawnZombie(x, y, kind, 1 + (this.wave - 1) * 0.05);
+    this.world.spawnZombie(
+      randRange(region.x0, region.x1),
+      randRange(region.y0, region.y1),
+      kind,
+      1 + (this.wave - 1) * 0.05,
+    );
   }
 
   /** 按固定速率往场里放丧尸，超出同屏上限则暂缓 */

@@ -138,6 +138,14 @@ export interface Point {
   y: number;
 }
 
+/** 矩形出生区域（像素坐标） */
+export interface SpawnRegion {
+  x0: number;
+  x1: number;
+  y0: number;
+  y1: number;
+}
+
 /** 一张地图的全部几何与默认参数 */
 export interface MapDef {
   id: string;
@@ -146,22 +154,19 @@ export interface MapDef {
   height: number;
   room: RoomDef;
   walls: Rect[];
-  /**
-   * 可破坏开口。编译时门排在窗之前 —— 当前守岗逻辑仍按下标取
-   * 「0 = 门、1/2 = 窗」，任意户型泛化留到后续阶段。
-   */
+  /** 可破坏开口；编译时门排在窗之前，但守岗 / 出怪不再依赖下标顺序 */
   openings: OpeningDef[];
   /** 各开口中心点：流场多源 BFS 的源点 / 丧尸的兜底目标 */
   openingCenters: Point[];
-  /** 丧尸在房间左侧走廊里的出生区域 */
-  spawn: { x0: number; x1: number; y0: number; y1: number };
-  /** 从上 / 下墙外侧逼近窗户的出生区域 */
+  /** 丧尸的主出生区域（门侧 / 通用） */
+  spawn: SpawnRegion;
+  /** 窗侧出生区域，按地图显式数据提供；缺失的方位直接不参与出怪 */
   windowSpawn: {
-    top: { x0: number; x1: number; y0: number; y1: number };
-    bottom: { x0: number; x1: number; y0: number; y1: number };
+    top?: SpawnRegion;
+    bottom?: SpawnRegion;
   };
   /** 人类活动范围（房间内缩一点，防止贴墙） */
-  humanBounds: { x0: number; x1: number; y0: number; y1: number };
+  humanBounds: SpawnRegion;
   /** 丧尸啃咬门窗时每口造成的建筑伤害 */
   buildBiteDamage: number;
   /** 啃建筑比咬人慢的倍率（拆门是个力气活） */

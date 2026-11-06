@@ -90,6 +90,8 @@ interface DeathMark {
 export class Renderer {
   readonly app = new Application();
   private floorLayer = new Container();
+  /** 地板网格复用同一张 Graphics，换图时 clear 后重画，避免旧图残留 */
+  private floorG!: Graphics;
   private trainingLayer = new Graphics();
   /** 倒地定格画在活单位下面 */
   private deathLayer = new Container();
@@ -132,6 +134,8 @@ export class Renderer {
     host.appendChild(this.app.canvas);
     this.dot = this.makeDotTexture();
     this.warmSpriteTextures();
+    this.floorG = new Graphics();
+    this.floorLayer.addChild(this.floorG);
     this.buildStatic();
     this.buildTrainingVisual();
     // 层级从下到上：训练场装饰 -> 地板 -> 倒地定格 -> 单位 -> 特效 -> 闪电 -> 门窗 -> 墙体 -> 选中框 -> 飘字
@@ -181,6 +185,21 @@ export class Renderer {
     this.trainingLayer.visible = active;
   }
 
+  /**
+   * 换图：重画地板网格、墙体与训练场装饰。
+   * 门窗每帧都从 world.openings 重画，不会残留旧图；流场由 World 按新地图重建。
+   */
+  setMap(map: MapDef): void {
+    if (map === this.map) return;
+    this.map = map;
+    if (this.app.renderer.width !== map.width || this.app.renderer.height !== map.height) {
+      this.app.renderer.resize(map.width, map.height);
+    }
+    this.buildStatic();
+    this.buildTrainingVisual();
+    this.openingLayer.clear();
+  }
+
   /** 用几层同心圆画一张“外圈发光、中心实心”的圆点贴图 */
   private makeDotTexture(): Texture {
     const g = new Graphics();
@@ -191,10 +210,11 @@ export class Renderer {
     return this.app.renderer.generateTexture(g);
   }
 
-  /** 静态内容：地板网格和墙体，只画一次 */
+  /** 静态内容：地板网格和墙体，随地图重建 */
   private buildStatic(): void {
     const { width, height, room, walls: mapWalls } = this.map;
-    const floor = new Graphics();
+    const floor = this.floorG;
+    floor.clear();
     floor.rect(0, 0, width, height).fill(0x07070d);
     for (let x = room.left; x < room.right; x += 48) {
       floor.moveTo(x, room.top).lineTo(x, room.bottom);
@@ -203,9 +223,9 @@ export class Renderer {
       floor.moveTo(room.left, y).lineTo(room.right, y);
     }
     floor.stroke({ width: 1, color: 0x141d2a, alpha: 0.85 });
-    this.floorLayer.addChild(floor);
 
     const walls = this.wallLayer;
+    walls.clear();
     for (const w of mapWalls) {
       walls.rect(w.x, w.y, w.w, w.h).fill(0x16202e);
       walls.rect(w.x, w.y, w.w, w.h).stroke({ width: 1, color: 0x3a516b, alpha: 0.95 });

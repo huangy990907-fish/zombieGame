@@ -20,6 +20,8 @@ export interface LevelDef {
   nodeY: number;
   /** 难度星数 */
   difficulty: Difficulty;
+  /** 本关使用的地图 id（对应 public/maps/<id>.json）；不存在时回退默认图并提示 */
+  mapId: string;
   /**
    * 这关专属的设置覆盖。只写要改的字段，没写的沿用实体定义默认值。
    * 比如第 1 关僵尸弱，就只覆盖 zombie.types.normal.hp / speed；第 2 关波次更长，覆盖 wave.count。
@@ -42,6 +44,7 @@ export const LEVELS: LevelDef[] = [
     nodeX: 10,
     nodeY: 50,
     difficulty: 1,
+    mapId: "arena",
     settings: {
       wave: { count: 8, base: 120, growth: 1.06, spawnBase: 12, spawnPerWave: 2, spawnMax: 80, maxAlive: 400, reinforce: 1 },
       human: { start: 50, cap: 50, hp: 100, speed: 54, sight: 420, turnTime: 2.8 },

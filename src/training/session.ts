@@ -13,12 +13,12 @@
  *
  * 新增僵尸 / 武器时，只要在 data 注册表里加一行，这里的单位库与统计桶会自动出现。
  */
-import { DEFAULT_MAP } from "../data/maps";
+import { DEFAULT_MAP, resolveMap, type MapDef } from "../data/maps";
 import { effectiveWeapon } from "../data/settings/runtime";
 import { WEAPON_LIST, getWeaponDef } from "../data/weapons";
 import { ZOMBIE_LIST } from "../data/zombies";
 import { createWorld } from "../core/world";
-import type { DamageSource, Human, Zombie } from "../core/world";
+import type { DamageSource, Human, World, Zombie } from "../core/world";
 import { updateHumans, updateZombies } from "../systems/ai";
 import { updateCombat } from "../systems/combat";
 import { clamp, dist2 } from "../utils/math";
@@ -132,7 +132,15 @@ function emptyZombieStat(): ZombieTypeStat {
 }
 
 export class TrainingSession {
-  world = createWorld(DEFAULT_MAP);
+  world: World = createWorld(DEFAULT_MAP);
+  /** 构造 / reset 时显式传入的地图（直接传 MapDef 时保留引用，供未注册的自定义图使用） */
+  private preferredMap: MapDef | undefined = undefined;
+  /** 构造 / reset 时显式指定的地图 id；未指定则沿用当前地图 */
+  private preferredMapId: string | undefined = undefined;
+  /** 最近一次地图解析是否回退默认图（main.ts 据此提示） */
+  mapFallback = false;
+  /** 最近一次请求的地图 id */
+  requestedMapId: string | undefined = undefined;
   paused = false;
   /** 速度倍率：1 = 正常，0.25 = 慢放 */
   speed = 1;
@@ -172,13 +180,30 @@ export class TrainingSession {
     WEAPON_LIST.map((w) => [w.id, new Array<number>(BUCKET_SLOTS).fill(-1)]),
   );
 
-  constructor() {
+  /**
+   * @param mapOrId 初始地图（MapDef 或 id）；省略时用默认地图。
+   *               id 不存在会回退默认图并置 mapFallback。
+   */
+  constructor(mapOrId?: MapDef | string) {
+    if (typeof mapOrId === "string") this.preferredMapId = mapOrId;
+    else if (mapOrId) this.preferredMap = mapOrId;
+    this.applyMap(mapOrId ?? DEFAULT_MAP);
     this.installHooks();
   }
 
-  /** 每次进入训练场都重置：新的空 World + 清零的统计，退出即丢弃 */
-  reset(): void {
-    this.world = createWorld(DEFAULT_MAP);
+  /** 按地图重建沙盒 World；流场与空间索引由 createWorld 一并重建 */
+  private applyMap(mapOrId: MapDef | string): void {
+    const resolved = resolveMap(mapOrId);
+    this.mapFallback = resolved.fallback;
+    this.requestedMapId = resolved.requestedId;
+    this.world = createWorld(resolved.map);
+  }
+
+  /** 每次进入训练场都重置：空的 World + 清零的统计，退出即丢弃 */
+  reset(mapOrId?: MapDef | string): void {
+    if (typeof mapOrId === "string") this.preferredMapId = mapOrId;
+    else if (mapOrId) this.preferredMap = mapOrId;
+    this.applyMap(mapOrId ?? this.preferredMap ?? this.preferredMapId ?? this.world.map);
     this.installHooks();
     this.paused = false;
     this.speed = 1;

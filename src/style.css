@@ -32,7 +32,7 @@ body {
 }
 
 .frame {
-  width: min(1180px, 100vw);
+  width: min(1184px, 100vw);
   max-height: 100vh;
   display: flex;
   flex-direction: column;
@@ -421,6 +421,30 @@ body {
   border-color: #ef4444;
   background: #2a1720;
   color: #fff;
+}
+
+/* ===== 地图回退提示（id 不存在时不静默） ===== */
+.map-notice {
+  position: fixed;
+  top: 78px;
+  left: 50%;
+  z-index: 40;
+  padding: 9px 18px;
+  border: 1px solid #5a4a2f;
+  border-radius: 5px;
+  background: rgba(24, 20, 12, 0.95);
+  color: #f5d08a;
+  font-size: 12px;
+  letter-spacing: 0.5px;
+  opacity: 0;
+  pointer-events: none;
+  transform: translate(-50%, -10px);
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+.map-notice.show {
+  opacity: 1;
+  transform: translate(-50%, 0);
 }
 
 /* ===== 顶栏/底部：只在 play 路由显示 ===== */

@@ -11,11 +11,12 @@
 import { updateHumans, updateZombies } from "../systems/ai";
 import { updateCombat } from "../systems/combat";
 import { sound, SFX } from "../audio/manager";
-import { DEFAULT_MAP, type MapDef } from "../data/maps";
+import { DEFAULT_MAP, resolveMap, type MapDef } from "../data/maps";
 import { applySettings, settings } from "../data/settings/runtime";
 import type { HumanMode, SettingsOverrides } from "../data/types";
 import { LOADOUT, WEAPON_IDS } from "../data/weapons";
 import { ZOMBIE_IDS } from "../data/zombies";
+import { findLevel } from "../levels";
 import { randRange } from "../utils/math";
 import type { Post } from "./world";
 import { createWorld } from "./world";
@@ -23,10 +24,19 @@ import { createWorld } from "./world";
 export type Phase = "wave" | "intermission" | "victory" | "defeat";
 
 export class Game {
-  readonly map: MapDef = DEFAULT_MAP;
+  /** 当前地图；随 start() 按关卡 mapId / 显式选择切换 */
+  map: MapDef = DEFAULT_MAP;
   world = createWorld(this.map);
   /** 当前关卡 id，undefined = 还没选关卡 */
   levelId: string | undefined = undefined;
+  /** 构造 / start 时显式指定的地图（直接传 MapDef 时保留引用，供未注册的自定义图使用） */
+  private preferredMap: MapDef | undefined = undefined;
+  /** 构造 / start 时显式指定的地图 id（优先于关卡 mapId，供调试与后续选图用） */
+  private preferredMapId: string | undefined = undefined;
+  /** 最近一次地图解析是否发生回退（main.ts 据此给出可见提示） */
+  mapFallback = false;
+  /** 最近一次请求的地图 id（回退时用于提示） */
+  requestedMapId: string | undefined = undefined;
   /** 当前波次，1 开始 */
   wave = 0;
   phase: Phase = "intermission";
@@ -46,9 +56,24 @@ export class Game {
   waveSize = 0;
   elapsed = 0;
 
-  constructor() {
+  /**
+   * @param mapOrId 初始地图；可传 MapDef 或地图 id。省略时用默认地图。
+   *               id 不存在会回退默认图，并置 mapFallback 供上层提示。
+   */
+  constructor(mapOrId?: MapDef | string) {
+    if (typeof mapOrId === "string") this.preferredMapId = mapOrId;
+    else if (mapOrId) this.preferredMap = mapOrId;
+    this.applyMap(mapOrId ?? DEFAULT_MAP);
     // 不自动 start() —— main.ts 在路由跳转到 play 时显式调 start(levelId)
     // 这样关卡 settings 才有机会在 World 构造前被 apply
+  }
+
+  /** 解析并记录地图；World 在构造 / start 处按新地图重建 */
+  private applyMap(mapOrId: MapDef | string): void {
+    const resolved = resolveMap(mapOrId);
+    this.map = resolved.map;
+    this.mapFallback = resolved.fallback;
+    this.requestedMapId = resolved.requestedId;
   }
 
   /**
@@ -58,6 +83,9 @@ export class Game {
    */
   start(levelId?: string, levelSettings?: SettingsOverrides): void {
     if (levelId) this.levelId = levelId;
+    // 优先级：显式选择（构造参数）> 关卡 mapId > 当前地图（保留未注册的自定义图）
+    const level = this.levelId ? findLevel(this.levelId) : undefined;
+    this.applyMap(this.preferredMap ?? this.preferredMapId ?? level?.mapId ?? this.map);
     if (levelSettings) applySettings(levelSettings);
 
     this.world = createWorld(this.map);

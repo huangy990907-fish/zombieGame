@@ -62,6 +62,28 @@ export function getMap(id: string): MapDef {
   return MAPS[id] ?? DEFAULT_MAP;
 }
 
+export interface MapResolution {
+  map: MapDef;
+  /** 请求的 id；传 MapDef 时取它自己的 id */
+  requestedId: string;
+  /** 请求 id 不存在、实际回退了默认图 */
+  fallback: boolean;
+}
+
+/**
+ * 解析地图参数：MapDef 直接使用，字符串按 id 查表。
+ * id 不存在时回退默认图并输出 warning，调用方可用 fallback 做可见提示。
+ */
+export function resolveMap(mapOrId: MapDef | string): MapResolution {
+  if (typeof mapOrId !== "string") {
+    return { map: mapOrId, requestedId: mapOrId.id, fallback: false };
+  }
+  const found = MAPS[mapOrId];
+  if (found) return { map: found, requestedId: mapOrId, fallback: false };
+  console.warn(`[maps] 地图 id「${mapOrId}」不存在，回退默认图「${DEFAULT_MAP.id}」`);
+  return { map: DEFAULT_MAP, requestedId: mapOrId, fallback: true };
+}
+
 export function isReadOnlyMap(id: string): boolean {
   return READONLY_MAP_IDS.has(id);
 }

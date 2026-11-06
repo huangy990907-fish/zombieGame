@@ -17,7 +17,7 @@
 ### 0.5.0 地图工坊阶段 1：编辑器 + 训练场试玩
 
 - 优先级：高
-- 状态：待办（阶段 0「地图 JSON 化地基」已完成）
+- 状态：待办（阶段 0「地图 JSON 化地基」、阶段 1A「地图注入」已完成；剩余编辑器与试玩入口）
 - 说明：在训练场加「地图试玩 / 编辑」入口，按 16px 网格绘制空地 / 墙 / 门 / 窗，设置人类区、出生区与每扇门窗的血量 / 通行速度；先支持草稿 localStorage、导入导出 JSON、另存副本，保存前跑强校验。任意户型与通用守岗仍不在本阶段。
 - 约束：`arena` 内置只读；加载期非法地图回退默认图；错误要能定位到格子；画布固定 74×45。
 - 涉及模块：`src/data/maps/schema.ts`、`src/data/maps/compile.ts`、`src/data/maps/index.ts`、`src/training/`、`index.html`、`src/style.css`、`src/router.ts`、`src/main.ts`。
@@ -45,14 +45,14 @@
 ### 多地图与多关卡
 
 - 优先级：待定
-- 状态：部分具备（地图 JSON 加载已完成，地图选择与关卡引用未做）
-- 说明：注册表已能从 manifest 加载多张地图，但入口仍只用默认 `arena`；`LevelDef` 还没有 `mapId` 字段，选图界面也未实现。
+- 状态：部分具备（地图 JSON 加载、`LevelDef.mapId`、`Game` / `TrainingSession` 地图注入已完成；玩家可见的选图 UI 未做）
+- 说明：注册表已能从 manifest 加载多张地图，`level-1` 通过 `mapId` 指向 `arena`，调试可用 `?map=<id>`；正式选图界面、地图解锁与 HUD 展示仍未实现。
 - 涉及模块：`src/data/maps/`、`src/levels.ts`、`src/router.ts`、选关与 HUD。
 
 ### 地图工坊（瓦片地图编辑器）
 
 - 优先级：待定
-- 状态：进行中（阶段 0 已完成，阶段 1 见「高优先级」）
+- 状态：进行中（阶段 0 地图 JSON 化、阶段 1A 地图注入已完成，阶段 1 编辑器见「高优先级」）
 - 分层定位：工坊是**内容生产工具**，不是玩家功能。开发者模式可见并可新增地图；玩家模式只提供已发布地图的游玩，界面不出现工坊入口。
 - 权限边界：纯浏览器游戏没有后端账号，开发者模式只能做到「界面隐藏」，**不是安全边界**——玩家改 localStorage 或直接访问 URL 仍可进入。若未来需要真隔离，得走服务端发布或维护两套构建产物；文档里写明这一点，避免后来者误以为有权限校验。
 - 数据形态：瓦片 JSON 只作编辑 / 存储格式，加载时编译回 `walls[] + openings[]` 的 `MapDef`；运行时读 `public/maps/*.json` + manifest。开发者产出走「导出 JSON → 进仓库 `public/maps/` + 更新 manifest → 随版本发布」；localStorage 只作草稿，不能当成发布。
@@ -66,7 +66,7 @@
   6. **校验**：编辑期提示 + 保存前强校验 + 加载期非法回退默认图，错误能定位到格子。
   7. **只读内置图**：`arena` 作为内置只读地图，工坊只能另存副本。
   8. **开发者模式**：设置里输入密码切换；密码明文可接受；放 gitignore 文件（可用 `.env.local` 的 `VITE_` 前缀）；默认密码 `zb9993`。密码与切换 UI 属后续阶段，本轮只记录决定。
-- 开发顺序：①地图 JSON 化（阶段 0，已完成）→ ②工坊编辑器 → ③放置模式选图 → ④闯关模式（关卡 = 地图 + 波次 + 目标，工坊只管前半段）。
+- 开发顺序：①地图 JSON 化（阶段 0，已完成）→ ①.5 地图注入（阶段 1A，已完成）→ ②工坊编辑器 → ③放置模式选图 → ④闯关模式（关卡 = 地图 + 波次 + 目标，工坊只管前半段）。
 - 涉及模块：`src/data/maps/schema.ts`、`src/data/maps/compile.ts`、`src/data/maps/index.ts`、`src/core/world.ts`、`src/systems/flowField.ts`、`src/core/game.ts`、`src/render/renderer.ts`、`src/training/`、`src/levels.ts`、`src/main.ts`、`index.html`、`src/style.css`。
 
 ### 建筑模组：草丛与水池（0.5.1，整块推迟但需求已确认）

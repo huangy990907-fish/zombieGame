@@ -39,13 +39,17 @@
 
 ### 场景与开口
 
-逻辑画布固定 `1184 × 720`（74 × 45 个 16px 瓦片），房间为 `224,64 → 1136,656`（墙厚 16），左墙有门、上下墙各有一扇窗。地图几何来自 `public/maps/arena.json`，启动时由 `compileTilesToMapDef()` 编译成现有 `MapDef`；`src/data/maps/arena.ts` 只在 JSON 加载失败时兜底。
+逻辑画布固定 `1184 × 720`（74 × 45 个 16px 瓦片）。默认地图 `arena` 的房间为 `224,64 → 1136,656`（墙厚 16），左墙有门、上下墙各有一扇窗；内置 `test-yard` 的房间更窄且向右偏移，用于验证多地图加载。地图几何来自 `public/maps/*.json`，启动时由 `compileTilesToMapDef()` 编译成现有 `MapDef`；`src/data/maps/arena.ts` 只在 JSON 加载失败时兜底。
+
+当前没有玩家可见的选图界面，调试时可用 `?map=<id>` 指定地图（例如 `?map=test-yard#/play`、`?map=test-yard#/training`）；id 不存在会回退默认图并在页面顶部提示。
 
 | 开口 | 血量 | 破损后通过速度 | 说明 |
 |---|---|---|---|
 | 门（`door-main`） | 450 | 1.0 | 走廊里的丧尸主要走门，门口火力最密集 |
 | 上窗（`window-top`） | 100 | 0.45 | 透明，人类可隔玻璃发现并射击 |
 | 下窗（`window-bottom`） | 100 | 0.45 | 同上；破窗后钻窗会被窗檐减速 |
+
+上表为默认地图 `arena` 的数值。其他地图的默认门窗数值取自 JSON 中第一扇门 / 第一扇窗的 `maxHp` 与 `passSpeed`（玩家覆盖仍按门 / 窗种类生效）；逐扇门窗独立结算要等阶段 1B 的设置层泛化。
 
 丧尸每啃一口对建筑造成 4 点伤害，啃建筑的间隔是咬人间隔的 1.5 倍。开口血量归零即破损，之后丧尸可以穿过。
 
@@ -206,7 +210,8 @@ zombieGame/
 │   ├── audio/              # 18 个音效 mp3 + CREDITS.md 授权台账
 │   └── maps/               # 内置地图 JSON + manifest（运行时加载，内置只读）
 │       ├── manifest.json   # 地图清单（id / 文件 / readOnly）
-│       └── arena.json      # 竞技场：74×45 瓦片、门窗实例、出生区与人类区
+│       ├── arena.json      # 竞技场：74×45 瓦片、门窗实例、出生区与人类区
+│       └── test-yard.json  # 测试庭院：第二张只读地图，用于换图回归
 ├── src/
 │   ├── main.ts             # 启动、hash 路由切换、主循环、键盘快捷键
 │   ├── levels.ts           # 关卡定义（目前只有 level-1）与关卡级参数覆盖
@@ -369,7 +374,7 @@ npm run preview   # 本地预览 dist/ 构建产物
 
 **1. 数据注册**
 
-- 僵尸：新建 `src/data/zombies/<id>.ts`，在 `src/data/zombies/index.ts` 注册；武器：新建 `src/data/weapons/<id>.ts`，在 `src/data/weapons/index.ts` 与 `LOADOUT` 里登记；地图：新建 `src/data/maps/<id>.ts`，在 `src/data/maps/index.ts` 注册。
+- 僵尸：新建 `src/data/zombies/<id>.ts`，在 `src/data/zombies/index.ts` 注册；武器：新建 `src/data/weapons/<id>.ts`，在 `src/data/weapons/index.ts` 与 `LOADOUT` 里登记；地图：新建 `public/maps/<id>.json`（瓦片 74×45 / 16px）并在 `public/maps/manifest.json` 登记，需要关卡引用时再给 `LevelDef` 写 `mapId`。
 - 数值只写在定义文件里，不在设置里重复一份；训练场按钮、统计列与 HUD 会跟随注册表自动出现，不需要手改 UI。
 
 **2. 精灵与动画帧**
@@ -511,9 +516,10 @@ npm run dev
 
 **工程与内容**
 
-- 目前只有 1 个关卡（`level-1`「初次尸潮」，8 波）和 1 张地图（`arena`）。地图已改为 `public/maps/*.json` + manifest 的运行时加载结构（0.5.0 阶段 0），但入口仍只用默认地图，还没有地图选择或工坊编辑器。
-- 0.5.0 阶段 0 的地图格式限制：画布固定 `74 × 45` 格（`16px`），不支持自定义尺寸；校验暂时只接受 **1 门 + 2 窗**（守岗仍按「0 = 门、1/2 = 窗」固定口径），任意户型与通用守岗留到后续阶段；`arena` 是只读内置地图，工坊只能另存副本。
-- 地图 JSON 加载失败、manifest 非法或校验不通过时，会回退 `src/data/maps/arena.ts` 的 0.4.3 TS 兜底几何（画布 `1180 × 720`、窗宽 18），并在 console 输出 `[maps]` warning；正常路径下以 `public/maps/arena.json` 编译出的 `1184 × 720` / 窗宽 16 为准。
+- 目前只有 1 个关卡（`level-1`「初次尸潮」，8 波），内置 2 张只读地图（`arena` / `test-yard`）。地图以 `public/maps/*.json` + manifest 运行时加载（0.5.0 阶段 0），关卡通过 `LevelDef.mapId` 引用地图（阶段 1A）；调试可用 `?map=<id>` 覆盖，玩家可见的选图界面与工坊编辑器仍未实现。
+- 0.5.0 阶段 0/1A 的地图格式限制：画布固定 `74 × 45` 格（`16px`），不支持自定义尺寸；校验暂时只接受 **1 门 + 2 窗**（守岗仍按「0 = 门、1/2 = 窗」固定口径），任意户型与通用守岗留到后续阶段；`arena` / `test-yard` 都是只读内置地图，工坊只能另存副本。
+- 地图 JSON 加载失败、manifest 非法或校验不通过时，会回退 `src/data/maps/arena.ts` 的 0.4.3 TS 兜底几何（画布 `1180 × 720`、窗宽 18），并在 console 输出 `[maps]` warning；正常路径下以 `public/maps/arena.json` 编译出的 `1184 × 720` / 窗宽 16 为准。请求地图 id 不存在时会回退默认图并在页面顶部显示 `.map-notice` 提示。
+- 阶段 1B 遗留：`openingTuning()` 仍只取「第一扇门 / 第一扇窗」的 JSON 默认值，`World` 按门 / 窗种类统一初始化，尚未逐扇读取各自的 `maxHp` / `passSpeed`；关卡设置覆盖也仍按种类生效。
 - 音效：18 个事件已接线，素材均为 freesound CC0 录音或其派生；但 `weapon-reload` 与 `human-hurt` 没有调用点，放入文件也不会响。
 - 美术：单位与武器已改为 32px 像素精灵（`src/art/`，17 精灵 / 51 帧，含 5 个 `human-<weapon>` 组合），但只为「朝上」方向烘焙了一帧集，运行时按朝向线性旋转，任意角会有轻微锯齿；特效与场景装饰仍由 Pixi 代码绘制。
 - 电击枪是瞬时命中，链式最多 5 只且每跳都要求视线可见；未破的门窗会挡住后续跳跃，想观察满 5 跳请在训练场把僵尸排成一条并在同侧放置，或先把窗打破。链式半径/上限/衰减/单体加成都在 `src/data/weapons/tesla.ts` 的 `tesla` 字段，没有全局滑块。

@@ -56,14 +56,17 @@ async function boot(): Promise<void> {
   sound.setMaster(getSetting("audio.master"));
   sound.setSfx(getSetting("audio.sfx"));
 
-  const game = new Game();
+  // 调试 / 阶段 1A 的临时选图入口：?map=<id>（正式选图 UI 留到阶段 3）
+  const mapOverrideId = new URLSearchParams(window.location.search).get("map") ?? undefined;
+
+  const game = new Game(mapOverrideId);
   const renderer = new Renderer();
   await renderer.init(host);
   const hud = new Hud(game);
 
   // ====== 训练场：一个和正常对局完全独立的沙盒 World ======
   // 面板常驻 DOM，只在 #/training 路由滑出；退出时整个会话被丢弃，不残留任何修改。
-  const training = new TrainingSession();
+  const training = new TrainingSession(mapOverrideId);
   const trainingPanel = new TrainingPanel(training, () => router.go("menu"));
   trainingPanel.attachCanvas(renderer.app.canvas as HTMLCanvasElement);
 
@@ -303,6 +306,31 @@ async function boot(): Promise<void> {
     closeModal(clearSaveOverlay);
   };
 
+  /** 地图 id 缺失时的可见提示：回退默认图不静默 */
+  let mapNoticeTimer = 0;
+  const showMapNotice = (text: string): void => {
+    let el = document.getElementById("mapNotice");
+    if (!el) {
+      el = document.createElement("div");
+      el.id = "mapNotice";
+      el.className = "map-notice";
+      document.body.appendChild(el);
+    }
+    el.textContent = text;
+    el.classList.add("show");
+    window.clearTimeout(mapNoticeTimer);
+    mapNoticeTimer = window.setTimeout(() => el?.classList.remove("show"), 4500);
+  };
+  const reportMapFallback = (
+    fallback: boolean,
+    requested: string | undefined,
+    actualName: string,
+  ): void => {
+    if (fallback && requested) {
+      showMapNotice(`地图「${requested}」不存在，已回退默认图「${actualName}」`);
+    }
+  };
+
   const applyRoute = (route: Route): void => {
     // 隐藏结算弹窗和菜单弹窗（切路由时清掉）
     resultOverlay.classList.add("hidden");
@@ -341,6 +369,8 @@ async function boot(): Promise<void> {
         if (currentLevel) {
           game.start(currentLevel.id, currentLevel.settings);
         }
+        reportMapFallback(game.mapFallback, game.requestedMapId, game.map.name);
+        renderer.setMap(game.map);
         refreshButtons();
         refreshPanelValues();
         sound.resumeAudio(); // 进入战斗场景恢复声音（AudioContext resume 在这里发生）
@@ -352,6 +382,8 @@ async function boot(): Promise<void> {
         settingsPanel.classList.remove("open");
         // 每次进入都是全新沙盒：不继承上一次的单位、统计和改动
         training.reset();
+        reportMapFallback(training.mapFallback, training.requestedMapId, training.world.map.name);
+        renderer.setMap(training.world.map);
         trainingPanel.activate();
         renderer.setTrainingVisual(true);
         document.body.classList.add("training");

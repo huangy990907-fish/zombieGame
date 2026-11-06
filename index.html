@@ -74,11 +74,61 @@
         <h1 class="game-title">尸潮</h1>
         <p class="subtitle">人类 vs 丧尸</p>
         <div class="menu-buttons">
-          <button class="menu-btn primary" id="btnNewGame">🎮 新游戏</button>
-          <button class="menu-btn" id="btnLoadGame">📂 载入游戏</button>
+          <button class="menu-btn primary" id="btnPlacement">🧱 放置抵抗</button>
+          <button class="menu-btn" id="btnChallenge">🗺 闯关模式</button>
           <button class="menu-btn training" id="btnTraining">🧪 训练场</button>
+          <button class="menu-btn" id="btnMenuSettings">⚙ 设置</button>
         </div>
-        <p class="menu-footer">选择关卡开始战斗 · 训练场可自由生成单位、测武器 DPS</p>
+        <p class="menu-footer">放置人类守住房间 · 训练场可自由生成单位、测武器 DPS</p>
+      </div>
+    </div>
+
+    <!-- ===== 闯关模式占位说明（尚未实现，不做成空页面） ===== -->
+    <div id="challengeOverlay" class="overlay menu-modal hidden">
+      <div class="menu-modal-card small">
+        <h2>闯关模式</h2>
+        <p class="menu-modal-desc">该模式将由玩家直接操控人类闯关，目前尚未实现。0.4.2 只保留入口占位，请先体验「放置抵抗」或到训练场试玩。</p>
+        <div class="menu-modal-actions">
+          <button class="menu-btn primary" id="btnChallengeClose">知道了</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== 主菜单设置（音量与对局内设置面板共用同一份数据） ===== -->
+    <div id="menuSettingsOverlay" class="overlay menu-modal hidden">
+      <div class="menu-modal-card">
+        <div class="menu-modal-head">
+          <h2>设置</h2>
+          <button class="menu-modal-close" id="btnMenuSettingsClose" title="返回主菜单">✕</button>
+        </div>
+
+        <h3>音量</h3>
+        <div class="settings-row">
+          <label for="menuVolMaster">总音量</label>
+          <input type="range" id="menuVolMaster" min="0" max="1" step="0.05" />
+          <span class="val" id="menuVolMasterVal">—</span>
+        </div>
+        <div class="settings-row">
+          <label for="menuVolSfx">音效音量</label>
+          <input type="range" id="menuVolSfx" min="0" max="1" step="0.05" />
+          <span class="val" id="menuVolSfxVal">—</span>
+        </div>
+
+        <h3>进度存档</h3>
+        <p class="menu-modal-desc">清空「放置抵抗」的关卡进度与「闯关模式」的进度存档。音量偏好和参数覆盖值会保留。</p>
+        <button class="menu-btn danger" id="btnClearProgress">🗑 清空存档</button>
+      </div>
+    </div>
+
+    <!-- ===== 清空存档二次确认 ===== -->
+    <div id="clearSaveOverlay" class="overlay menu-modal hidden">
+      <div class="menu-modal-card small">
+        <h2>确认清空存档？</h2>
+        <p class="menu-modal-desc">放置抵抗的解锁/通关记录与闯关模式进度将被删除，且无法恢复。音量与参数设置不受影响。</p>
+        <div class="menu-modal-actions">
+          <button class="menu-btn" id="btnClearCancel">取消</button>
+          <button class="menu-btn danger" id="btnClearConfirm">确认清空</button>
+        </div>
       </div>
     </div>
 

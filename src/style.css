@@ -546,6 +546,109 @@ body {
   letter-spacing: 1px;
 }
 
+/* ===== 主菜单弹窗：闯关占位 / 设置 / 清档确认 ===== */
+.menu-modal {
+  background: rgba(3, 4, 10, 0.78);
+  backdrop-filter: blur(4px);
+  z-index: 30;
+}
+
+.menu-modal-card {
+  width: min(440px, 88vw);
+  padding: 26px 30px 28px;
+  background: linear-gradient(180deg, #121321, #0b0c15);
+  border: 1px solid #2f3a5a;
+  border-radius: 10px;
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.65), 0 0 0 1px rgba(124, 58, 237, 0.12);
+  color: #cfd8e6;
+}
+
+.menu-modal-card.small {
+  width: min(380px, 88vw);
+  text-align: center;
+}
+
+.menu-modal-card h2 {
+  margin: 0 0 18px;
+  font-size: 22px;
+  letter-spacing: 2px;
+  color: #eaf1ff;
+}
+
+.menu-modal-card h3 {
+  margin: 24px 0 10px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid #1f2638;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 1.5px;
+  color: #9aa6b8;
+}
+
+.menu-modal-card h3:first-of-type {
+  margin-top: 0;
+}
+
+.menu-modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 18px;
+}
+
+.menu-modal-head h2 {
+  margin: 0;
+}
+
+.menu-modal-close {
+  width: 32px;
+  height: 32px;
+  background: transparent;
+  border: 1px solid #2f3a5a;
+  border-radius: 50%;
+  color: #9aa6b8;
+  font-size: 15px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.menu-modal-close:hover {
+  border-color: #7c3aed;
+  color: #fff;
+}
+
+.menu-modal-desc {
+  margin: 8px 0 17px;
+  color: #8b96a8;
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.menu-modal-actions {
+  display: flex;
+  justify-content: center;
+  gap: 12px;
+  margin-top: 22px;
+}
+
+.menu-modal-card .menu-btn {
+  min-width: 0;
+  padding: 11px 24px;
+  font-size: 14px;
+  letter-spacing: 1px;
+}
+
+.menu-btn.danger {
+  border-color: #7f2f3a;
+  color: #ffb4b4;
+}
+
+.menu-btn.danger:hover {
+  border-color: #ef4444;
+  color: #fff;
+  box-shadow: 0 4px 20px rgba(239, 68, 68, 0.25);
+}
+
 /* ===== 选关页 ===== */
 .levels-overlay {
   background: rgba(3, 4, 10, 0.92);

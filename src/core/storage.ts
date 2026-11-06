@@ -323,6 +323,25 @@ export function saveProgress(p: Progress): void {
   }
 }
 
+/**
+ * 清空玩法进度（放置抵抗的关卡解锁/通关 + 闯关模式预留的进度 key）。
+ * 只删进度相关的 key，不碰设置覆盖值 / 音量偏好，也不碰 FSA 目录里的 settings.json。
+ */
+export function clearProgress(): void {
+  try {
+    localStorage.removeItem(LS_PROGRESS);
+    // 闯关模式尚未实现，但按前缀预留：将来它的进度也只落在这些 key 上
+    const keys: string[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && k.startsWith("zombieGame.challenge.")) keys.push(k);
+    }
+    for (const k of keys) localStorage.removeItem(k);
+  } catch {
+    // 隐私模式等场景静默失败
+  }
+}
+
 /** 记录通关一关：把它标记为 beaten，并解锁下一个关卡（按 LEVELS 数组顺序） */
 export function recordBeaten(levelId: string): Progress {
   const p = loadProgress();

@@ -18,6 +18,7 @@ import { SLIDER_GROUPS } from "./data/settings/sliders";
 import { sound, SFX } from "./audio/manager";
 import {
   FSA_SUPPORTED,
+  clearProgress,
   clearSaveDir,
   exportToFile,
   getSaveDir,
@@ -86,6 +87,15 @@ async function boot(): Promise<void> {
   const resultCard = document.getElementById("resultCard") as HTMLElement;
   const resultTitle = document.getElementById("resultTitle") as HTMLElement;
   const resultSubtitle = document.getElementById("resultSubtitle") as HTMLElement;
+
+  // 主菜单弹窗：闯关占位 / 设置 / 清档二次确认
+  const challengeOverlay = document.getElementById("challengeOverlay") as HTMLElement;
+  const menuSettingsOverlay = document.getElementById("menuSettingsOverlay") as HTMLElement;
+  const clearSaveOverlay = document.getElementById("clearSaveOverlay") as HTMLElement;
+  const menuVolMaster = document.getElementById("menuVolMaster") as HTMLInputElement;
+  const menuVolMasterVal = document.getElementById("menuVolMasterVal") as HTMLElement;
+  const menuVolSfx = document.getElementById("menuVolSfx") as HTMLInputElement;
+  const menuVolSfxVal = document.getElementById("menuVolSfxVal") as HTMLElement;
 
   // 面板标题映射：key = 分组名（和 SLIDERS.group 一致）
   const GROUP_TITLES: Record<string, string> = {
@@ -274,10 +284,26 @@ async function boot(): Promise<void> {
     // 结算弹窗独立，由 victory/defeat 触发，不受路由控制
   };
 
+  /** 弹窗统一开合：hidden 控制 display，active 触发淡入 */
+  const openModal = (el: HTMLElement): void => {
+    el.classList.remove("hidden");
+    requestAnimationFrame(() => el.classList.add("active"));
+  };
+  const closeModal = (el: HTMLElement): void => {
+    el.classList.remove("active");
+    el.classList.add("hidden");
+  };
+  const closeMenuModals = (): void => {
+    closeModal(challengeOverlay);
+    closeModal(menuSettingsOverlay);
+    closeModal(clearSaveOverlay);
+  };
+
   const applyRoute = (route: Route): void => {
-    // 隐藏结算弹窗（切路由时清掉）
+    // 隐藏结算弹窗和菜单弹窗（切路由时清掉）
     resultOverlay.classList.add("hidden");
     resultOverlay.classList.remove("active");
+    closeMenuModals();
 
     // 先统一收起训练场的 UI / 专属地面装饰；training 分支再重新打开
     trainingPanel.deactivate();
@@ -469,9 +495,10 @@ async function boot(): Promise<void> {
   };
 
   // ====== 主菜单按钮 ======
-  const newGameBtn = document.getElementById("btnNewGame") as HTMLButtonElement;
-  const loadGameBtn = document.getElementById("btnLoadGame") as HTMLButtonElement;
+  const placementBtn = document.getElementById("btnPlacement") as HTMLButtonElement;
+  const challengeBtn = document.getElementById("btnChallenge") as HTMLButtonElement;
   const trainingBtn = document.getElementById("btnTraining") as HTMLButtonElement;
+  const menuSettingsBtn = document.getElementById("btnMenuSettings") as HTMLButtonElement;
   const menuMuteBtn = document.getElementById("btnMenuMute") as HTMLButtonElement;
   const updateMuteIcon = () => {
     menuMuteBtn.textContent = sound.isMuted() ? "🔇" : "🔊";
@@ -480,10 +507,81 @@ async function boot(): Promise<void> {
     sound.toggleMute();
     updateMuteIcon();
   };
-  newGameBtn.onclick = () => { sound.resume(); sound.play(SFX.UI_CLICK); router.go("levels"); };
-  loadGameBtn.onclick = () => { sound.resume(); sound.play(SFX.UI_CLICK); router.go("levels"); };
+
+  // 放置抵抗：直接进入现有 #/play，从第一关正常开局
+  placementBtn.onclick = () => {
+    sound.resume();
+    sound.play(SFX.UI_CLICK);
+    currentLevel = findLevel("level-1") ?? null;
+    router.go("play");
+  };
+  // 闯关模式：只弹占位说明，不做成可点进去的空页面
+  challengeBtn.onclick = () => {
+    sound.resume();
+    sound.play(SFX.UI_CLICK);
+    openModal(challengeOverlay);
+  };
   trainingBtn.onclick = () => { sound.resume(); sound.play(SFX.UI_CLICK); router.go("training"); };
   updateMuteIcon();
+
+  // ====== 主菜单设置：音量与对局内设置面板共用 getSetting / setSetting ======
+  const syncMenuVolumes = (): void => {
+    const master = getSetting("audio.master");
+    const sfx = getSetting("audio.sfx");
+    menuVolMaster.value = String(master);
+    menuVolSfx.value = String(sfx);
+    menuVolMasterVal.textContent = `${Math.round(master * 100)}%`;
+    menuVolSfxVal.textContent = `${Math.round(sfx * 100)}%`;
+  };
+  const bindMenuVolume = (
+    input: HTMLInputElement,
+    valEl: HTMLElement,
+    path: "audio.master" | "audio.sfx",
+  ): void => {
+    input.addEventListener("input", () => {
+      const v = Number(input.value);
+      setSetting(path, v);
+      valEl.textContent = `${Math.round(v * 100)}%`;
+      void saveSettings();
+      if (path === "audio.master") sound.setMaster(v);
+      else sound.setSfx(v);
+    });
+  };
+  bindMenuVolume(menuVolMaster, menuVolMasterVal, "audio.master");
+  bindMenuVolume(menuVolSfx, menuVolSfxVal, "audio.sfx");
+
+  menuSettingsBtn.onclick = () => {
+    sound.resume();
+    sound.play(SFX.UI_CLICK);
+    syncMenuVolumes();
+    openModal(menuSettingsOverlay);
+  };
+  document.getElementById("btnMenuSettingsClose")!.onclick = () => {
+    sound.play(SFX.UI_CLICK);
+    closeModal(menuSettingsOverlay);
+  };
+  document.getElementById("btnChallengeClose")!.onclick = () => {
+    sound.play(SFX.UI_CLICK);
+    closeModal(challengeOverlay);
+  };
+
+  // ====== 清空存档：先点按钮，再二次确认 ======
+  const clearProgressBtn = document.getElementById("btnClearProgress") as HTMLButtonElement;
+  clearProgressBtn.onclick = () => {
+    sound.play(SFX.UI_CLICK);
+    openModal(clearSaveOverlay);
+  };
+  document.getElementById("btnClearCancel")!.onclick = () => closeModal(clearSaveOverlay);
+  document.getElementById("btnClearConfirm")!.onclick = () => {
+    clearProgress();
+    progress = loadProgress(); // 内存里的进度同步重置，下一次开局从第一关起
+    closeModal(clearSaveOverlay);
+    sound.play(SFX.UI_CLICK);
+    clearProgressBtn.textContent = "✓ 已清空";
+    setTimeout(() => {
+      clearProgressBtn.textContent = "🗑 清空存档";
+    }, 1600);
+  };
 
   // ====== 选关页返回按钮 ======
   const backFromLevelsBtn = document.getElementById("btnBackFromLevels") as HTMLButtonElement;

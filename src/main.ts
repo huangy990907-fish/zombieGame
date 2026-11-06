@@ -1,22 +1,26 @@
 /**
  * 入口 —— 启动游戏、驱动主循环、绑定操作。
  *
- * 三屏 SPA（hash 路由）：
+ * 五屏 SPA（hash 路由）：
  *   #/ 或 #/menu     → 主菜单（PixiJS 画面做静态背景 + 半透明遮罩）
  *   #/levels         → 选关页（横向节点式地图）
  *   #/play           → 战斗场景（原有顶栏 + PixiJS + HUD）
+ *   #/training       → 训练场
+ *   #/workshop       → 工坊编辑器（阶段 2，仅地址直达）
  *
  * 主循环是固定步长 + 累加器模式：
  *   渲染帧率可能波动，但逻辑永远以 1/60 秒为一步；
  *   速度倍率就是"这一帧多走几步"，2x 就是每帧走 2 步逻辑。
  *
- * menu/levels 路由下 ticker 继续跑（保证 Pixi 渲染帧稳定），
+ * menu/levels/workshop 路由下 ticker 继续跑（保证 Pixi 渲染帧稳定），
  * 但 game.tick() 不被调用——战斗逻辑停止，画面冻结成静态背景。
  */
 import { getSetting, setSetting } from "./data/settings/runtime";
 import { SLIDER_GROUPS } from "./data/settings/sliders";
-import { loadBuiltinMaps } from "./data/maps";
+import { loadBuiltinMaps, registerRuntimeMap } from "./data/maps";
 import { sound, SFX } from "./audio/manager";
+import { WorkshopPage } from "./workshop/page";
+import { WORKSHOP_PREVIEW_MAP_ID, compileWorkshopPreview } from "./workshop/storage";
 import {
   FSA_SUPPORTED,
   clearProgress,
@@ -48,6 +52,15 @@ async function boot(): Promise<void> {
   // ====== 先加载内置地图（JSON -> MapDef），再构造任何依赖地图的实例 ======
   await loadBuiltinMaps();
 
+  // 调试 / 阶段 1A 的临时选图入口：?map=<id>（正式选图 UI 留到阶段 3）
+  const mapOverrideId = new URLSearchParams(window.location.search).get("map") ?? undefined;
+
+  // 工坊「试玩」：把预览草稿注册成运行时地图，再按 ?map=workshop-draft 解析
+  if (mapOverrideId === WORKSHOP_PREVIEW_MAP_ID) {
+    const preview = compileWorkshopPreview();
+    if (preview) registerRuntimeMap(preview);
+  }
+
   // ====== 先加载存档，再构造 Game（覆盖值先就位，Game 启动按合并后的值读） ======
   const loadedFrom = await loadSettings();
 
@@ -55,9 +68,6 @@ async function boot(): Promise<void> {
   sound.init();
   sound.setMaster(getSetting("audio.master"));
   sound.setSfx(getSetting("audio.sfx"));
-
-  // 调试 / 阶段 1A 的临时选图入口：?map=<id>（正式选图 UI 留到阶段 3）
-  const mapOverrideId = new URLSearchParams(window.location.search).get("map") ?? undefined;
 
   const game = new Game(mapOverrideId);
   const renderer = new Renderer();
@@ -69,6 +79,9 @@ async function boot(): Promise<void> {
   const training = new TrainingSession(mapOverrideId);
   const trainingPanel = new TrainingPanel(training, () => router.go("menu"));
   trainingPanel.attachCanvas(renderer.app.canvas as HTMLCanvasElement);
+
+  // ====== 工坊编辑器：整页 DOM overlay，仅 #/workshop 路由显示 ======
+  const workshop = new WorkshopPage(() => router.go("menu"));
 
   // DOM 引用
   const topbar = document.getElementById("topbar") as HTMLElement;
@@ -341,6 +354,7 @@ async function boot(): Promise<void> {
     trainingPanel.deactivate();
     renderer.setTrainingVisual(false);
     document.body.classList.remove("training");
+    workshop.deactivate();
 
     switch (route) {
       case "menu":
@@ -388,6 +402,14 @@ async function boot(): Promise<void> {
         renderer.setTrainingVisual(true);
         document.body.classList.add("training");
         sound.resumeAudio();
+        break;
+      case "workshop":
+        showOverlay(null);
+        topbar.classList.add("hidden");
+        bottom.classList.add("hidden");
+        settingsPanel.classList.remove("open");
+        workshop.activate();
+        sound.pause();
         break;
     }
   };

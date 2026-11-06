@@ -88,6 +88,17 @@ export function isReadOnlyMap(id: string): boolean {
   return READONLY_MAP_IDS.has(id);
 }
 
+/**
+ * 注册运行时地图（工坊试玩预览用）。
+ * 不写入 manifest，不算内置、不算只读；进程内有效，刷新后由预览草稿重新编译。
+ */
+export function registerRuntimeMap(map: MapDef): void {
+  MAPS[map.id] = map;
+  MAP_LIST.length = 0;
+  MAP_LIST.push(...Object.values(MAPS));
+  console.info(`[maps] 运行时地图已注册「${map.id}」${map.width}×${map.height}`);
+}
+
 function formatValidationErrors(errors: MapValidationError[]): string {
   return errors
     .map((e) => (e.x === undefined ? e.message : `(${e.x},${e.y}) ${e.message}`))

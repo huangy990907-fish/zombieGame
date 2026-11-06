@@ -26,6 +26,17 @@ export type HumanMode = "defend" | "attack" | "guard";
  */
 export type ZombieMode = "hunt" | "wander";
 
+/**
+ * 追击决策模式（按僵尸类型配置，行为层按模式分发）：
+ *  - breach：连通区域 + 可破坏开口。本区有人直追；跨区时在区域邻接图上
+ *    选“破开后最快接近活人”的最短路，破掉第一扇，逐层推进（默认）
+ *  - direct：旧行为，无视墙体分区，直接朝全场最近人类走，贴到门窗就啃
+ *
+ * 以后要加“只追可见人类 / 只破门”等模式，在这里扩联合类型，
+ * 再到 systems/ai.ts 的分发处加分支即可，不必改默认实现。
+ */
+export type ZombiePursuitMode = "breach" | "direct";
+
 /** 武器攻击形态：直线子弹 / 霰弹多弹丸 / 喷火锥形 / 火箭爆炸 / 电击链 */
 export type WeaponKind = "bullet" | "pellet" | "flame" | "rocket" | "tesla";
 
@@ -98,6 +109,8 @@ export interface ZombieDef {
   bite: number;
   /** 每次成功撕咬对人类造成的伤害（人类血量归零才进入异变） */
   damage: number;
+  /** 追击决策模式；缺省按 breach（连通区域 + 破口追击） */
+  pursuit?: ZombiePursuitMode;
 }
 
 export interface ZombieTunables {

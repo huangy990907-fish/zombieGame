@@ -10,4 +10,5 @@ export const normal: ZombieDef = {
   color: 0x8b5cf6,
   bite: 0.55,
   damage: 25,
+  pursuit: "breach",
 };

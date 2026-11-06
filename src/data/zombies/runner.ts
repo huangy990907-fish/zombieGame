@@ -10,4 +10,5 @@ export const runner: ZombieDef = {
   color: 0xc77dff,
   bite: 0.7,
   damage: 18,
+  pursuit: "breach",
 };

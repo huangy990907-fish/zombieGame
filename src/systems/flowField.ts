@@ -39,10 +39,13 @@ export class FlowField {
    * @param bodyDiameter 通行直径。>0 时，净宽小于它的开口视为不可通行：
    *   其矩形覆盖的格子标成阻挡、也不再作为 BFS 源，流场会自然绕到别的开口。
    *   0 表示不做体型过滤（原行为：所有开口都可用）。
+   * @param sourcesOverride 显式指定 BFS 源（breach 追击用“只以已破开口为源”的流场）；
+   *   传空数组表示没有源（sample 返回 0 方向），由调用方自行退化。
    */
   constructor(
     map: MapDef,
     bodyDiameter = 0,
+    sourcesOverride?: { x: number; y: number }[],
   ) {
     this.cols = Math.ceil(map.width / CELL);
     this.rows = Math.ceil(map.height / CELL);
@@ -55,11 +58,15 @@ export class FlowField {
     const passable = map.openings
       .map((o) => ({ o, width: openingNetWidth(o.rect) }))
       .filter(({ width }) => bodyDiameter <= 0 || width >= bodyDiameter);
-    this.sources = passable.map(({ o }) => ({
-      x: o.rect.x + o.rect.w * 0.5,
-      y: o.rect.y + o.rect.h * 0.5,
-    }));
-    if (this.sources.length === 0) this.sources = map.openingCenters;
+    this.sources =
+      sourcesOverride ??
+      passable.map(({ o }) => ({
+        x: o.rect.x + o.rect.w * 0.5,
+        y: o.rect.y + o.rect.h * 0.5,
+      }));
+    if (sourcesOverride === undefined && this.sources.length === 0) {
+      this.sources = map.openingCenters;
+    }
 
     // 先把所有被墙体覆盖的格子标记为不可走（门窗开口不算墙）；
     // 体型过不去的开口同样按阻挡处理，避免胖子顺着流场顶到窗边。
@@ -185,8 +192,13 @@ export class FlowField {
     return this;
   }
 
-  /** 兜底：直线朝最近的开口中心走 */
+  /** 兜底：直线朝最近的开口中心走；没有源就原地不动 */
   private fallback(x: number, y: number): FlowField {
+    if (this.sources.length === 0) {
+      this.x = 0;
+      this.y = 0;
+      return this;
+    }
     let bx = this.sources[0].x;
     let by = this.sources[0].y;
     let bd = Infinity;

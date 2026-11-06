@@ -15,6 +15,7 @@ import { effectiveHuman, effectiveWeapon, effectiveZombie, openingInstance, setA
 import { zombieBodyDiameter } from "../data/zombies";
 import type { HumanMode, Rect, ZombieMode } from "../data/types";
 import { FlowField, openingNetWidth } from "../systems/flowField";
+import { RegionMap } from "../systems/regions";
 import { gaussClamped, insideRect, randRange, segRectHit } from "../utils/math";
 import { SpatialHash } from "../utils/spatialHash";
 
@@ -111,6 +112,13 @@ export interface Zombie {
   ty: number;
   /** 行为状态：hunt 索敌进攻 / wander 场上零人类时漫游 */
   mode: ZombieMode;
+  /**
+   * breach 追击：当前要破除的开口 id（走向它、只啃它）。
+   * null 表示本区有人类、直接追人，或处在无解漫游状态。
+   */
+  goalOpening: string | null;
+  /** breach 追击：本区没有活人且找不到破口路径时，退化为漫游，不贴墙顶门 */
+  stranded: boolean;
   /** 漫游朝向（弧度）；仅 mode === "wander" 时由行为层推进 */
   wanderAngle: number;
   /** 漫游当前动作的剩余时间（秒）：移动段与停顿段共用 */
@@ -241,6 +249,14 @@ export class World {
   flow: FlowField;
   /** 按通行直径缓存的流场：普通 11 / 狂奔 9 都共用 flow，胖子另建一张绕开窗洞 */
   private flowCache = new Map<number, FlowField>();
+  /** 按通行直径缓存的连通区域图：完好门窗是边界，破口按体型放行 */
+  private regionCache = new Map<number, RegionMap>();
+  /** 以“活人”为源的追击流场：同区追人时绕过墙体，按体型缓存并定期刷新 */
+  private humanFlowCache = new Map<number, { field: FlowField; built: number }>();
+  /** 以“指定破口目标”为源的流场：跨区走向要破除的开口，按“体型+开口 id”缓存 */
+  private openingFlowCache = new Map<string, FlowField>();
+  /** 开口 id -> 运行时实例，供 breach 追击按 id 定位目标（O(1)） */
+  private readonly openingIndex = new Map<string, Opening>();
   /** 全场最窄开口的净宽：通行直径不超过它的单位直接复用 flow */
   private readonly minOpeningWidth: number;
   time = 0;
@@ -287,6 +303,99 @@ export class World {
     this.flow = new FlowField(map);
     this.minOpeningWidth = Math.min(...map.openings.map((o) => openingNetWidth(o.rect)));
     this.bulletWalls = computeBulletWalls(map);
+    for (const o of this.openings) this.openingIndex.set(o.id, o);
+  }
+
+  /** 按 id 取运行时开口实例（breach 追击的破口目标用） */
+  opening(id: string): Opening | undefined {
+    return this.openingIndex.get(id);
+  }
+
+  /**
+   * 按通行直径取连通区域图；首次访问时构建，之后 O(1) 复用。
+   * 不同体型对应不同的可穿越开口集合（胖子 22 钻不过 16 的窗）。
+   */
+  regionMap(bodyDiameter: number): RegionMap {
+    let region = this.regionCache.get(bodyDiameter);
+    if (!region) {
+      region = new RegionMap(this.map, this.openings, bodyDiameter);
+      this.regionCache.set(bodyDiameter, region);
+    }
+    return region;
+  }
+
+  /**
+   * 把“当前体型过不去”的开口矩形并入墙体：完好的门窗、破损但过窄的开口。
+   * 追击流场用它做障碍，避免把僵尸往还关着 / 钻不过的洞口引。
+   * exceptId 用于“走向目标破口”的流场：目标开口本身要留作缺口。
+   */
+  private blockedOpeningRects(bodyDiameter: number, exceptId?: string): Rect[] {
+    const blocked: Rect[] = [];
+    for (const o of this.openings) {
+      if (o.id === exceptId) continue;
+      if (o.broken && openingNetWidth(o.rect) >= bodyDiameter) continue;
+      blocked.push(o.rect);
+    }
+    return blocked;
+  }
+
+  /** 用“墙体 + 体型过不去的开口”合成一张只留通行缺口的导航地图 */
+  private navMap(bodyDiameter: number, exceptId?: string): MapDef {
+    return {
+      ...this.map,
+      walls: [...this.map.walls, ...this.blockedOpeningRects(bodyDiameter, exceptId)],
+      openings: [],
+    };
+  }
+
+  /**
+   * 同区追击流场：以所有活人为源，障碍是墙体与“过不去”的开口。
+   * 直扑人类遇到墙角 / 门框绕不过去时，沿这张场走。
+   * 人类会移动，所以按固定间隔（0.6 秒）刷新，查询仍是 O(1)。
+   */
+  humanFlowFor(bodyDiameter: number): FlowField | null {
+    const cached = this.humanFlowCache.get(bodyDiameter);
+    if (cached && this.time - cached.built < 0.6) return cached.field;
+    const sources: { x: number; y: number }[] = [];
+    for (let i = 0; i < this.humans.length; i++) {
+      const h = this.humans[i];
+      if (h.alive) sources.push({ x: h.x, y: h.y });
+    }
+    if (sources.length === 0) return null;
+    const field = new FlowField(this.navMap(bodyDiameter), 0, sources);
+    this.humanFlowCache.set(bodyDiameter, { field, built: this.time });
+    return field;
+  }
+
+  /**
+   * 走向指定开口的流场：以该开口中心为源，其它过不去的开口按墙处理。
+   * 跨区追击时用它绕过外墙 / 内墙，而不是朝开口中心走直线撞墙。
+   * 开口破碎或换图时缓存整体清空。
+   */
+  openingFlow(openingId: string, bodyDiameter: number): FlowField | null {
+    const op = this.opening(openingId);
+    if (!op) return null;
+    const key = `${bodyDiameter}:${openingId}`;
+    let field = this.openingFlowCache.get(key);
+    if (!field) {
+      field = new FlowField(this.navMap(bodyDiameter, openingId), 0, [
+        { x: op.rect.x + op.rect.w * 0.5, y: op.rect.y + op.rect.h * 0.5 },
+      ]);
+      this.openingFlowCache.set(key, field);
+    }
+    return field;
+  }
+
+  /**
+   * 导航拓扑变化（开口被啃破）：立刻丢弃区域图 / 破口流场缓存，并让所有丧尸
+   * 下一帧重新决策 —— 不等各自 0.3~0.6 秒的索敌节拍，做到“刚破口就同步”。
+   * 原流场与破碎状态无关（开口从来不是流场障碍），不需要重建。
+   */
+  invalidateNavigation(): void {
+    this.regionCache.clear();
+    this.humanFlowCache.clear();
+    this.openingFlowCache.clear();
+    for (let i = 0; i < this.zombies.length; i++) this.zombies[i].retarget = 0;
   }
 
   /** 按通行直径取流场；所有开口都能过时直接复用共享流场（保持原行为） */
@@ -425,6 +534,8 @@ export class World {
       tx: x,
       ty: y,
       mode: "hunt",
+      goalOpening: null,
+      stranded: false,
       wanderAngle: randRange(-Math.PI, Math.PI),
       wanderTimer: 0,
       wanderRest: false,

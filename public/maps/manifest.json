@@ -15,6 +15,11 @@
       "id": "test-multi",
       "file": "test-multi.json",
       "readOnly": true
+    },
+    {
+      "id": "my-map",
+      "file": "my-map.json",
+      "readOnly": false
     }
   ]
 }

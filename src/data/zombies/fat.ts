@@ -15,4 +15,5 @@ export const fat: ZombieDef = {
   color: 0xb06a7f,
   bite: 0.85,
   damage: 40,
+  pursuit: "breach",
 };

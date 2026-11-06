@@ -252,6 +252,61 @@ function checkReachability(
   }
 }
 
+/** 两侧被墙体堵住的格（越界也算堵） */
+function isBlockedSide(grid: string[], x: number, y: number): boolean {
+  if (x < 0 || y < 0 || x >= GRID_COLS || y >= GRID_ROWS) return true;
+  return grid[y]?.[x] === TILE_CHARS.wall;
+}
+
+/**
+ * 每个门窗的两侧都必须可通行：
+ *  - 横向开口（w >= h）检查上下两排
+ *  - 纵向开口（h > w）检查左右两列
+ *  - 1×1 的洞口方向不明，上下或左右任意一组通过即可
+ * 编辑器与加载期共用这条规则，确保「画出来的门窗能从两边走」。
+ */
+function checkOpeningPassages(
+  grid: string[],
+  openings: Array<{ id: string; kind: "door" | "window"; rect: TileRect }>,
+  errors: MapValidationError[],
+): void {
+  for (const opening of openings) {
+    const rect = opening.rect;
+    const horizontal = rect.w >= rect.h;
+    let blocked: { x: number; y: number } | null = null;
+
+    const checkVertical = (): { x: number; y: number } | null => {
+      for (let x = rect.x; x < rect.x + rect.w; x++) {
+        if (isBlockedSide(grid, x, rect.y - 1)) return { x, y: rect.y - 1 };
+        if (isBlockedSide(grid, x, rect.y + rect.h)) return { x, y: rect.y + rect.h };
+      }
+      return null;
+    };
+    const checkHorizontal = (): { x: number; y: number } | null => {
+      for (let y = rect.y; y < rect.y + rect.h; y++) {
+        if (isBlockedSide(grid, rect.x - 1, y)) return { x: rect.x - 1, y };
+        if (isBlockedSide(grid, rect.x + rect.w, y)) return { x: rect.x + rect.w, y };
+      }
+      return null;
+    };
+
+    if (horizontal) {
+      blocked = checkVertical();
+      if (blocked && rect.w === 1 && rect.h === 1) blocked = checkHorizontal();
+    } else {
+      blocked = checkHorizontal();
+    }
+
+    if (blocked) {
+      errors.push({
+        message: `开口「${opening.id}」有一侧被墙体堵住，丧尸无法从两边通过`,
+        x: blocked.x,
+        y: blocked.y,
+      });
+    }
+  }
+}
+
 /**
  * 校验地图 JSON。返回空数组表示通过。
  * 所有能落到格子的错误都带 x / y，编辑器与保存前校验共用这一份规则。
@@ -364,6 +419,7 @@ export function validateMapJson(raw: unknown): MapValidationError[] {
 
   // ===== 瓦片内容 =====
   if (grid) {
+    checkOpeningPassages(grid, openings, errors);
     let wallCount = 0;
     let orphanCount = 0;
     for (let y = 0; y < GRID_ROWS; y++) {

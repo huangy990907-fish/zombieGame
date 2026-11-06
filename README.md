@@ -181,6 +181,18 @@
 
 训练场会额外绘制青色全场网格、虚线房间边框、四角标记与地面靶心；选中单位画 8 段弧高亮。正常对局不显示这些装饰。
 
+## 工坊编辑器（阶段 2）
+
+工坊是内容生产工具，**仅地址直达**：`#/workshop`。主菜单入口与开发者模式开关属于阶段 4，放置模式选图属于阶段 3，当前都没有接入；左上角「← 主菜单」退出。
+
+- 画布固定 `74 × 45` 格、`16px` 一格（`1184 × 720`），不做自定义尺寸；网格可见，悬停高亮当前格，滚轮以光标为中心缩放，右键 / 中键 / 空格 + 左键拖拽平移。
+- 画笔：空地、墙、门、窗、人类可行区、丧尸出生点、擦除。门 / 窗按拖拽起点与终点决定宽度（必须落在 16px 的整数倍），拖动时实时显示拟定净宽（px / 格数）、默认血量与通行速度；默认值可在左栏「新门窗默认值」修改。人类区与出生区按拖拽画矩形。
+- 擦除门窗会还原成墙；撤销 / 重做支持 `Ctrl/Cmd+Z` 与 `Shift+Ctrl/Cmd+Z`，历史栈上限 100 步；清空也可撤销。
+- 左栏列出全部门窗，可直接改单扇 `maxHp` / `passSpeed` 或删除；右侧小地图与视口框实时跟随。
+- 校验面板共用 `validateMapJson()`：至少 1 扇门、人类区存在且世界可达、出生区落在空地且不与人类区冲突、出生点可达所有开口、每扇门窗两侧可通行。带坐标的错误可点击跳到对应格。
+- 草稿自动写入 localStorage（250ms 防抖），刷新或重进 `#/workshop` 自动恢复；可导入 / 导出 `public/maps` 可直接使用的 JSON（含 `schemaVersion`）。内置地图只读，需「另存为副本」，副本 id 不能与内置图重名。
+- 校验通过后「用当前图试玩」：`compileTilesToMapDef()` 即时编译，草稿注册为运行时地图并跳到 `?map=workshop-draft#/training`，不写入 `public/maps`。
+
 ## 技术栈
 
 | 方面 | 选型 |
@@ -190,7 +202,7 @@
 | 渲染 | PixiJS 8.6（WebGL/WebGPU），绘制到 Canvas |
 | UI | 原生 DOM + CSS，HUD 与训练场面板均为覆盖层 |
 | 音频 | Web Audio API（`AudioBuffer` 预加载 + 全局限频） |
-| 路由 | 自写 hash 路由（`#/menu`、`#/levels`、`#/play`、`#/training`） |
+| 路由 | 自写 hash 路由（`#/menu`、`#/levels`、`#/play`、`#/training`、`#/workshop`） |
 | 存档 | localStorage + File System Access API + JSON 导入导出 |
 | 测试 | 无自动化测试，改动后以 `npm run build` + 浏览器实跑为准 |
 
@@ -265,6 +277,11 @@ zombieGame/
 │   ├── training/
 │   │   ├── session.ts      # 训练场独立 World、生成/删除/清场、统计、暂停/单步/慢放
 │   │   └── panel.ts        # 训练场右侧 DOM 面板：单位库、编辑器、读数
+│   ├── workshop/
+│   │   ├── doc.ts          # 瓦片文档模型：画笔、区域、实施例、历史快照、JSON 转换
+│   │   ├── editor.ts       # 2D 画布：缩放、平移、绘制、撤销重做、小地图与错误定位
+│   │   ├── page.ts         # 整页 DOM：画笔、默认值、开口列表、校验面板、导入导出
+│   │   └── storage.ts      # 草稿 localStorage、内置图目录、试玩预览地图注册
 │   ├── ui/
 │   │   └── hud.ts          # 正常对局顶栏兵种配比与底栏战况
 │   └── utils/
@@ -518,8 +535,9 @@ npm run dev
 
 **工程与内容**
 
-- 目前只有 1 个关卡（`level-1`「初次尸潮」，8 波），内置 3 张只读地图（`arena` / `test-yard` / `test-multi`，后者是 2 门 3 窗回归图）。地图以 `public/maps/*.json` + manifest 运行时加载（0.5.0 阶段 0），关卡通过 `LevelDef.mapId` 引用地图（阶段 1A）；调试可用 `?map=<id>` 覆盖，玩家可见的选图界面与工坊编辑器仍未实现。
+- 目前只有 1 个关卡（`level-1`「初次尸潮」，8 波），内置 3 张只读地图（`arena` / `test-yard` / `test-multi`，后者是 2 门 3 窗回归图）。地图以 `public/maps/*.json` + manifest 运行时加载（0.5.0 阶段 0），关卡通过 `LevelDef.mapId` 引用地图（阶段 1A）；调试可用 `?map=<id>` 覆盖。玩家可见的选图界面属于阶段 3；工坊编辑器已完成阶段 2，但只能通过 `#/workshop` 直达，主菜单入口与开发者模式属于阶段 4。
 - 0.5.0 阶段 0/1B 的地图格式限制：画布固定 `74 × 45` 格（`16px`），不支持自定义尺寸；校验接受任意数量门窗（至少 1 扇门），守岗与出怪按开口类型 / 几何推导；`arena` / `test-yard` / `test-multi` 都是只读内置地图，工坊只能另存副本。
+- 工坊草稿只存 localStorage，不能当作发布：试玩通过 `?map=workshop-draft` 注册运行时地图，正式落地仍需「导出 JSON → 放入 `public/maps/` → 更新 `manifest.json`」。工坊目前没有多人协同、图层或自定义画布尺寸。
 - 地图 JSON 加载失败、manifest 非法或校验不通过时，会回退 `src/data/maps/arena.ts` 的 0.4.3 TS 兜底几何（画布 `1180 × 720`、窗宽 18），并在 console 输出 `[maps]` warning；正常路径下以 `public/maps/arena.json` 编译出的 `1184 × 720` / 窗宽 16 为准。请求地图 id 不存在时会回退默认图并在页面顶部显示 `.map-notice` 提示。
 - 阶段 1B 折中：玩家设置的门 / 窗覆盖仍按种类统一生效，优先级高于逐扇 JSON 默认值；因此 `#/play` 下 `level-1` 的 `doorHp=450 / winHp=100 / winPassSpeed=0.45` 会覆盖 `test-multi` 的逐扇默认值，想看逐扇差异请用 `#/training` 或无关卡覆盖的场景。逐扇独立覆盖 UI 留到后续阶段。
 - 音效：18 个事件已接线，素材均为 freesound CC0 录音或其派生；但 `weapon-reload` 与 `human-hurt` 没有调用点，放入文件也不会响。

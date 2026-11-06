@@ -8,6 +8,32 @@
 
 暂无待发布变更。
 
+## [0.5.1] - 2026-11-06
+
+工坊新增开发态「保存到项目」：编辑器内一键把当前图写入 `public/maps/` 并自动登记 manifest，训练场下拉无需刷新即可选到新图。**只在开发服务器可用，不是发布通道。**
+
+### 新增
+
+- Vite dev 中间件 `scripts/workshop-save-plugin.ts`（`POST /__workshop/save`）：服务端二次校验 `schemaVersion = 1` 与 `validateMapJson()`、id 白名单 / 长度、`map.id` 与请求 id 一致；内置只读图返回 403；重名未确认返回 409，确认后才覆盖。
+- 默认只接受 loopback（`127.0.0.1` / `::1`），非本机 403；远程开发需显式设置 `VITE_WORKSHOP_ALLOW_REMOTE=1`。
+- 覆盖前备份到 `public/maps/.bak/<id>-<时间戳>.json`，每个 id 只保留最近 5 份；`.bak/` 与 `*.tmp` 已加入 `.gitignore`。
+- 原子写入（先写 `*.tmp` 再 rename）、失败回滚、进程内串行队列；manifest 自动追加或更新为 `readOnly: false`，不产生重复条目。
+- 工坊编辑器新增 dev-only「💾 保存到项目（dev）」按钮：只在 `import.meta.env.DEV` 下动态 `import()` 保存模块并显示；保存成功后热刷新工坊内置目录与训练场地图下拉，不整页 reload。
+- dev 中间件直接按请求读取 `public/maps/*.json`，补上「Vite 启动后新建的 public 文件不在 `publicFiles` 集合、会被 SPA fallback 返回 index.html」的缺口，保证保存后立刻可读。
+
+### 变更
+
+- 版本号升至 `0.5.1`。
+- 保存链路成功后由 `main.ts` 重新加载注册表并刷新训练场下拉；若覆盖的是当前正在训练的图，面板提示「切到其它地图再切回」。
+
+### 修复
+
+- 保存新图后训练场下拉原先要等 Vite 文件监听刷新才出现；现在保存完成即可选到。
+
+### 安全
+
+- 生产构建整段剥离：`vite build` 后 `dist/` 搜不到 `__workshop/save` 与「保存到项目」；`npm run preview` 下接口 404、按钮不存在。工坊保存仍只影响本地开发仓库，不构成发布通道。
+
 ## [0.5.0] - 2026-11-06
 
 地图数据全面 JSON 化，任意户型可跑；新增工坊编辑器与训练场选图，开发者模式下才显示工坊入口。

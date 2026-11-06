@@ -3,7 +3,7 @@
 一个运行在浏览器里的 2D 自主对抗小游戏：50 名人类守在封闭房间里，抵御一波波从门和窗户涌入的丧尸。玩家不直接操控单个单位，而是通过调整参数、切换行为模式和游戏速度来观察战局；另外提供一个独立的「训练场」，用于自由生成单位、改数值、测武器 DPS。
 
 - 技术栈：TypeScript + Vite + PixiJS（渲染到 Canvas）
-- 版本：`0.5.0`，变更记录见 [CHANGELOG.md](./CHANGELOG.md)
+- 版本：`0.5.1`，变更记录见 [CHANGELOG.md](./CHANGELOG.md)
 - 入口：主菜单 → 放置抵抗 / 闯关模式（占位）/ 训练场 / 设置；开启开发者模式后主菜单额外出现「地图工坊」
 
 ## 目录
@@ -195,6 +195,7 @@
 - 校验面板共用 `validateMapJson()`：至少 1 扇门、人类区存在且世界可达、出生区落在空地且不与人类区冲突、出生点可达所有开口、每扇门窗两侧可通行。带坐标的错误可点击跳到对应格。
 - 草稿自动写入 localStorage（250ms 防抖），刷新或重进 `#/workshop` 自动恢复；可导入 / 导出 `public/maps` 可直接使用的 JSON（含 `schemaVersion`）。内置地图只读，需「另存为副本」，副本 id 不能与内置图重名。
 - 校验通过后「用当前图试玩」：`compileTilesToMapDef()` 即时编译，草稿注册为运行时地图并跳到 `?map=workshop-draft#/training`，不写入 `public/maps`。
+- **保存到项目（仅开发态）**：`npm run dev` 下工坊会出现「💾 保存到项目（dev）」按钮，把当前图写入 `public/maps/<id>.json` 并自动登记 `manifest.json`（`readOnly: false`），训练场地图下拉保存后即可选到，不需要整页刷新。服务端只接受本机（loopback）请求，非本机 403；远程开发需显式设 `VITE_WORKSHOP_ALLOW_REMOTE=1`。覆盖已有地图前会先备份到 `public/maps/.bak/`，每个 id 只保留最近 5 份（`.bak/` 与 `*.tmp` 已被 git 忽略）。内置只读图不能覆盖；重名会先弹确认。**这不是发布通道**：`vite build` 会把保存按钮与接口整段剥离，`npm run preview` 下按钮不存在、接口 404，正式发布仍需提交 JSON 与 manifest。
 
 ## 开发者模式
 
@@ -225,6 +226,9 @@
 zombieGame/
 ├── index.html              # 页面骨架：顶栏、画布容器、主菜单/选关/结算/设置/训练场面板
 ├── package.json            # 版本号与 scripts（dev / build / preview）
+├── vite.config.ts          # Vite 配置：注册工坊保存插件（仅 dev 生效）
+├── scripts/
+│   └── workshop-save-plugin.ts # 工坊「保存到项目」dev 中间件（校验 / 备份 / manifest）
 ├── README.md               # 本文件
 ├── CHANGELOG.md            # 变更记录
 ├── AGENTS.md               # 项目索引（给后续接手的 AI：模块职责 / 改动映射 / 约定）
@@ -293,6 +297,7 @@ zombieGame/
 │   │   ├── doc.ts          # 瓦片文档模型：画笔、区域、实施例、历史快照、JSON 转换
 │   │   ├── editor.ts       # 2D 画布：缩放、平移、绘制、撤销重做、小地图与错误定位
 │   │   ├── page.ts         # 整页 DOM：画笔、默认值、开口列表、校验面板、导入导出
+│   │   ├── devSave.ts      # 仅开发态：保存到项目的请求封装（生产构建不加载）
 │   │   └── storage.ts      # 草稿 localStorage、内置图目录、试玩预览地图注册
 │   ├── ui/
 │   │   └── hud.ts          # 正常对局顶栏兵种配比与底栏战况
@@ -547,9 +552,9 @@ npm run dev
 
 **工程与内容**
 
-- 目前只有 1 个关卡（`level-1`「初次尸潮」，8 波），内置 3 张只读地图（`arena` / `test-yard` / `test-multi`，后者是 2 门 3 窗回归图）。地图以 `public/maps/*.json` + manifest 运行时加载（0.5.0 阶段 0），关卡通过 `LevelDef.mapId` 引用地图（阶段 1A），选关节点、详情与「开始战斗」按钮都会显示所用地图名。训练场面板已提供地图下拉（阶段 3），`#/play` 仍严格按关卡 `mapId` 绑定运行、没有对局内选图 UI；调试仍可用 `?map=<id>` 覆盖。工坊编辑器已完成阶段 2，入口在开发者模式下才显示（阶段 4），玩家模式直达 `#/workshop` 会被挡回主菜单；该拦截只是界面显隐，不是安全边界。
+- 目前只有 1 个关卡（`level-1`「初次尸潮」，8 波），内置 3 张只读地图（`arena` / `test-yard` / `test-multi`，后者是 2 门 3 窗回归图）。地图以 `public/maps/*.json` + manifest 运行时加载（0.5.0 阶段 0），关卡通过 `LevelDef.mapId` 引用地图（阶段 1A），选关节点、详情与「开始战斗」按钮都会显示所用地图名。训练场面板已提供地图下拉（阶段 3），`#/play` 仍严格按关卡 `mapId` 绑定运行、没有对局内选图 UI；调试仍可用 `?map=<id>` 覆盖。工坊编辑器已完成阶段 2，入口在开发者模式下才显示（阶段 4），玩家模式直达 `#/workshop` 会被挡回主菜单；该拦截只是界面显隐，不是安全边界。0.5.1 增加开发态「保存到项目」，只服务本地开发流程。
 - 0.5.0 阶段 0/1B 的地图格式限制：画布固定 `74 × 45` 格（`16px`），不支持自定义尺寸；校验接受任意数量门窗（至少 1 扇门），守岗与出怪按开口类型 / 几何推导；`arena` / `test-yard` / `test-multi` 都是只读内置地图，工坊只能另存副本。
-- 工坊草稿只存 localStorage，不能当作发布：试玩通过 `?map=workshop-draft` 注册运行时地图，正式落地仍需「导出 JSON → 放入 `public/maps/` → 更新 `manifest.json`」。工坊目前没有多人协同、图层或自定义画布尺寸。
+- 工坊草稿只存 localStorage，不能当作发布：试玩通过 `?map=workshop-draft` 注册运行时地图。0.5.1 起开发态可在工坊内「保存到项目」直接写 `public/maps/` 并登记 manifest（只允许 loopback、覆盖前备份、每个 id 留最近 5 份），但该接口只存在于 `npm run dev`，生产构建会整段剥离，**不是发布通道**；正式发布仍需提交 JSON 与 `manifest.json`。工坊目前没有多人协同、图层或自定义画布尺寸。
 - 地图 JSON 加载失败、manifest 非法或校验不通过时，会回退 `src/data/maps/arena.ts` 的 0.4.3 TS 兜底几何（画布 `1180 × 720`、窗宽 18），并在 console 输出 `[maps]` warning；正常路径下以 `public/maps/arena.json` 编译出的 `1184 × 720` / 窗宽 16 为准。请求地图 id 不存在时会回退默认图并在页面顶部显示 `.map-notice` 提示。
 - 阶段 1B 折中：玩家设置的门 / 窗覆盖仍按种类统一生效，优先级高于逐扇 JSON 默认值；因此 `#/play` 下 `level-1` 的 `doorHp=450 / winHp=100 / winPassSpeed=0.45` 会覆盖 `test-multi` 的逐扇默认值，想看逐扇差异请用 `#/training` 或无关卡覆盖的场景。逐扇独立覆盖 UI 留到后续阶段。
 - 音效：18 个事件已接线，素材均为 freesound CC0 录音或其派生；但 `weapon-reload` 与 `human-hurt` 没有调用点，放入文件也不会响。
@@ -566,9 +571,9 @@ npm run dev
 - `package.json` 的 `version` 是版本的唯一来源。发版时同步更新 `package.json`、`CHANGELOG.md`，并打 **annotated tag** `vX.Y.Z`：
 
 ```bash
-git tag -a v0.5.0 -m "0.5.0: 地图 JSON 化、工坊编辑器、训练场选图、开发者模式"
+git tag -a v0.5.1 -m "0.5.1: 工坊开发态保存到项目（manifest 自动登记）"
 git push origin main
-git push origin v0.5.0
+git push origin v0.5.1
 ```
 
 - `CHANGELOG.md` 采用 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 风格，中文条目，新版本在上、旧版本在下；日期统一写 `YYYY-MM-DD`。

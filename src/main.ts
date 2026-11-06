@@ -106,7 +106,13 @@ async function boot(): Promise<void> {
   trainingPanel.attachCanvas(renderer.app.canvas as HTMLCanvasElement);
 
   // ====== 工坊编辑器：整页 DOM overlay，仅 #/workshop 路由显示 ======
-  const workshop = new WorkshopPage(() => router.go("menu"));
+  const workshop = new WorkshopPage(
+    () => router.go("menu"),
+    async (savedId: string) => {
+      await loadBuiltinMaps();
+      trainingPanel.reloadMaps(savedId);
+    },
+  );
 
   // DOM 引用
   const topbar = document.getElementById("topbar") as HTMLElement;

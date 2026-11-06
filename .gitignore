@@ -45,3 +45,8 @@ coverage/
 
 # Vite 缓存
 .vite/
+
+# 工坊「保存到项目」的备份与临时文件
+public/maps/.bak/
+public/maps/*.tmp
+public/maps/.*.tmp

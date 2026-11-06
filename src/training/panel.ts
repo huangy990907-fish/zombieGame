@@ -323,6 +323,17 @@ export class TrainingPanel {
       message ?? "切换地图会重建 World，并清空单位与全部实时读数。";
   }
 
+  /** 工坊保存新图后刷新下拉；不重建当前 World，也不清空正在进行的会话 */
+  reloadMaps(savedId?: string): void {
+    if (savedId && this.session.world.map.id === savedId) {
+      this.refreshMapOptions(
+        `「${savedId}」已写入项目地图；当前训练仍用旧数据，请切到其它地图再切回。`,
+      );
+      return;
+    }
+    this.refreshMapOptions("地图列表已刷新：新图可在下拉中选择。");
+  }
+
   // ============================================================
   // 周期刷新
   // ============================================================

@@ -29,6 +29,7 @@ import {
   loadBuiltinCatalog,
   loadBuiltinMapJson,
   loadWorkshopDraft,
+  resetWorkshopCatalog,
   saveWorkshopDraft,
   saveWorkshopPreview,
   type BuiltinMapEntry,
@@ -79,6 +80,7 @@ export class WorkshopPage {
   private readonly toastEl: HTMLElement;
   private readonly playBtn: HTMLButtonElement;
   private readonly exportBtn: HTMLButtonElement;
+  private readonly saveProjectBtn: HTMLButtonElement | null;
 
   private paletteButtons: HTMLButtonElement[] = [];
   private selectedOpeningId: string | null = null;
@@ -89,7 +91,11 @@ export class WorkshopPage {
   private saveTimer = 0;
   private toastTimer = 0;
 
-  constructor(private readonly onBack: () => void) {
+  constructor(
+    private readonly onBack: () => void,
+    /** 保存到项目成功后：由 main.ts 重新加载注册表并刷新训练场下拉（参数是被保存的 id） */
+    private readonly onSaved?: (id: string) => void | Promise<void>,
+  ) {
     const root = document.getElementById("workshopOverlay");
     if (!root) throw new Error("missing element #workshopOverlay");
     this.root = root;
@@ -184,6 +190,7 @@ export class WorkshopPage {
                 <button id="wsImportBtn">⬆ 导入 JSON</button>
                 <input type="file" id="wsImportFile" accept="application/json,.json" hidden />
                 <button id="wsPlay" class="primary" disabled title="校验通过后可试玩">▶ 用当前图试玩</button>
+                <button id="wsSaveProject" class="ws-dev-save" hidden disabled></button>
               </div>
               <div class="ws-builtin">
                 <select id="wsBuiltinSelect"><option value="">载入内置图…</option></select>
@@ -219,6 +226,7 @@ export class WorkshopPage {
     this.toastEl = this.query<HTMLElement>("#wsToast");
     this.playBtn = this.query<HTMLButtonElement>("#wsPlay");
     this.exportBtn = this.query<HTMLButtonElement>("#wsExport");
+    this.saveProjectBtn = this.root.querySelector<HTMLButtonElement>("#wsSaveProject");
 
     const canvas = this.query<HTMLCanvasElement>("#wsCanvas");
     const minimap = this.query<HTMLCanvasElement>("#wsMinimap");
@@ -267,6 +275,7 @@ export class WorkshopPage {
     this.root.classList.add("active");
     this.editor.setActive(true);
     requestAnimationFrame(() => this.editor.refreshLayout(!this.hasActivated));
+    this.bindDevSave();
 
     if (!this.hasActivated) {
       this.hasActivated = true;
@@ -492,6 +501,7 @@ export class WorkshopPage {
       this.compileEl.textContent = `⚠ ${errors.length} 条错误，无法编译`;
       this.compileEl.classList.add("bad");
       this.playBtn.disabled = true;
+      if (this.saveProjectBtn) this.saveProjectBtn.disabled = true;
       return;
     }
 
@@ -501,10 +511,12 @@ export class WorkshopPage {
       this.compileEl.classList.remove("bad");
       this.compileEl.classList.add("ok");
       this.playBtn.disabled = false;
+      if (this.saveProjectBtn) this.saveProjectBtn.disabled = isReadOnlyMap(doc.id);
     } catch (err) {
       this.compileEl.textContent = `编译失败：${err instanceof Error ? err.message : String(err)}`;
       this.compileEl.classList.add("bad");
       this.playBtn.disabled = true;
+      if (this.saveProjectBtn) this.saveProjectBtn.disabled = true;
     }
   }
 
@@ -719,6 +731,46 @@ export class WorkshopPage {
     a.click();
     URL.revokeObjectURL(url);
     this.showToast(`已导出 ${sanitizeFileId(doc.id)}.json，可放入 public/maps/ 并登记 manifest`);
+  }
+
+  /** 仅开发态：动态加载保存模块并显示按钮（生产构建整块剔除） */
+  private bindDevSave(): void {
+    const btn = this.saveProjectBtn;
+    if (!btn) return;
+    if (import.meta.env.DEV) {
+      void import("./devSave")
+        .then((mod) => {
+          mod.installDevSave({
+            button: btn,
+            isReadOnly: () => isReadOnlyMap(this.editor.getDoc().id),
+            getErrors: () => validateMapJson(toRawJson(this.editor.getDoc())),
+            getMap: () => toMapJson(this.editor.getDoc()),
+            toast: (text, kind) => this.showToast(text, kind),
+            refresh: () => this.refreshValidation(),
+            afterSave: async (id) => {
+              this.saveDraftNow();
+              resetWorkshopCatalog();
+              await this.reloadBuiltinCatalog();
+              await this.onSaved?.(id);
+            },
+          });
+        })
+        .catch((err) => {
+          console.warn("[workshop] 开发态保存模块加载失败", err);
+          btn.remove();
+        });
+      return;
+    }
+    btn.remove();
+  }
+
+  /** 保存后重读 manifest，让新图立刻出现在「载入内置图」下拉里 */
+  private async reloadBuiltinCatalog(): Promise<void> {
+    this.builtinCatalog = [];
+    this.catalogLoaded = false;
+    this.builtinSelect.innerHTML = '<option value="">载入内置图…</option>';
+    this.builtinSelect.disabled = false;
+    await this.loadCatalog();
   }
 
   private async importJsonFile(file: File): Promise<void> {

@@ -130,6 +130,12 @@ export async function loadBuiltinCatalog(): Promise<BuiltinMapEntry[]> {
   return entries.filter((e): e is BuiltinMapEntry => e !== null);
 }
 
+/** 保存到项目后清空目录缓存，让下一次读取拿到新的 manifest 与地图 JSON */
+export function resetWorkshopCatalog(): void {
+  manifestPromise = null;
+  mapJsonCache.clear();
+}
+
 export function saveWorkshopPreview(json: MapJson): void {
   const copy: MapJson = { ...json, id: WORKSHOP_PREVIEW_MAP_ID };
   try {

@@ -1875,6 +1875,19 @@ body.training .screen canvas {
   background: rgba(139, 92, 246, 0.3);
 }
 
+/* 开发态专用：保存到项目 */
+.ws-btn-grid button.ws-dev-save {
+  grid-column: 1 / -1;
+  color: #86efac;
+  border-color: #14532d;
+  background: rgba(34, 197, 94, 0.1);
+}
+
+.ws-btn-grid button.ws-dev-save:hover:not(:disabled) {
+  border-color: #22c55e;
+  background: rgba(34, 197, 94, 0.2);
+}
+
 .ws-builtin {
   display: flex;
   gap: 6px;

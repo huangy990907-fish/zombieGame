@@ -9,6 +9,7 @@
  * 面板本身不碰游戏逻辑，只调用 TrainingSession 的公开方法。
  */
 import { settings } from "../data/settings/runtime";
+import { BUILTIN_MAP_IDS, MAP_LIST, type MapDef } from "../data/maps";
 import { WEAPON_LIST, getWeaponDef } from "../data/weapons";
 import { ZOMBIE_LIST, getZombieDef } from "../data/zombies";
 import type { Human, Zombie } from "../core/world";
@@ -21,6 +22,24 @@ import {
 
 function hexColor(c: number): string {
   return `#${c.toString(16).padStart(6, "0")}`;
+}
+
+/** 地图名 / id 来自工坊导入的 JSON，写进 DOM 前必须转义 */
+function escHtml(s: string): string {
+  return s.replace(/[&<>"']/g, (ch) => {
+    switch (ch) {
+      case "&":
+        return "&amp;";
+      case "<":
+        return "&lt;";
+      case ">":
+        return "&gt;";
+      case '"':
+        return "&quot;";
+      default:
+        return "&#39;";
+    }
+  });
 }
 
 function fmt(n: number, digits = 0): string {
@@ -61,6 +80,9 @@ export class TrainingPanel {
   private rhythmHintEl!: HTMLElement;
   private selectBtn!: HTMLButtonElement;
   private deleteBtn!: HTMLButtonElement;
+  private mapSelectEl!: HTMLSelectElement;
+  private mapInfoEl!: HTMLElement;
+  private mapHintEl!: HTMLElement;
   private pauseBtn!: HTMLButtonElement;
   private slowBtn!: HTMLButtonElement;
   private normalBtn!: HTMLButtonElement;
@@ -72,6 +94,8 @@ export class TrainingPanel {
   constructor(
     private readonly session: TrainingSession,
     private readonly onBack: () => void,
+    /** 切换地图：由 main.ts 负责重建 World、静态层与回退提示 */
+    private readonly onMapChange: (id: string) => void,
   ) {
     const root = document.getElementById("trainingPanel");
     if (!root) throw new Error("missing element #trainingPanel");
@@ -95,6 +119,7 @@ export class TrainingPanel {
     this.active = true;
     this.root.classList.add("open");
     this.editorKey = "";
+    this.refreshMapOptions();
     this.refresh(1);
   }
 
@@ -119,6 +144,15 @@ export class TrainingPanel {
         <button id="tpToolDelete">🗑 删除</button>
         <button id="tpClear">🧹 清场</button>
         <button id="tpResetStats">↺ 读数清零</button>
+      </div>
+
+      <div class="tp-section">
+        <h3>地图</h3>
+        <div class="tp-map-row">
+          <select id="tpMapSelect" class="tp-select"></select>
+          <span class="tp-chip" id="tpMapInfo"></span>
+        </div>
+        <div class="tp-hint" id="tpMapHint">切换地图会重建 World，并清空单位与全部实时读数。</div>
       </div>
 
       <div class="tp-section">
@@ -155,8 +189,20 @@ export class TrainingPanel {
     this.statsEl = this.el("tpStats");
     this.hintEl = this.el("tpHint");
     this.rhythmHintEl = this.el("tpRhythmHint");
+    this.mapSelectEl = this.el("tpMapSelect") as HTMLSelectElement;
+    this.mapInfoEl = this.el("tpMapInfo");
+    this.mapHintEl = this.el("tpMapHint");
 
     this.buildLibraries();
+
+    this.mapSelectEl.onchange = () => {
+      const id = this.mapSelectEl.value;
+      if (!id || id === this.session.world.map.id) return;
+      this.onMapChange(id);
+      this.editorKey = "";
+      this.refreshMapOptions(`已切换到「${this.session.world.map.name}」：单位与读数已清空。`);
+      this.refresh(1);
+    };
 
     (this.el("tpBack") as HTMLButtonElement).onclick = () => this.onBack();
     this.selectBtn = this.el("tpToolSelect") as HTMLButtonElement;
@@ -243,6 +289,38 @@ export class TrainingPanel {
         this.refresh(1);
       };
     }
+  }
+
+  /**
+   * 重建地图下拉：
+   *  - 内置地图 / 工坊地图分组，工坊来源包含启动时注册的 `workshop-draft`
+   *  - 当前地图不在注册表时单独列出，避免下拉显示错值
+   */
+  private refreshMapOptions(message?: string): void {
+    const current = this.session.world.map;
+    const optionOf = (m: MapDef): string =>
+      `<option value="${escHtml(m.id)}">${escHtml(m.name)}（${escHtml(m.id)}）</option>`;
+
+    const builtin = MAP_LIST.filter((m) => BUILTIN_MAP_IDS.has(m.id));
+    const workshop = MAP_LIST.filter((m) => !BUILTIN_MAP_IDS.has(m.id));
+    const groups: string[] = [];
+    if (builtin.length > 0) {
+      groups.push(`<optgroup label="内置地图">${builtin.map(optionOf).join("")}</optgroup>`);
+    }
+    if (workshop.length > 0) {
+      groups.push(`<optgroup label="工坊地图">${workshop.map(optionOf).join("")}</optgroup>`);
+    }
+    if (!MAP_LIST.some((m) => m.id === current.id)) {
+      groups.push(`<optgroup label="当前地图">${optionOf(current)}</optgroup>`);
+    }
+    this.mapSelectEl.innerHTML = groups.join("");
+    this.mapSelectEl.value = current.id;
+
+    const isBuiltin = BUILTIN_MAP_IDS.has(current.id);
+    this.mapInfoEl.textContent = `${current.name} · ${isBuiltin ? "内置" : "工坊"} · ${current.width}×${current.height}`;
+    this.mapInfoEl.classList.toggle("tp-workshop", !isBuiltin);
+    this.mapHintEl.textContent =
+      message ?? "切换地图会重建 World，并清空单位与全部实时读数。";
   }
 
   // ============================================================

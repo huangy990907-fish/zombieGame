@@ -264,7 +264,7 @@ export function updateHumans(world: World, dt: number): void {
      * 逐轴判定，撞墙时只停被挡的那个轴，保留沿墙滑动。
      * 已经被旧存档 / 极端情况放进墙里时不做阻挡，让人能自己走出来（避免永久卡死）。
      */
-    const stuck = world.solidAt(h.x, h.y, 0, HUMAN_BODY_DIAMETER);
+    const stuck = world.solidAt(h.x, h.y, 0, 0);
     let nx = clamp(h.x + h.vx * dt, bounds.x0, bounds.x1);
     let ny = clamp(h.y + h.vy * dt, bounds.y0, bounds.y1);
     if (!stuck) {
@@ -762,7 +762,8 @@ export function updateZombies(world: World, dt: number): void {
       x = z.x;
       blockedX = true;
     }
-    if (world.solidAt(z.x, y, 0, z.bodyDiameter)) {
+    // 用已修正的 x 再判 y：两个轴单独可走、拼起来却切进墙角的对角位移也要拦住
+    if (world.solidAt(x, y, 0, z.bodyDiameter)) {
       y = z.y;
       blockedY = true;
     }
@@ -822,8 +823,9 @@ export function updateZombies(world: World, dt: number): void {
       }
     }
 
-    const cx = clamp(x, 2, map.width - 2);
-    const cy = clamp(y, 2, map.height - 2);
+    // 地图边界同样按碰撞半径夹取，身体外缘不越出画布
+    const cx = clamp(x, z.radius, map.width - z.radius);
+    const cy = clamp(y, z.radius, map.height - z.radius);
     if (cx !== x) blockedX = true;
     if (cy !== y) blockedY = true;
     z.x = cx;

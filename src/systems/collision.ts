@@ -7,6 +7,10 @@
  *  - 已破坏的开口：净宽 < 身体直径时仍按实体墙处理（胖子钻不过 16px 窗）；
  *  - bodyDiameter <= 0 表示不做体型过滤（只判墙体与完好开口）。
  *
+ * 阻挡矩形会按「碰撞半径 = bodyDiameter / 2」向外扩张：
+ * 单位停在身体外缘刚好贴住墙面，而不是中心点贴墙（避免视觉插墙）。
+ * 扩张只作用于实体阻挡，不改开口通行口径 —— 净宽仍按身体直径判定。
+ *
  * 以后接入水域 / 其它新地形时，只需在这里登记新的阻挡矩形，
  * 人类、丧尸与生成落点会同时生效。
  */
@@ -28,12 +32,14 @@ export function isBlockedForBody(
   openings: readonly OpeningBlocker[],
   pad = 0,
 ): boolean {
+  // 墙体按碰撞半径外扩：中心点离墙面 >= radius 才算不接触
+  const blockPad = pad + bodyDiameter * 0.5;
   for (const w of walls) {
-    if (insideRect(x, y, w, pad)) return true;
+    if (insideRect(x, y, w, blockPad)) return true;
   }
   for (const o of openings) {
     const tooNarrow = bodyDiameter > 0 && openingNetWidth(o.rect) < bodyDiameter;
-    if ((!o.broken || tooNarrow) && insideRect(x, y, o.rect, pad)) return true;
+    if ((!o.broken || tooNarrow) && insideRect(x, y, o.rect, blockPad)) return true;
   }
   return false;
 }

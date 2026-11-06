@@ -15,7 +15,7 @@
 | `src/data/` | **唯一数值来源**：实体定义、地图、默认设置、滑块元数据 | 调平衡只改这里；玩家改动只存覆盖值，读取时合并 |
 | `public/maps/` | **地图运行时来源**：`manifest.json` + `<id>.json` 瓦片地图（内置 `arena` / `test-yard` / `test-multi`） | 内置只读；加载失败回退 `src/data/maps/arena.ts` |
 | `src/core/` | 运行时状态与流程：`world.ts` 实体/空间索引/开口，`game.ts` 波次与胜负，`storage.ts` 存档，`devMode.ts` 开发者模式开关与密码校验 | `world` 只存状态和查询；行为不放这里；`devMode` 只是界面显隐，不是权限系统 |
-| `src/systems/` | 行为与规则：`ai.ts` 人类/丧尸/感染/受击减速推进与追击模式分发，`combat.ts` 开火、命中与减速结算，`flowField.ts` BFS 寻路（支持显式多源），`regions.ts` 按体型的连通区域图与区域邻接边 | 新玩法规则优先落在这里 |
+| `src/systems/` | 行为与规则：`ai.ts` 人类/丧尸/感染/受击减速推进与追击模式分发，`collision.ts` 人类/丧尸/生成落点共用的阻挡判定，`combat.ts` 开火、命中与减速结算，`flowField.ts` BFS 寻路（支持显式多源），`regions.ts` 按体型的连通区域图与区域邻接边 | 新玩法规则优先落在这里 |
 | `src/render/` | PixiJS 绘制：`renderer.ts` 场景/单位/粒子/倒地，`pixel.ts` 精灵与坐标换算 | 只读 World，不改数据 |
 | `src/art/` | 32×32 像素精灵数据：`sprites.ts` 单体，`composites.ts` 人类+武器烘焙，`preview.ts` 预览页 | 不 import 游戏其它模块 |
 | `src/audio/` | `events.ts` 事件/文件/限频，`manager.ts` 预加载与播放 | 音频文件在 `public/audio/`，必须登记授权 |
@@ -38,6 +38,7 @@
 | 新增地图 | `public/maps/<id>.json` + `public/maps/manifest.json`（瓦片 74×45 / 16px）、`src/data/maps/index.ts`（注册与加载） | `src/data/maps/schema.ts`（校验）、`src/data/maps/compile.ts`（编译）、`src/data/maps/arena.ts`（TS 兜底）、`src/levels.ts`（`LevelDef.mapId` 引用）、`src/render/renderer.ts`（`setMap()` 重建静态层） |
 | 新增音效 | `public/audio/<name>.mp3`、`src/audio/events.ts`（`SFX` + `SFX_MAP` + `SFX_THROTTLE` 三处） | `public/audio/CREDITS.md`、调用点（`src/systems/ai.ts` / `src/systems/combat.ts` / `src/core/game.ts` / `src/main.ts`） |
 | 改 AI 行为 | `src/systems/ai.ts`（含 `breach` / `direct` 分发） | `src/data/zombies/<id>.ts`（`pursuit`）、`src/data/types.ts`（`ZombiePursuitMode`）、`src/systems/regions.ts`（连通区域图）、`src/systems/flowField.ts`（寻路规则）、`src/core/world.ts`（区域 / 流场缓存与 `invalidateNavigation`）、`src/data/zombies/index.ts`（`WANDER_TUNING`）、`src/data/settings/runtime.ts` + `sliders.ts`（可调参数） |
+| 改移动 / 碰撞判定 | `src/systems/collision.ts`（`isBlockedForBody` / `findFreePoint`） | `src/core/world.ts`（`solidAt` / `findFreeSpot`）、`src/systems/ai.ts`（人类逐轴移动）、`src/core/game.ts`（随机出生落点）、`src/training/session.ts`（点选生成）、`src/data/humans.ts`（`HUMAN_BODY_DIAMETER`） |
 | 改渲染 / 外观 | `src/render/renderer.ts`、`src/render/pixel.ts` | `src/art/sprites.ts`（像素数据）、`sprites.html` 预览 |
 | 改训练场 | `src/training/session.ts`、`src/training/panel.ts`、`index.html`（面板 DOM）、`src/style.css` | `src/audio/events.ts`（如新增操作音） |
 | 改工坊编辑器 | `src/workshop/doc.ts`（瓦片/区域/实施例）、`src/workshop/editor.ts`（画布与输入）、`src/workshop/page.ts`（整页 UI 与校验/存读档）、`src/workshop/storage.ts`（草稿与试玩预览） | `src/data/maps/schema.ts`（校验规则）、`index.html` + `src/style.css`（覆盖层 DOM 与样式）、`src/router.ts` + `src/main.ts`（路由、`?map=workshop-draft` 注册、开发者模式守卫） |
@@ -103,7 +104,8 @@ npx tsc --noEmit  # 单项类型检查
 - 0.5.1 规则：丧尸追击按类型模式分发。`ZombieDef.pursuit` 取 `breach`（默认）或 `direct`（旧行为）；普通 / 狂奔 / 胖子都在定义文件显式写 `breach`。新增模式先扩 `src/data/types.ts` 的 `ZombiePursuitMode`，再到 `systems/ai.ts` 的 `pursuitModeOf()` / `retargetZombie()` / 移动分支处加分支，不改默认实现。
 - 0.5.1 规则：`systems/regions.ts` 的 `RegionMap` 按体型构建连通域：完好门窗为边界，破损开口仅当净宽 ≥ 身体直径才连通；`regionAt()` O(1)，`regionNear()` 处理压墙沿，边只连“完好且体型能过”的开口。探边只查开口外侧相邻一格，避免穿过一层墙生成假边。
 - 0.5.1 规则：breach 决策。同区有活人 → 沿 `World.humanFlowFor(bodyDiameter)`（活人为源、0.6s 刷新）绕墙直追，不主动破门窗；本区无活人 → 在区域邻接图上 Dijkstra（边权 = 走到开口距离 + `ceil(maxHp / buildBiteDamage) * bite * 该僵尸移速`），在所有有活人的可达区域里取总代价最小者，回溯取第一扇开口并沿 `World.openingFlow(id, bodyDiameter)` 走过去啃；无解（只剩不可破坏墙或体型过不去的窗）→ `stranded` 漫游，不贴墙顶门。全图零活人仍走原有漫游。
-- 0.5.1 规则：区域图与两类流场按体型 / 开口缓存；`World.invalidateNavigation()` 在破口与地图切换时清空缓存并把所有僵尸 `retarget = 0`，破一扇立即重算、其它僵尸同步按新区域更新；每帧查询 O(1)，不做全图扫描。
+- 0.5.1 规则：人类与丧尸共用 `systems/collision.ts` 的 `isBlockedForBody()`。墙体与地图边界永远阻挡，完好门窗一律阻挡，已破坏开口只有净宽 ≥ 身体直径才放行；人类身体直径 = `HUMAN_DEF.radius * 2 = 12`。人类移动逐轴判定（撞墙只停该轴、保留沿墙滑动），巡逻目标点、随机出生落点与训练场点选生成统一走 `World.findFreeSpot()` / `World.solidAt()`；训练场点击墙内或钻不过的开口不生成单位。新增水域等地形时只在 `collision.ts` 登记阻挡矩形。
+- 0.5.1 规则：`humanBounds` 只负责把人类夹在房间内，**不再替代墙体碰撞**。不能只靠夹取，否则含内部墙体的自定义地图（如 `my-map`）里人类会横穿内墙与门窗。
 
 ## 已知限制（0.5.1 现状）
 

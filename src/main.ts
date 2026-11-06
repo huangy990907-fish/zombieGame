@@ -36,6 +36,7 @@ import {
   selectSaveDir,
 } from "./core/storage";
 import { Game } from "./core/game";
+import { checkDevPassword, isDevModeEnabled, setDevModeEnabled } from "./core/devMode";
 import { Hud } from "./ui/hud";
 import { Renderer } from "./render/renderer";
 import { TrainingSession } from "./training/session";
@@ -436,6 +437,12 @@ async function boot(): Promise<void> {
         topbar.classList.add("hidden");
         bottom.classList.add("hidden");
         settingsPanel.classList.remove("open");
+        // 界面层拦截：玩家模式下不允许直达 #/workshop（不是安全边界，见 README）
+        if (!isDevModeEnabled()) {
+          showMapNotice("地图工坊需要先在设置里开启开发者模式");
+          router.go("menu");
+          break;
+        }
         workshop.activate();
         sound.pause();
         break;
@@ -584,8 +591,15 @@ async function boot(): Promise<void> {
   const placementBtn = document.getElementById("btnPlacement") as HTMLButtonElement;
   const challengeBtn = document.getElementById("btnChallenge") as HTMLButtonElement;
   const trainingBtn = document.getElementById("btnTraining") as HTMLButtonElement;
+  const workshopBtn = document.getElementById("btnWorkshop") as HTMLButtonElement;
   const menuSettingsBtn = document.getElementById("btnMenuSettings") as HTMLButtonElement;
   const menuMuteBtn = document.getElementById("btnMenuMute") as HTMLButtonElement;
+  const devModeStatusEl = document.getElementById("devModeStatus") as HTMLElement;
+  const devModeAuthRow = document.getElementById("devModeAuthRow") as HTMLElement;
+  const devModePasswordInput = document.getElementById("devModePassword") as HTMLInputElement;
+  const devModeEnableBtn = document.getElementById("btnDevModeEnable") as HTMLButtonElement;
+  const devModeDisableBtn = document.getElementById("btnDevModeDisable") as HTMLButtonElement;
+  const devModeFeedbackEl = document.getElementById("devModeFeedback") as HTMLElement;
   const updateMuteIcon = () => {
     menuMuteBtn.textContent = sound.isMuted() ? "🔇" : "🔊";
   };
@@ -650,6 +664,53 @@ async function boot(): Promise<void> {
     sound.play(SFX.UI_CLICK);
     closeModal(challengeOverlay);
   };
+
+  // ====== 开发者模式：密码开启 / 退出；入口只在开发者模式下出现 ======
+  const syncDevModeUI = (message = "", ok = false): void => {
+    const on = isDevModeEnabled();
+    workshopBtn.classList.toggle("hidden", !on);
+    devModeStatusEl.textContent = on
+      ? "已开启：主菜单显示「地图工坊」入口，可直接访问 #/workshop。"
+      : "未开启。开启后主菜单会显示「地图工坊」入口。";
+    devModeAuthRow.classList.toggle("hidden", on);
+    devModeDisableBtn.classList.toggle("hidden", !on);
+    devModeFeedbackEl.textContent = message;
+    devModeFeedbackEl.classList.toggle("ok", ok);
+    // 关掉开发者模式时若还停在工坊页，立刻回到主菜单
+    if (!on && router.get() === "workshop") router.go("menu");
+  };
+
+  const tryEnableDevMode = (): void => {
+    if (!checkDevPassword(devModePasswordInput.value)) {
+      devModeFeedbackEl.textContent = "密码不正确";
+      devModeFeedbackEl.classList.remove("ok");
+      return;
+    }
+    setDevModeEnabled(true);
+    devModePasswordInput.value = "";
+    sound.resume();
+    sound.play(SFX.UI_CLICK);
+    syncDevModeUI("开发者模式已开启", true);
+  };
+
+  devModeEnableBtn.onclick = tryEnableDevMode;
+  devModePasswordInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      tryEnableDevMode();
+    }
+  });
+  devModeDisableBtn.onclick = () => {
+    setDevModeEnabled(false);
+    sound.play(SFX.UI_CLICK);
+    syncDevModeUI("已退出开发者模式，主菜单入口与 #/workshop 均已关闭", true);
+  };
+  workshopBtn.onclick = () => {
+    sound.resume();
+    sound.play(SFX.UI_CLICK);
+    router.go("workshop");
+  };
+  syncDevModeUI();
 
   // ====== 清空存档：先点按钮，再二次确认 ======
   const clearProgressBtn = document.getElementById("btnClearProgress") as HTMLButtonElement;

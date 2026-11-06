@@ -2,7 +2,7 @@
  * 工坊页面 —— 把编辑器、校验、存档 / 导入导出装进一个整页 overlay。
  *
  * 页面只做 DOM 与流程编排，几何与绘制全部在 editor.ts / doc.ts。
- * 入口只有 `#/workshop`（阶段 2 不接主菜单按钮）。
+ * 入口只有 `#/workshop`，由开发者模式控制显隐（阶段 4）。
  */
 import { compileTilesToMapDef } from "../data/maps/compile";
 import { isReadOnlyMap } from "../data/maps";

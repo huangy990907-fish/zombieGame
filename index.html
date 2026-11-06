@@ -77,6 +77,7 @@
           <button class="menu-btn primary" id="btnPlacement">🧱 放置抵抗</button>
           <button class="menu-btn" id="btnChallenge">🗺 闯关模式</button>
           <button class="menu-btn training" id="btnTraining">🧪 训练场</button>
+          <button class="menu-btn workshop hidden" id="btnWorkshop">🛠 地图工坊</button>
           <button class="menu-btn" id="btnMenuSettings">⚙ 设置</button>
         </div>
         <p class="menu-footer">放置人类守住房间 · 训练场可自由生成单位、测武器 DPS</p>
@@ -113,6 +114,15 @@
           <input type="range" id="menuVolSfx" min="0" max="1" step="0.05" />
           <span class="val" id="menuVolSfxVal">—</span>
         </div>
+
+        <h3>开发者模式</h3>
+        <p class="menu-modal-desc" id="devModeStatus">未开启。开启后主菜单会显示「地图工坊」入口。</p>
+        <div class="dev-mode-row" id="devModeAuthRow">
+          <input type="password" id="devModePassword" placeholder="开发者密码" autocomplete="off" />
+          <button class="menu-btn primary" id="btnDevModeEnable">开启</button>
+        </div>
+        <button class="menu-btn hidden" id="btnDevModeDisable">退出开发者模式</button>
+        <p class="dev-mode-feedback" id="devModeFeedback"></p>
 
         <h3>进度存档</h3>
         <p class="menu-modal-desc">清空「放置抵抗」的关卡进度与「闯关模式」的进度存档。音量偏好和参数覆盖值会保留。</p>

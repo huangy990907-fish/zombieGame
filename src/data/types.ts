@@ -26,8 +26,22 @@ export type HumanMode = "defend" | "attack" | "guard";
  */
 export type ZombieMode = "hunt" | "wander";
 
-/** 武器攻击形态：直线子弹 / 霰弹多弹丸 / 喷火锥形 / 火箭爆炸 */
-export type WeaponKind = "bullet" | "pellet" | "flame" | "rocket";
+/** 武器攻击形态：直线子弹 / 霰弹多弹丸 / 喷火锥形 / 火箭爆炸 / 电击链 */
+export type WeaponKind = "bullet" | "pellet" | "flame" | "rocket" | "tesla";
+
+/** 电击枪的链式参数（全部集中在这里，训练场/后续调参只改这份配置） */
+export interface TeslaConfig {
+  /** 链式跳跃搜索半径（像素） */
+  chainRadius: number;
+  /** 单次电击最多命中的僵尸数（含首个目标） */
+  chainMaxTargets: number;
+  /** 每跳伤害相对上一跳的比例 */
+  chainFalloff: number;
+  /** 首个目标附近没有其他僵尸时的伤害倍率 */
+  singleBonus: number;
+  /** “附近没有其他僵尸”的判定半径（像素） */
+  singleRadius: number;
+}
 
 export interface WeaponDef {
   /** 代码里唯一使用的身份，例如 "mg" */
@@ -59,6 +73,8 @@ export interface WeaponDef {
   burst: number;
   /** 爆炸伤害，仅火箭用 */
   blastDamage: number;
+  /** 电击链参数，仅电击枪用 */
+  tesla?: TeslaConfig;
 }
 
 /** 武器定义里允许被玩家覆盖的数值字段 */

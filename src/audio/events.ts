@@ -8,6 +8,7 @@ export const SFX = {
   FLAME: "weapon-flame",         // 喷火持续结算
   SHOTGUN: "weapon-shotgun",     // 霰弹枪扣扳机
   ROCKET: "weapon-rocket",       // 火箭发射
+  TESLA: "weapon-tesla",         // 电击枪放电
   EXPLOSION: "weapon-explosion", // 火箭爆炸
   RELOAD: "weapon-reload",       // 换弹
 
@@ -39,6 +40,7 @@ export const SFX_MAP: Record<SfxKey, string> = {
   [SFX.FLAME]: "audio/weapon-flame.mp3",
   [SFX.SHOTGUN]: "audio/weapon-shotgun.mp3",
   [SFX.ROCKET]: "audio/weapon-rocket.mp3",
+  [SFX.TESLA]: "audio/weapon-tesla.mp3",
   [SFX.EXPLOSION]: "audio/weapon-explosion.mp3",
   [SFX.RELOAD]: "audio/weapon-reload.mp3",
 
@@ -64,6 +66,7 @@ export const SFX_THROTTLE: Record<SfxKey, number> = {
   [SFX.FLAME]: 60,
   [SFX.SHOTGUN]: 200,
   [SFX.ROCKET]: 300,
+  [SFX.TESLA]: 250,
   [SFX.EXPLOSION]: 500,
   [SFX.RELOAD]: 1000,
 

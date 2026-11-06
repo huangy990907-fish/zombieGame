@@ -1,5 +1,5 @@
 /**
- * 烘焙组合精灵：人类 + 四把武器，每种 4 帧（idle / walk1 / walk2 / fire）。
+ * 烘焙组合精灵：人类 + 五把武器，每种 4 帧（idle / walk1 / walk2 / fire）。
  * 这里在模块加载时就把武器压进人物帧，产物是普通的 SpriteDef，
  * 接入渲染层时不需要再叠两层，也不会重复计算 overlay。
  */
@@ -24,6 +24,7 @@ const MUZZLE_BY_WEAPON: Record<string, Vec2> = {
   "weapon-flame": { x: 24, y: 5 },
   "weapon-shotgun": { x: 22, y: 5 },
   "weapon-rocket": { x: 24, y: 5 },
+  "weapon-tesla": { x: 24, y: 4 },
 };
 
 function findSprite(id: string): SpriteDef {

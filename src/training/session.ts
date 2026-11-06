@@ -97,6 +97,19 @@ export interface HumanStat {
   turns: number;
 }
 
+/**
+ * 电击枪链式统计 —— 独立于武器 DPS 表：
+ * 记录每次放电实际命中的僵尸数、单体加成触发次数与平均每发命中数。
+ */
+export interface TeslaStat {
+  /** 放电次数（有首个目标的射击） */
+  volleys: number;
+  /** 累计命中僵尸数（含链式跳跃） */
+  hits: number;
+  /** 触发单体加成的次数 */
+  singleBonus: number;
+}
+
 /** 面板需要区分人类 / 僵尸，用判别联合避免类型断言 */
 export type SelectedUnit =
   | { kind: "human"; human: Human }
@@ -145,6 +158,8 @@ export class TrainingSession {
   );
   /** 人类挨咬统计（独立于武器 DPS 表） */
   readonly humanStat: HumanStat = { bites: 0, damage: 0, turns: 0 };
+  /** 电击枪链式统计（独立于武器 DPS 表） */
+  readonly teslaStat: TeslaStat = { volleys: 0, hits: 0, singleBonus: 0 };
 
   /** 每个丧尸的出生时间（训练场生成 / 波次生成都记），用于算击杀耗时 */
   private spawnTimes = new Map<number, number>();
@@ -190,6 +205,9 @@ export class TrainingSession {
     this.humanStat.bites = 0;
     this.humanStat.damage = 0;
     this.humanStat.turns = 0;
+    this.teslaStat.volleys = 0;
+    this.teslaStat.hits = 0;
+    this.teslaStat.singleBonus = 0;
     for (const z of this.world.zombies) this.spawnTimes.set(z.id, 0);
     for (const b of this.buckets.values()) b.fill(0);
     for (const s of this.stamps.values()) s.fill(-1);
@@ -230,6 +248,11 @@ export class TrainingSession {
     };
     this.world.onHumanTurn = () => {
       this.humanStat.turns++;
+    };
+    this.world.onTeslaVolley = (hits, singleBonus) => {
+      this.teslaStat.volleys++;
+      this.teslaStat.hits += hits;
+      if (singleBonus) this.teslaStat.singleBonus++;
     };
   }
 

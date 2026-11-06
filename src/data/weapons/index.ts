@@ -3,6 +3,7 @@ import { flame } from "./flame";
 import { mg } from "./mg";
 import { rocket } from "./rocket";
 import { shotgun } from "./shotgun";
+import { tesla } from "./tesla";
 
 /**
  * 武器注册表：id -> 定义。
@@ -13,6 +14,7 @@ export const WEAPONS: Record<string, WeaponDef> = {
   flame,
   shotgun,
   rocket,
+  tesla,
 };
 
 /** 有序列表（插入顺序）—— 仅用于默认展示与配比，身份始终用 id */
@@ -24,14 +26,16 @@ export const WEAPON_IDS = {
   flame: flame.id,
   shotgun: shotgun.id,
   rocket: rocket.id,
+  tesla: tesla.id,
 } as const;
 
 /** 初始 50 人的兵种配比，顺序与 HUD 顶栏一致 */
 export const LOADOUT: ReadonlyArray<{ id: string; count: number }> = [
-  { id: mg.id, count: 25 },
-  { id: flame.id, count: 10 },
-  { id: shotgun.id, count: 10 },
-  { id: rocket.id, count: 5 },
+  { id: mg.id, count: 20 },
+  { id: flame.id, count: 8 },
+  { id: shotgun.id, count: 8 },
+  { id: rocket.id, count: 4 },
+  { id: tesla.id, count: 10 },
 ];
 
 /** 按 id 取定义；未知 id 回落到机枪，保证旧存档 / 脏数据不崩溃 */

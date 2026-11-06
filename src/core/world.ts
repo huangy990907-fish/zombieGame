@@ -175,7 +175,7 @@ export interface Post {
   oy: number;
 }
 
-export type EffectKind = "blast" | "ember";
+export type EffectKind = "blast" | "ember" | "arc";
 
 /** 纯视觉特效，不参与逻辑 */
 export interface Effect {
@@ -190,6 +190,8 @@ export interface Effect {
   /** ember 粒子的漂移速度（像素/秒），ageEffects 里推进；不填则原地消散 */
   vx?: number;
   vy?: number;
+  /** arc 闪电折线的顶点序列（世界坐标）；渲染层据此画不规则折线 */
+  points?: Array<{ x: number; y: number }>;
 }
 
 /** 子弹擦边容差：贴着开口边缘 10px 内的墙算“打在门框/窗框上”，弹道放行 */
@@ -258,6 +260,8 @@ export class World {
   onHumanDamage?: (h: Human, amount: number) => void;
   /** 人类异变完成（训练场统计转化数） */
   onHumanTurn?: (h: Human) => void;
+  /** 电击枪一次放电结算（训练场统计命中数 / 单体加成次数） */
+  onTeslaVolley?: (hits: number, singleBonus: boolean) => void;
   private nextId = 1;
   private readonly bulletWalls: Rect[];
 

@@ -508,12 +508,17 @@ export class TrainingPanel {
     }).join("");
 
     const hs = this.session.humanStat;
+    const ts = this.session.teslaStat;
+    const teslaAvg = ts.volleys > 0 ? ts.hits / ts.volleys : 0;
     this.statsEl.innerHTML = `
       <div class="tp-statline">
         ⏱ ${fmtTime(this.session.activeTime)} · 人类 ${counts.humans} · 僵尸 ${counts.zombies} · 击杀 ${this.session.totalKills()}
       </div>
       <div class="tp-statline">
         🩸 人类被咬 ${hs.bites} 次 · 掉血 ${Math.round(hs.damage)} · 异变 ${hs.turns}
+      </div>
+      <div class="tp-statline">
+        ⚡ 电击枪放电 ${ts.volleys} 次 · 命中 ${ts.hits} 只 · 平均 ${teslaAvg.toFixed(2)} 只/次 · 单体加成 ${ts.singleBonus} 次
       </div>
       <table class="tp-table">
         <thead><tr><th>武器</th><th>总伤</th><th>DPS</th><th>近4s</th><th>击杀</th><th>均杀</th></tr></thead>
@@ -523,7 +528,7 @@ export class TrainingPanel {
         <thead><tr><th>僵尸类型</th><th>存活</th><th>承伤</th><th>击杀</th><th>均杀</th></tr></thead>
         <tbody>${zombieRows}</tbody>
       </table>
-      <div class="tp-hint">武器表与「承伤」统计人类对僵尸造成的伤害；「人类被咬 / 掉血 / 异变」是僵尸对人类的反向读数，两者不混算。DPS = 累计伤害 / 运行时间，「近4s」是最近 4 秒滚动窗口</div>
+      <div class="tp-hint">武器表与「承伤」统计人类对僵尸造成的伤害；「人类被咬 / 掉血 / 异变」是僵尸对人类的反向读数，两者不混算。DPS = 累计伤害 / 运行时间，「近4s」是最近 4 秒滚动窗口。电击枪单独按「每次放电」计口径：平均命中 = 命中数 / 放电次数，单体加成 = 首个目标 96px 内没有其他僵尸时的 ×2.2 加成</div>
     `;
   }
 }

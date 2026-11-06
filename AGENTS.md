@@ -31,7 +31,7 @@
 | 新增僵尸 | `src/data/zombies/<id>.ts`（含 `damage`）、`src/data/zombies/index.ts`（注册 + `ZOMBIE_IDS`） | `src/art/sprites.ts`（精灵与倒地帧）、`src/render/pixel.ts`（缺图兜底/死亡精灵 id）、`src/audio/events.ts` + `public/audio/*` + `CREDITS.md`（专属叫声）、README/CHANGELOG |
 | 改人类血量 / 撕咬伤害 | `src/systems/ai.ts`（咬人扣血→归零才 turning）、`src/core/world.ts`（`Human.hp/hurtTimer`、`Zombie.damage`）、`src/data/zombies/*.ts`（`damage`） | `src/render/renderer.ts`（头顶血条）、`src/data/settings/runtime.ts`（`damage` 覆盖值）、训练场编辑器/统计 |
 | 改受击减速 | `src/systems/combat.ts`（`applyHitSlow`）、`src/systems/ai.ts`（推进/应用到移速）、`src/data/zombies/index.ts`（`ZOMBIE_SLOW`） | `src/core/world.ts`（`slowMul/slowTimer/flash`）、`src/render/renderer.ts`（受击闪白） |
-| 新增武器 | `src/data/weapons/<id>.ts`、`src/data/weapons/index.ts`（注册 + `LOADOUT`） | `src/art/sprites.ts` / `src/art/composites.ts`（人类武器外观与枪口）、`src/data/settings/sliders.ts`（如要单独滑块）、训练场自动出现 |
+| 新增武器 | `src/data/weapons/<id>.ts`、`src/data/weapons/index.ts`（注册 + `LOADOUT`） | `src/art/sprites.ts` / `src/art/composites.ts`（人类武器外观与枪口）、`src/data/settings/sliders.ts`（如要单独滑块）、训练场自动出现；电击枪类链式武器还要改 `src/systems/combat.ts`（独立 hitscan/链式，不复用 Bullet）与 `src/render/renderer.ts`（`renderArcs` 折线特效） |
 | 新增地图 | `src/data/maps/<id>.ts`、`src/data/maps/index.ts` | `src/core/game.ts` / `src/core/world.ts`（默认地图注入）、`src/levels.ts`（关卡引用）、`src/render/renderer.ts`（静态场景读取 map） |
 | 新增音效 | `public/audio/<name>.mp3`、`src/audio/events.ts`（`SFX` + `SFX_MAP` + `SFX_THROTTLE` 三处） | `public/audio/CREDITS.md`、调用点（`src/systems/ai.ts` / `src/systems/combat.ts` / `src/core/game.ts` / `src/main.ts`） |
 | 改 AI 行为 | `src/systems/ai.ts` | `src/data/zombies/index.ts`（`WANDER_TUNING`）、`src/data/settings/runtime.ts` + `sliders.ts`（可调参数）、`src/systems/flowField.ts`（寻路规则） |
@@ -77,10 +77,12 @@ npx tsc --noEmit  # 单项类型检查
 - 0.4.2 规则：**开口净宽 < 单位身体直径即不可通行**（门 80、窗 18；普通 11 / 狂奔 9 / 胖子 22）。通行判定口径 = 可见体宽 = 2 × 碰撞半径；渲染盒宽 = 2r × `VISUAL_SCALE`（普通 16.5 / 狂奔 13.5 / 胖子 33），1.5 只补精灵透明留白，不要叠加到半径上。胖子只能走门，流场与移动碰撞都按该通用规则过滤，不是写死特例。
 - 0.4.3 规则：**人类血量是真实生命值**（`HUMAN_DEF.hp = 100`，可被设置/训练场覆盖），丧尸每次撕咬按 `Zombie.damage` 扣血，`hp <= 0` 才设置 `turning`；turning 期间 `alive` 仍为 true（`livingHumans` 口径不变）。训练场 `invincible` 完全免疫掉血与异变。
 - 0.4.3 规则：**受击减速**由 `combat.ts` 的 `applyHitSlow` 写入 `slowMul/slowTimer`，`ai.ts` 每帧线性恢复并乘到 hunt/wander 移速；每点伤害 4%、最低 40%，0.6 秒恢复，不叠加只取最强并刷新计时；大体型（`bodyDiameter >= 20`）幅度减半、最低 70%；喷火每秒最多结算一次。受击反馈是 `flash > 0` 时渲染层加法混合提亮 0.08 秒。
+- 0.4.3 规则：**电击枪** `tesla` 是独立 hitscan（射线投影 + 目标半径 + 墙体/完好门窗视线），不复用 Bullet 扫掠；首个目标 96px 内无其他僵尸时 ×2.2，否则向最近可见僵尸逐只跳跃，最多 5 只（含首个），每跳衰减到 75%。参数集中在 `src/data/weapons/tesla.ts` 的 `tesla` 字段。闪电是 `EffectKind = "arc"` 的折线（`Effect.points`），每跳一段，渲染在 `renderer.ts` 的 `renderArcs()`；训练场链式读数走 `World.onTeslaVolley` 钩子，独立于 DPS 表。
 
 ## 已知限制（0.4.3 现状）
 
 - 人类会真实掉血，但血量归零不会立刻死亡，而是进入原有的 2.8 秒转化倒计时；训练场可调人类血量与僵尸攻击力来观察。
+- 电击枪链式最多 5 只（含首个），每跳都要求视线可见：未破的门窗会挡住后续跳跃；链式半径 / 上限 / 衰减 / 单体加成只有 `src/data/weapons/tesla.ts` 一处参数，没有全局滑块。首个目标的单体加成按“96px 内是否有其他存活僵尸”判断，不检查它们是否被墙挡住。
 - 僵尸攻击力目前只有训练场按单位调整，全局滑块表未登记 `damage`；默认值在 `src/data/zombies/*.ts`。
 - `screenshots/` 固定只保留 6 张长期设计图，新增验证图不要提交（见强制约定）。
 - 无 BGM；只有一次性音效，且同一事件全局限频，**没有随机音效变体**（音高/时长变化）。

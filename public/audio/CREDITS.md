@@ -1,6 +1,6 @@
 # 音效授权台账（public/audio）
 
-本目录 17 个 mp3 均来自 **CC0 素材**（检索时用 `license:"Creative Commons 0"` 过滤，逐条核对 API 返回的 license 字段），或由这些 CC0 素材直接派生，不再包含程序化合成文件。`zombie-growl-fat.mp3` 是 0.4.2 新增的派生成品：从本目录已有的 CC0 `zombie-growl.mp3` 降调、降速得到，不引入新的授权来源。
+本目录 18 个 mp3 均来自 **CC0 素材**（检索时用 `license:"Creative Commons 0"` 过滤，逐条核对 API 返回的 license 字段），或由这些 CC0 素材直接派生，不再包含程序化合成文件。`zombie-growl-fat.mp3` 是 0.4.2 新增的派生成品：从本目录已有的 CC0 `zombie-growl.mp3` 降调、降速得到；`weapon-tesla.mp3` 是 0.4.3 新增的派生成品：从本目录已有的 CC0 `zombie-growl-fat.mp3` 升调、高通、颤音处理得到，两者都不引入新的授权来源。
 
 - 许可证：**CC0 1.0（Creative Commons Zero）**，可复制、修改、商用，无需署名。
   官方文本：<https://creativecommons.org/publicdomain/zero/1.0/>
@@ -14,6 +14,7 @@
 | `weapon-flame.mp3` | 0.13s | 2.5 KB | 739469 | WD-40 quarter Full - Flame thrower 3 | Sadiquecat | CC0 1.0 | https://freesound.org/s/739469/ | 真实喷火/火炬声，截取 0.08–0.18s 稳定段，100ms 级 |
 | `weapon-shotgun.mp3` | 0.34s | 5.8 KB | 702672 | Remington 870 | areniporgen | CC0 1.0 | https://freesound.org/s/702672/ | 真实 12 号霰弹枪近距录音，保留 0.30s 冲击主体 |
 | `weapon-rocket.mp3` | 0.47s | 7.8 KB | 521377 | Rocket Launch | Jarusca | CC0 1.0 | https://freesound.org/s/521377/ | 游戏用火箭发射声，保留出膛 + 尾焰 0.44s |
+| `weapon-tesla.mp3` | 0.10s | 3.0 KB | —（派生） | Zombie Groan 3（派生） | OwNathan | CC0 1.0 | https://freesound.org/s/754441/ | 0.4.3 电击枪放电：从 `zombie-growl-fat.mp3` 取 8 倍升调 + 1.6kHz 高通 + 42Hz 颤音，压成 0.10s 电流滋滋声；无新增授权 |
 | `weapon-explosion.mp3` | 0.57s | 9.4 KB | 67469 | Fragmentation Grenade Explosion Military M67 1.flac | qubodup | CC0 1.0 | https://freesound.org/s/67469/ | 真实 M67 破片手雷爆炸，完整 0.54s，无长尾 |
 | `weapon-reload.mp3` | 0.47s | 7.8 KB | 455921 | Pistol (magazine reload only) | bolkmar | CC0 1.0 | https://freesound.org/s/455921/ | 弹匣拔出/插入两声金属咔哒，截取 0.44s。**仍未被游戏代码调用** |
 | `zombie-growl.mp3` | 0.73s | 11.9 KB | 754441 | Zombie Groan 3 | OwNathan | CC0 1.0 | https://freesound.org/s/754441/ | 僵尸低吼，去掉 0.12s 静音头后的完整 0.73s（略低于清单 0.8s 下限） |
@@ -32,8 +33,8 @@
 
 - 所有条目均为 **CC0 1.0**，API 返回的 `license` 字段均为 `http://creativecommons.org/publicdomain/zero/1.0/`；未使用 CC-BY、NC 或来源不明的素材。
 - 使用的是 freesound 官方 preview-hq-mp3 预览文件（由 CC0 原始素材转码），版权状态与原始素材一致。
-- 合计 **17 个文件、约 251 KB**；单文件最大 63.7 KB（`defeat.mp3`），均小于 100 KB，总量远低于 1.5 MB。
-- `zombie-growl-fat.mp3` 不是独立素材，而是 `zombie-growl.mp3` 的派生物，授权随原文件（CC0）。
+- 合计 **18 个文件、约 254 KB**；单文件最大 63.7 KB（`defeat.mp3`），均小于 100 KB，总量远低于 1.5 MB。
+- `zombie-growl-fat.mp3` 不是独立素材，而是 `zombie-growl.mp3` 的派生物；`weapon-tesla.mp3` 又是 `zombie-growl-fat.mp3` 的派生物，授权均随原文件（CC0）。
 
 ## 备注
 

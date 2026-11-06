@@ -53,12 +53,12 @@
 
 ### 人类 AI
 
-- 初始 50 人，兵种配比按 `LOADOUT = [{ mg: 25 }, { flame: 10 }, { shotgun: 10 }, { rocket: 5 }]` 随机分配（`src/data/weapons/index.ts`，按武器 id 计数）：机枪 25、喷火 10、霰弹 10、火箭 5。
+- 初始 50 人，兵种配比按 `LOADOUT = [{ mg: 20 }, { flame: 8 }, { shotgun: 8 }, { rocket: 4 }, { tesla: 10 }]` 随机分配（`src/data/weapons/index.ts`，按武器 id 计数）：机枪 20、喷火 8、霰弹 8、火箭 4、电击枪 10。
 - 开局分岗（`src/core/game.ts` 的 `assignPosts()`）：
   - 门口 32 人散兵线，离门约 90px；
   - 每扇窗 4 名机枪岗，位于窗后约 40px、间距 12px（窗宽收窄到 18px 后从 6 人缩编）；
   - 中央预备队 10 人（窗口省下的 4 人补到这里）；
-  - 喷火 / 霰弹优先守门，机枪补门岗和窗岗，火箭与剩余机枪进预备队。
+  - 喷火 / 霰弹优先守门，机枪补门岗，其余（火箭 / 电击枪 / 剩余机枪）依次补窗岗与预备队。
 - 默认「防守」模式：有岗的人站桩守点，只打视野内且在射程内的目标，不主动追击；被逼近到 60px 内会全速后撤拉开距离。没有岗位的人自由游荡。
 - 切换「进攻」模式后，人类会主动接敌：太近后撤、太远推进、合适距离侧向绕圈。
 - 索敌每 0.25–0.4 秒刷新一次；墙体、完好的门窗会挡视线，窗户透明（带 12px 侧向容差）。
@@ -93,8 +93,11 @@
 | 喷火 | 锥形持续伤害 | 158 | 1.3 / 0.06s | 0.06s | 8 轮燃料 | 1.35s | 单轮持续 1.1s，锥形半角 0.32 |
 | 霰弹 | 5 弹丸 | 190 | 5.5 / 弹丸 | 0.80s | 7 | 1.6s | 散布 0.24 |
 | 火箭 | 弹道 + 爆炸 | 480 | 直接 20，爆炸 44 | 1.90s | 4 | 2.4s | 爆炸半径 62，只伤丧尸 |
+| 电击枪 | 瞬时命中 + 链式 | 200 | 34 | 0.90s | 10 | 1.8s | 首个目标 96px 内无其他僵尸时 ×2.2（约 75）；否则向最近可见僵尸逐只跳跃，最多 5 只（含首个），每跳 75% |
 
 命中判定使用「上一帧位置 → 当前位置」的线段扫掠，避免高速子弹穿过丧尸。火箭撞到丧尸、墙或出界都会爆炸。
+
+电击枪是独立的 hitscan 判定：射线投影 + 目标半径 + 墙体/完好门窗的视线检查，没有飞行物。链式跳跃同样要求两僵尸之间视线可见（未破的窗会挡住）；链式上限、跳跃半径、衰减与单体加成参数在 `src/data/weapons/tesla.ts` 的 `tesla` 字段里，可直接调。
 
 ## 训练场
 
@@ -156,6 +159,7 @@
 
 - 顶部：累计运行时间（不含暂停）、存活人类数、存活僵尸数、总击杀。
 - 人类挨咬：被咬次数、累计掉血、异变完成数（与武器 DPS 表分开统计）。
+- 电击枪链式读数：放电次数、命中僵尸数、单发平均命中数、单体加成触发次数（独立口径，不混进武器 DPS 表）。
 - 武器表（按武器聚合）：总伤、平均 DPS、最近 4 秒滚动 DPS、击杀数、平均击杀耗时。
 - 僵尸类型表（按类型聚合）：存活数、承受伤害、被击杀数、平均击杀耗时。
 - 伤害飘字：命中时在丧尸头顶显示实际生效伤害，同屏最多 160 条。
@@ -199,7 +203,7 @@ zombieGame/
 ├── TODO.md                 # 待办与交付约定（按优先级）
 ├── sprites.html            # 像素精灵预览页（开发服务器下访问；不进入构建）
 ├── public/
-│   └── audio/              # 17 个音效 mp3 + CREDITS.md 授权台账
+│   └── audio/              # 18 个音效 mp3 + CREDITS.md 授权台账
 ├── src/
 │   ├── main.ts             # 启动、hash 路由切换、主循环、键盘快捷键
 │   ├── levels.ts           # 关卡定义（目前只有 level-1）与关卡级参数覆盖
@@ -208,7 +212,7 @@ zombieGame/
 │   ├── art/                # 美术数据层：32px 像素精灵（不依赖游戏其它模块）
 │   │   ├── types.ts        # SpriteDef / 调色板 / 帧矩阵 / anchor / muzzle 类型
 │   │   ├── sprites.ts      # 人类、僵尸、武器、倒地等单体精灵定义
-│   │   ├── composites.ts   # 人类 + 四把武器烘焙成 human-<weapon> 组合精灵
+│   │   ├── composites.ts   # 人类 + 五把武器烘焙成 human-<weapon> 组合精灵
 │   │   ├── bake.ts         # 武器叠加烘焙（overlay 偏移）
 │   │   ├── render.ts       # 帧矩阵 → Canvas 绘制
 │   │   ├── preview.ts      # sprites.html 预览页逻辑
@@ -226,14 +230,14 @@ zombieGame/
 │   │   │   ├── fat.ts      # 胖子丧尸（碰撞半径 11 / 体宽 22，只能走门）
 │   │   │   └── index.ts    # 僵尸注册表（加一行即可新增类型）+ 漫游参数 WANDER_TUNING + 体型/半径推导
 │   │   ├── weapons/
-│   │   │   ├── mg.ts / flame.ts / shotgun.ts / rocket.ts
+│   │   │   ├── mg.ts / flame.ts / shotgun.ts / rocket.ts / tesla.ts
 │   │   │   └── index.ts    # 武器注册表 + LOADOUT 配比
 │   │   └── settings/
 │   │       ├── defaults.ts # 场景级默认值（波次、开局人数、随机幅度、音量）
 │   │       ├── sliders.ts  # 参数控制台的滑块元数据与分组
 │   │       └── runtime.ts  # 覆盖值存取、默认值合并、存档解析
 │   ├── audio/
-│   │   ├── events.ts       # 17 个音效事件、文件映射、限频表
+│   │   ├── events.ts       # 18 个音效事件、文件映射、限频表
 │   │   └── manager.ts      # AudioManager 单例：预加载、播放、音量、静音、暂停
 │   ├── core/
 │   │   ├── game.ts         # 正常对局流程：波次状态机、分岗、生成、胜负
@@ -343,7 +347,7 @@ npm run preview   # 本地预览 dist/ 构建产物
 | `gameDiameter` / `footprintRadius` | 建议绘制直径与碰撞半径，用于预览页还原 1:1 大小 |
 | `facing` | 统一为 `"up"`（枪口指向 -y），运行时按朝向旋转 |
 
-人类与四把武器的组合精灵 `human-mg` / `human-flame` / `human-shotgun` / `human-rocket` 由 `src/art/composites.ts` 在模块加载时用 `bakeOverlay` 烘焙，产物是普通 `SpriteDef`；渲染层只按 id 取一张贴图，不再实时叠两层。
+人类与五把武器的组合精灵 `human-mg` / `human-flame` / `human-shotgun` / `human-rocket` / `human-tesla` 由 `src/art/composites.ts` 在模块加载时用 `bakeOverlay` 烘焙，产物是普通 `SpriteDef`；渲染层只按 id 取一张贴图，不再实时叠两层。
 
 ### 新增一个单位外观
 
@@ -415,11 +419,11 @@ npm run dev
 
 ### 事件与文件
 
-音效事件定义在 `src/audio/events.ts`，共 **17 个**：
+音效事件定义在 `src/audio/events.ts`，共 **18 个**：
 
 | 分组 | 事件 |
 |---|---|
-| 武器 | 机枪射击、喷火、霰弹、火箭发射、火箭爆炸、换弹 |
+| 武器 | 机枪射击、喷火、霰弹、火箭发射、火箭爆炸、电击枪放电、换弹 |
 | 丧尸 | 追击咆哮、胖子低吼、啃咬、被命中、击杀 |
 | 人类 | 受伤、转化倒戈 |
 | 场景 | 波次开始、胜利、失败 |
@@ -438,7 +442,7 @@ npm run dev
 
 `src/audio/manager.ts` 导出单例 `sound`：
 
-- 启动时创建 `AudioContext`，用 `decodeAudioData` 预加载全部 17 个文件为 `AudioBuffer`。
+- 启动时创建 `AudioContext`，用 `decodeAudioData` 预加载全部 18 个文件为 `AudioBuffer`。
 - 播放时 `createBufferSource` 一次性输出，延迟低、并发稳定。
 - 同一音效受 `SFX_THROTTLE` 全局限频（例如机枪 40ms、咆哮 3000ms），避免几十人同时开火导致音频爆炸。
 - 文件缺失或解码失败时静默降级：该事件不发声，不抛错，只在控制台 `debug` 记录。
@@ -449,7 +453,7 @@ npm run dev
 
 `public/audio/CREDITS.md` 逐文件记录来源、许可证与处理方式：
 
-- 17 个 mp3 均为 **freesound.org 的 CC0 1.0 素材或其派生**（不含程序化合成文件），可复制、修改、商用，无需署名或授权费。`zombie-growl-fat.mp3` 由 `zombie-growl.mp3` 降调/降速生成，授权随原文件。
+- 18 个 mp3 均为 **freesound.org 的 CC0 1.0 素材或其派生**（不含程序化合成文件），可复制、修改、商用，无需署名或授权费。`zombie-growl-fat.mp3` 由 `zombie-growl.mp3` 降调/降速生成，`weapon-tesla.mp3` 又由 `zombie-growl-fat.mp3` 升调/高通/颤音派生，授权均随原文件。
 - 每个文件的 freesound id、原始标题、作者、许可证链接与处理说明都在台账表格中逐条列出；具体来源以 `CREDITS.md` 为准。
 - 统一后处理规格：44.1kHz / 单声道 / MP3 128kbps / 峰值约 -3dB / 去静音头 / 按用途裁剪并加淡入淡出。
 - 其中 `weapon-reload`、`human-hurt` 两个事件已声明、文件已备好，但游戏代码目前没有调用点，因此不会发声。
@@ -503,8 +507,9 @@ npm run dev
 **工程与内容**
 
 - 目前只有 1 个关卡（`level-1`「初次尸潮」，8 波）和 1 张地图（`arena`）。地图已是注册表结构（`src/data/maps/`），但入口暂时只用默认地图，还没有地图选择界面；关卡结构支持继续添加，但尚未有第二关。
-- 音效：17 个事件已接线，素材均为 freesound CC0 录音或其派生；但 `weapon-reload` 与 `human-hurt` 没有调用点，放入文件也不会响。
-- 美术：单位与武器已改为 32px 像素精灵（`src/art/`，15 精灵 / 45 帧），但只为「朝上」方向烘焙了一帧集，运行时按朝向线性旋转，任意角会有轻微锯齿；特效与场景装饰仍由 Pixi 代码绘制。
+- 音效：18 个事件已接线，素材均为 freesound CC0 录音或其派生；但 `weapon-reload` 与 `human-hurt` 没有调用点，放入文件也不会响。
+- 美术：单位与武器已改为 32px 像素精灵（`src/art/`，17 精灵 / 51 帧，含 5 个 `human-<weapon>` 组合），但只为「朝上」方向烘焙了一帧集，运行时按朝向线性旋转，任意角会有轻微锯齿；特效与场景装饰仍由 Pixi 代码绘制。
+- 电击枪是瞬时命中，链式最多 5 只且每跳都要求视线可见；未破的门窗会挡住后续跳跃，想观察满 5 跳请在训练场把僵尸排成一条并在同侧放置，或先把窗打破。链式半径/上限/衰减/单体加成都在 `src/data/weapons/tesla.ts` 的 `tesla` 字段，没有全局滑块。
 - 没有自动化测试；`npm run build` 只做类型检查与打包，行为正确性依赖浏览器实跑。
 - 面向桌面浏览器：训练场需要鼠标精确点选，未做移动端触控适配。
 - 顶栏速度按钮支持 8x，但键盘只覆盖 1x / 2x / 4x。
@@ -516,7 +521,7 @@ npm run dev
 - `package.json` 的 `version` 是版本的唯一来源。发版时同步更新 `package.json`、`CHANGELOG.md`，并打 **annotated tag** `vX.Y.Z`：
 
 ```bash
-git tag -a v0.4.3 -m "0.4.3: 人类血量与僵尸攻击力、受击减速、截图精简"
+git tag -a v0.4.3 -m "0.4.3: 人类血量与僵尸攻击力、受击减速、电击枪、截图精简"
 git push origin main
 git push origin v0.4.3
 ```

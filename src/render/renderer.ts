@@ -12,7 +12,7 @@ import { Application, CanvasSource, Container, Graphics, Sprite, Text, Texture }
 import { COMBO_SPRITES, SPRITE_LIST, SPRITE_SIZE, getNativeFrame, getSprite, type SpriteDef } from "../art";
 import { DEFAULT_MAP, type MapDef } from "../data/maps";
 import { settings } from "../data/settings/runtime";
-import type { Human, World, Zombie } from "../core/world";
+import type { Effect, Human, World, Zombie } from "../core/world";
 import { HUMAN_DIAMETER, humanSpriteId, spriteDef, spriteRotation, spriteScale, VISUAL_SCALE, zombieDeathSpriteId, zombieSpriteId } from "./pixel";
 
 /** 单条伤害飘字（训练场用，渲染层只负责画，生命周期由训练场会话管理） */
@@ -99,6 +99,8 @@ export class Renderer {
   /** 人类血条：始终水平、不随精灵朝向旋转，画在墙体之上 */
   private hpBarLayer = new Graphics();
   private fxLayer = new Container();
+  /** 电击枪闪电：独立 Graphics 层，画折线，不走圆点精灵池 */
+  private arcLayer = new Graphics();
   private selectionLayer = new Graphics();
   private textLayer = new Container();
   private dot!: Texture;
@@ -132,7 +134,7 @@ export class Renderer {
     this.warmSpriteTextures();
     this.buildStatic();
     this.buildTrainingVisual();
-    // 层级从下到上：训练场装饰 -> 地板 -> 倒地定格 -> 单位 -> 特效 -> 门窗 -> 墙体 -> 选中框 -> 飘字
+    // 层级从下到上：训练场装饰 -> 地板 -> 倒地定格 -> 单位 -> 特效 -> 闪电 -> 门窗 -> 墙体 -> 选中框 -> 飘字
     // 门窗在特效之上：火焰飞过门口会被盖住；墙体最后画，遮住飞出去的特效
     this.app.stage.addChild(
       this.floorLayer,
@@ -140,6 +142,7 @@ export class Renderer {
       this.deathLayer,
       this.unitLayer,
       this.fxLayer,
+      this.arcLayer,
       this.openingLayer,
       this.wallLayer,
       this.hpBarLayer,
@@ -278,6 +281,33 @@ export class Renderer {
     for (let py = y; py < y + h; py += step) {
       g.moveTo(x, py).lineTo(x, Math.min(py + dash, y + h));
       g.moveTo(x + w, py).lineTo(x + w, Math.min(py + dash, y + h));
+    }
+  }
+
+  /**
+   * 电击枪闪电：每段跳跃是一条独立折线，外层暖黄辉光 + 内层黄色芯线，
+   * 末端画一个小亮点。整段按 age/life 线性淡出（约 0.12 秒）。
+   */
+  private renderArcs(effects: Effect[]): void {
+    const g = this.arcLayer;
+    g.clear();
+    for (let i = 0; i < effects.length; i++) {
+      const e = effects[i];
+      if (e.kind !== "arc" || !e.points || e.points.length < 2) continue;
+      const fade = 1 - Math.min(1, e.age / e.life);
+      if (fade <= 0) continue;
+      const pts = e.points;
+      const trace = (): void => {
+        g.moveTo(pts[0].x, pts[0].y);
+        for (let k = 1; k < pts.length; k++) g.lineTo(pts[k].x, pts[k].y);
+      };
+      // 先用宽一点的暖黄半透明线打底，做出辉光感，再叠一条细黄芯线
+      trace();
+      g.stroke({ width: 6, color: 0xffc93c, alpha: fade * 0.26 });
+      trace();
+      g.stroke({ width: 2.6, color: e.color, alpha: fade * 0.95 });
+      const end = pts[pts.length - 1];
+      g.circle(end.x, end.y, 2.6).fill({ color: 0xfff8d0, alpha: fade * 0.85 });
     }
   }
 
@@ -535,10 +565,15 @@ export class Renderer {
     }
 
     const effects = w.effects;
-    this.sync(this.fxSprites, effects.length, this.fxLayer);
+    // 闪电是折线，单独画在 arcLayer；圆点精灵池只分给 ember / blast
+    let fxCount = 0;
+    for (let i = 0; i < effects.length; i++) if (effects[i].kind !== "arc") fxCount++;
+    this.sync(this.fxSprites, fxCount, this.fxLayer);
+    let fxIndex = 0;
     for (let i = 0; i < effects.length; i++) {
       const e = effects[i];
-      const s = this.fxSprites[i];
+      if (e.kind === "arc") continue;
+      const s = this.fxSprites[fxIndex++];
       const p = e.age / e.life;
       s.position.set(e.x, e.y);
       s.tint = e.color;
@@ -561,6 +596,7 @@ export class Renderer {
       }
     }
 
+    this.renderArcs(effects);
     this.renderOpenings(w);
     this.renderHumanHealth(w.humans);
     this.renderSelection(extra?.selection ?? null);

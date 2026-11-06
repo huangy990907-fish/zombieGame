@@ -11,7 +11,7 @@ import { effectiveWeapon } from "../data/settings/runtime";
 import { MAX_ZOMBIE_RADIUS, ZOMBIE_SLOW } from "../data/zombies";
 import { WEAPON_IDS } from "../data/weapons";
 import type { WeaponDef } from "../data/types";
-import { dist2, mixColor, pointSegDistSq } from "../utils/math";
+import { dist2, mixColor, pointSegDistSq, segRectHit } from "../utils/math";
 import type { BulletKind, DamageSource, Human, World, Zombie } from "../core/world";
 import { sound, SFX } from "../audio/manager";
 import { humanMuzzle } from "../render/pixel";
@@ -39,6 +39,16 @@ export function tryFire(world: World, h: Human, angle: number): void {
     return;
   }
 
+  if (def.kind === "tesla") {
+    if (h.fire > 0 || h.reloadTimer > 0 || h.ammo <= 0) return;
+    h.fire = cooldown;
+    h.ammo--;
+    sound.play(SFX.TESLA);
+    fireTesla(world, h, angle, def, dmgMul);
+    if (h.ammo <= 0) h.reloadTimer = def.reload;
+    return;
+  }
+
   if (h.fire > 0 || h.reloadTimer > 0 || h.ammo <= 0) return;
 
   h.fire = cooldown;
@@ -63,6 +73,156 @@ export function tryFire(world: World, h: Human, angle: number): void {
   }
 
   if (h.ammo <= 0) h.reloadTimer = def.reload;
+}
+
+/** 电击枪视线：墙体和未破的门/窗都会挡住链式跳跃（破口后放行） */
+function teslaBlocked(world: World, ax: number, ay: number, bx: number, by: number): boolean {
+  for (const w of world.map.walls) {
+    if (segRectHit(ax, ay, bx, by, w)) return true;
+  }
+  for (const o of world.openings) {
+    if (!o.broken && segRectHit(ax, ay, bx, by, o.rect)) return true;
+  }
+  return false;
+}
+
+/** 射线 + 视线 + 目标半径选首个目标：取射线上最近的、未被遮挡的僵尸 */
+function findTeslaFirst(
+  world: World,
+  mx: number,
+  my: number,
+  angle: number,
+  range: number,
+): Zombie | null {
+  const dirX = Math.cos(angle);
+  const dirY = Math.sin(angle);
+  world.zombieGrid.query(mx, my, range + MAX_ZOMBIE_RADIUS, queryBuf);
+  let best: Zombie | null = null;
+  let bestDist = Infinity;
+  for (let i = 0; i < queryBuf.length; i++) {
+    const z = queryBuf[i];
+    if (!z.alive) continue;
+    const dx = z.x - mx;
+    const dy = z.y - my;
+    // 投影距离：目标必须在前方射程内
+    const proj = dx * dirX + dy * dirY;
+    if (proj <= 0 || proj > range) continue;
+    // 点到射线的垂直距离，命中容差取目标半径 + 少量擦边
+    const perp = Math.abs(dx * dirY - dy * dirX);
+    if (perp > z.radius + 3) continue;
+    if (teslaBlocked(world, mx, my, z.x, z.y)) continue;
+    if (proj < bestDist) {
+      bestDist = proj;
+      best = z;
+    }
+  }
+  return best;
+}
+
+/** 链式跳跃：以当前目标为圆心找最近的、未被本次电击命中且视线可见的僵尸 */
+function findTeslaNext(
+  world: World,
+  from: Zombie,
+  radius: number,
+  visited: Set<number>,
+): Zombie | null {
+  world.zombieGrid.query(from.x, from.y, radius, queryBuf);
+  let best: Zombie | null = null;
+  let bestD = Infinity;
+  for (let i = 0; i < queryBuf.length; i++) {
+    const z = queryBuf[i];
+    if (!z.alive || visited.has(z.id)) continue;
+    const d = dist2(from.x, from.y, z.x, z.y);
+    if (d > radius * radius || d >= bestD) continue;
+    if (teslaBlocked(world, from.x, from.y, z.x, z.y)) continue;
+    bestD = d;
+    best = z;
+  }
+  return best;
+}
+
+/** 生成一段折线闪电：起点到终点，中间点随机抖动，持续 0.12 秒 */
+function addTeslaArc(
+  world: World,
+  fx: number,
+  fy: number,
+  tx: number,
+  ty: number,
+  color: number,
+): void {
+  const dx = tx - fx;
+  const dy = ty - fy;
+  const len = Math.hypot(dx, dy) || 1;
+  const nx = -dy / len;
+  const ny = dx / len;
+  const amp = Math.min(9, 4 + len * 0.04);
+  const points: Array<{ x: number; y: number }> = [{ x: fx, y: fy }];
+  for (let i = 1; i < 5; i++) {
+    const t = i / 5;
+    const off = (Math.random() - 0.5) * 2 * amp;
+    // 中间点沿法线抖动，形成不规则折线而不是直棍
+    points.push({
+      x: fx + dx * t + nx * off,
+      y: fy + dy * t + ny * off,
+    });
+  }
+  points.push({ x: tx, y: ty });
+  world.effects.push({
+    kind: "arc",
+    x: fx,
+    y: fy,
+    angle: 0,
+    radius: 0,
+    color,
+    age: 0,
+    life: 0.12,
+    points,
+  });
+}
+
+/**
+ * 电击枪一次放电：瞬时命中，不需要子弹。
+ * 首个目标单挑时伤害 ×2.2；否则以它为起点逐只链式跳跃，
+ * 最多命中 chainMaxTargets 只，每跳伤害按 chainFalloff 衰减。
+ */
+function fireTesla(world: World, h: Human, angle: number, def: WeaponDef, dmgMul: number): void {
+  const cfg = def.tesla;
+  if (!cfg) return;
+  const muzzle = humanMuzzle(h.weapon, h.x, h.y, angle);
+  const first = findTeslaFirst(world, muzzle.x, muzzle.y, angle, def.range);
+  if (!first) return;
+
+  // 单体加成只看“首个目标附近有没有其他僵尸”，不看它们是否被墙挡住
+  let hasOtherNear = false;
+  world.zombieGrid.query(first.x, first.y, cfg.singleRadius, queryBuf);
+  for (let i = 0; i < queryBuf.length; i++) {
+    const z = queryBuf[i];
+    if (z.alive && z !== first) {
+      hasOtherNear = true;
+      break;
+    }
+  }
+  const solo = !hasOtherNear;
+  const firstDamage = def.damage * dmgMul * (solo ? cfg.singleBonus : 1);
+  const source: DamageSource = { weapon: h.weapon, humanId: h.id };
+  addTeslaArc(world, muzzle.x, muzzle.y, first.x, first.y, 0xffe14d);
+  damageZombie(world, first, firstDamage, source);
+
+  const visited = new Set<number>([first.id]);
+  let current = first;
+  let damage = firstDamage;
+  let hits = 1;
+  for (let jump = 1; jump < cfg.chainMaxTargets; jump++) {
+    const next = findTeslaNext(world, current, cfg.chainRadius, visited);
+    if (!next) break;
+    damage *= cfg.chainFalloff;
+    addTeslaArc(world, current.x, current.y, next.x, next.y, 0xffe14d);
+    damageZombie(world, next, damage, source);
+    visited.add(next.id);
+    current = next;
+    hits++;
+  }
+  world.onTeslaVolley?.(hits, solo);
 }
 
 /**

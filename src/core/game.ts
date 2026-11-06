@@ -14,7 +14,7 @@ import { sound, SFX } from "../audio/manager";
 import { HUMAN_DEF } from "../data/humans";
 import { DEFAULT_MAP, resolveMap, type MapDef } from "../data/maps";
 import { applySettings, settings } from "../data/settings/runtime";
-import type { HumanMode, SettingsOverrides } from "../data/types";
+import type { HumanMode, SettingsOverrides, SpawnRegion } from "../data/types";
 import { LOADOUT, WEAPON_IDS } from "../data/weapons";
 import { ZOMBIE_IDS } from "../data/zombies";
 import { findLevel } from "../levels";
@@ -171,11 +171,12 @@ export class Game {
       roster[i] = roster[j];
       roster[j] = tmp;
     }
-    const bounds = this.map.humanBounds;
+    const zones = this.map.humanZones.length > 0 ? this.map.humanZones : [this.map.humanBounds];
     for (const w of roster) {
+      const zone = this.pickRegion(zones, this.map.humanBounds);
       this.world.spawnHuman(
-        randRange(bounds.x0, bounds.x1),
-        randRange(bounds.y0, bounds.y1),
+        randRange(zone.x0, zone.x1),
+        randRange(zone.y0, zone.y1),
         w,
       );
     }
@@ -339,12 +340,13 @@ export class Game {
     sound.play(SFX.WAVE_START);
 
     // 每波少量补充兵员，避免被一波打崩后彻底没法看
-    const bounds = this.map.humanBounds;
+    const zones = this.map.humanZones.length > 0 ? this.map.humanZones : [this.map.humanBounds];
     const add = Math.min(s.reinforce, Math.max(0, settings().human.cap - this.world.humans.length));
     for (let i = 0; i < add; i++) {
+      const zone = this.pickRegion(zones, this.map.humanBounds);
       this.world.spawnHuman(
-        randRange(bounds.x0, bounds.x1),
-        randRange(bounds.y0, bounds.y1),
+        randRange(zone.x0, zone.x1),
+        randRange(zone.y0, zone.y1),
         this.randomWeapon(),
       );
     }
@@ -361,6 +363,26 @@ export class Game {
     return LOADOUT[0].id;
   }
 
+  /**
+   * 多区域并集按面积加权抽一块（区域可以相交 / 重叠，权重按各自面积累加）。
+   * 空集合回退 fallback，避免调用方再写一次兜底。
+   */
+  private pickRegion(regions: SpawnRegion[], fallback: SpawnRegion): SpawnRegion {
+    if (regions.length === 0) return fallback;
+    const areaOf = (r: SpawnRegion): number =>
+      Math.max(0, (r.x1 - r.x0) * (r.y1 - r.y0));
+    let total = 0;
+    for (const r of regions) total += areaOf(r);
+    if (total <= 0) return regions[regions.length - 1];
+    let roll = Math.random() * total;
+    for (const r of regions) {
+      const area = areaOf(r);
+      if (roll < area) return r;
+      roll -= area;
+    }
+    return regions[regions.length - 1];
+  }
+
   /** 生成一只丧尸：按剩余比例决定普通/狂奔，血量随波次上浮 */
   private spawnOne(): void {
     let kind = ZOMBIE_IDS.normal;
@@ -371,23 +393,12 @@ export class Game {
         this.runnersLeft--;
       }
     }
-    // 出生点完全按地图显式区域选择：spawn 为主区域，缺哪个窗侧区域就不参与
-    // 抽签，不假设“左 / 上 / 下”的方位。按面积加权，大出生区放更多丧尸。
-    const regions = [this.map.spawn];
+    // 出生点完全按地图显式区域选择：spawn 为主区域（可多块），再叠加可选的窗侧区域。
+    // 按面积加权，大出生区放更多丧尸；不假设“左 / 上 / 下”的方位。
+    const regions: SpawnRegion[] = [...this.map.spawn];
     if (this.map.windowSpawn.top) regions.push(this.map.windowSpawn.top);
     if (this.map.windowSpawn.bottom) regions.push(this.map.windowSpawn.bottom);
-    let totalArea = 0;
-    for (const r of regions) totalArea += (r.x1 - r.x0) * (r.y1 - r.y0);
-    let roll = Math.random() * totalArea;
-    let region = regions[regions.length - 1];
-    for (const r of regions) {
-      const area = (r.x1 - r.x0) * (r.y1 - r.y0);
-      if (roll < area) {
-        region = r;
-        break;
-      }
-      roll -= area;
-    }
+    const region = this.pickRegion(regions, this.map.spawn[0] ?? this.map.humanBounds);
     this.world.spawnZombie(
       randRange(region.x0, region.x1),
       randRange(region.y0, region.y1),

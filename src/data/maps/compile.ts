@@ -35,6 +35,24 @@ function toPxRegion(rect: TileRect): { x0: number; x1: number; y0: number; y1: n
   };
 }
 
+/** 读取兼容：旧版单个矩形 / 新版矩形数组，统一成数组 */
+function rectList(value: TileRect | TileRect[]): TileRect[] {
+  return Array.isArray(value) ? value : [value];
+}
+
+/** 人类移动边界：房间内侧内缩 20px（与 TS 兜底口径一致，防止贴墙） */
+function humanBoundsOf(room: MapDef["room"]): MapDef["humanBounds"] {
+  const pad = 20;
+  const x0 = room.left + room.wall + pad;
+  const y0 = room.top + room.wall + pad;
+  return {
+    x0,
+    y0,
+    x1: Math.max(x0, room.right - room.wall - pad),
+    y1: Math.max(y0, room.bottom - room.wall - pad),
+  };
+}
+
 interface WallRun {
   x: number;
   w: number;
@@ -120,6 +138,7 @@ export function compileTilesToMapDef(json: MapJson): MapDef {
   }
 
   const walls = compileWalls(json.tiles);
+  const room = compileRoom(walls, TILE_SIZE);
 
   // 门在前、窗在后；同类按从上到下、从左到右排序，保证编译结果稳定
   const rank = (kind: "door" | "window"): number => (kind === "door" ? 0 : 1);
@@ -136,22 +155,23 @@ export function compileTilesToMapDef(json: MapJson): MapDef {
 
   return {
     id: json.id,
-    name: json.name,
+    name: typeof json.name === "string" && json.name.trim() ? json.name.trim() : json.id,
     width: MAP_WIDTH,
     height: MAP_HEIGHT,
-    room: compileRoom(walls, TILE_SIZE),
+    room,
     walls,
     openings,
     openingCenters: openings.map((o) => ({
       x: o.rect.x + o.rect.w * 0.5,
       y: o.rect.y + o.rect.h * 0.5,
     })),
-    spawn: toPxRegion(json.spawn),
+    spawn: rectList(json.spawn).map(toPxRegion),
     windowSpawn: {
       top: json.windowSpawn?.top ? toPxRegion(json.windowSpawn.top) : undefined,
       bottom: json.windowSpawn?.bottom ? toPxRegion(json.windowSpawn.bottom) : undefined,
     },
-    humanBounds: toPxRegion(json.humanZone),
+    humanZones: rectList(json.humanZone).map(toPxRegion),
+    humanBounds: humanBoundsOf(room),
     buildBiteDamage: json.buildBiteDamage,
     buildBiteSlow: json.buildBiteSlow,
   };

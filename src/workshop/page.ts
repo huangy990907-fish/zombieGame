@@ -8,21 +8,25 @@ import { compileTilesToMapDef } from "../data/maps/compile";
 import { isReadOnlyMap } from "../data/maps";
 import { validateMapJson } from "../data/maps/schema";
 import { TILE_SIZE } from "../data/maps/schema";
-import type { MapJson } from "../data/maps/schema";
+import type { MapJson, MapValidationError, TileRect } from "../data/maps/schema";
+import { getMapReferences } from "../levels";
 import {
   OPENING_DEFAULTS,
   cloneDoc,
   createBlankDoc,
   fromMapJson,
+  generateWorkshopId,
   toMapJson,
   toRawJson,
   type OpeningDefaults,
+  type WorkshopDoc,
 } from "./doc";
 import {
   WorkshopEditor,
   type EditorTool,
   type HoverInfo,
   type OpeningPreview,
+  type ZoneRef,
 } from "./editor";
 import {
   WORKSHOP_PREVIEW_MAP_ID,
@@ -34,14 +38,15 @@ import {
   saveWorkshopPreview,
   type BuiltinMapEntry,
 } from "./storage";
+import type { DevDeleteInfo } from "./devDelete";
 
 const TOOLS: Array<{ id: EditorTool; label: string; icon: string; hint: string }> = [
   { id: "empty", label: "空地", icon: "·", hint: "把格子清成空地，并移除覆盖它的门窗" },
   { id: "wall", label: "墙", icon: "#", hint: "拖动连续画墙；画在门窗上会把门窗还原成墙" },
   { id: "door", label: "门", icon: "D", hint: "按住拖拽决定宽度（16px 整数倍），门可被胖子穿过" },
   { id: "window", label: "窗", icon: "W", hint: "按住拖拽决定宽度；窗只放行普通 / 狂奔僵尸" },
-  { id: "human", label: "人类区", icon: "人", hint: "拖出矩形人类可行区，必须全部落在空地格" },
-  { id: "spawn", label: "出生点", icon: "生", hint: "拖出矩形丧尸出生区，必须可通行且不与人类区重叠" },
+  { id: "human", label: "人类区", icon: "人", hint: "拖出矩形人类出生区，可放多块；只决定出生点，不限制后续活动" },
+  { id: "spawn", label: "僵尸区", icon: "僵", hint: "拖出矩形僵尸出生区，可放多块；必须可通行且不与人类区重叠" },
   { id: "erase", label: "擦除", icon: "✕", hint: "擦门窗时还原成墙；擦墙 / 空地清成空地" },
 ];
 
@@ -63,7 +68,7 @@ export class WorkshopPage {
   private readonly editor: WorkshopEditor;
 
   private readonly nameInput: HTMLInputElement;
-  private readonly idInput: HTMLInputElement;
+  private readonly idTextEl: HTMLElement;
   private readonly readonlyBadge: HTMLElement;
   private readonly undoBtn: HTMLButtonElement;
   private readonly redoBtn: HTMLButtonElement;
@@ -75,26 +80,32 @@ export class WorkshopPage {
   private readonly errorCountEl: HTMLElement;
   private readonly compileEl: HTMLElement;
   private readonly openingsEl: HTMLElement;
+  private readonly zonesEl: HTMLElement;
   private readonly saveStatusEl: HTMLElement;
   private readonly builtinSelect: HTMLSelectElement;
   private readonly toastEl: HTMLElement;
   private readonly playBtn: HTMLButtonElement;
   private readonly exportBtn: HTMLButtonElement;
   private readonly saveProjectBtn: HTMLButtonElement | null;
+  private readonly deleteMapBtn: HTMLButtonElement | null;
 
   private paletteButtons: HTMLButtonElement[] = [];
   private selectedOpeningId: string | null = null;
+  private selectedZone: ZoneRef | null = null;
   private openingDefaults: OpeningDefaults = { ...OPENING_DEFAULTS };
   private builtinCatalog: BuiltinMapEntry[] = [];
   private catalogLoaded = false;
   private hasActivated = false;
   private saveTimer = 0;
   private toastTimer = 0;
+  private syncDevDelete: (() => void) | null = null;
 
   constructor(
     private readonly onBack: () => void,
     /** 保存到项目成功后：由 main.ts 重新加载注册表并刷新训练场下拉（参数是被保存的 id） */
     private readonly onSaved?: (id: string) => void | Promise<void>,
+    /** 删除项目地图成功后：由 main.ts 重新加载注册表，必要时把训练场切回 arena */
+    private readonly onDeleted?: (id: string) => void | Promise<void>,
   ) {
     const root = document.getElementById("workshopOverlay");
     if (!root) throw new Error("missing element #workshopOverlay");
@@ -110,7 +121,7 @@ export class WorkshopPage {
           </div>
           <div class="ws-meta">
             <label>名称 <input id="wsName" maxlength="24" spellcheck="false" /></label>
-            <label>id <input id="wsId" maxlength="32" spellcheck="false" /></label>
+            <span class="ws-idline">id <code id="wsIdText"></code></span>
             <span class="ws-badge hidden" id="wsReadonly">内置只读</span>
           </div>
           <div class="ws-top-actions">
@@ -144,11 +155,12 @@ export class WorkshopPage {
             <h3>开口列表</h3>
             <div class="ws-openings" id="wsOpenings"></div>
 
-            <h3>区域</h3>
+            <h3>区域（可多块）</h3>
             <div class="ws-zone-actions">
               <button id="wsClearHuman">清除人类区</button>
-              <button id="wsClearSpawn">清除出生区</button>
+              <button id="wsClearSpawn">清除僵尸区</button>
             </div>
+            <div class="ws-zones" id="wsZones"></div>
 
             <h3>操作提示</h3>
             <ul class="ws-controls">
@@ -196,6 +208,7 @@ export class WorkshopPage {
                 <select id="wsBuiltinSelect"><option value="">载入内置图…</option></select>
                 <button id="wsLoadBuiltin">载入</button>
               </div>
+              <button id="wsDeleteMap" class="ws-dev-delete" hidden disabled></button>
               <p class="ws-hint">
                 导出的 JSON 可直接放进 <code>public/maps/</code>，并在 <code>manifest.json</code> 登记；
                 试玩会载入训练场，正式选图入口留到阶段 3。
@@ -209,7 +222,7 @@ export class WorkshopPage {
     `;
 
     this.nameInput = this.query<HTMLInputElement>("#wsName");
-    this.idInput = this.query<HTMLInputElement>("#wsId");
+    this.idTextEl = this.query<HTMLElement>("#wsIdText");
     this.readonlyBadge = this.query<HTMLElement>("#wsReadonly");
     this.undoBtn = this.query<HTMLButtonElement>("#wsUndo");
     this.redoBtn = this.query<HTMLButtonElement>("#wsRedo");
@@ -221,12 +234,14 @@ export class WorkshopPage {
     this.errorCountEl = this.query<HTMLElement>("#wsErrCount");
     this.compileEl = this.query<HTMLElement>("#wsCompile");
     this.openingsEl = this.query<HTMLElement>("#wsOpenings");
+    this.zonesEl = this.query<HTMLElement>("#wsZones");
     this.saveStatusEl = this.query<HTMLElement>("#wsSaveStatus");
     this.builtinSelect = this.query<HTMLSelectElement>("#wsBuiltinSelect");
     this.toastEl = this.query<HTMLElement>("#wsToast");
     this.playBtn = this.query<HTMLButtonElement>("#wsPlay");
     this.exportBtn = this.query<HTMLButtonElement>("#wsExport");
     this.saveProjectBtn = this.root.querySelector<HTMLButtonElement>("#wsSaveProject");
+    this.deleteMapBtn = this.root.querySelector<HTMLButtonElement>("#wsDeleteMap");
 
     const canvas = this.query<HTMLCanvasElement>("#wsCanvas");
     const minimap = this.query<HTMLCanvasElement>("#wsMinimap");
@@ -237,6 +252,10 @@ export class WorkshopPage {
         this.zoomEl.textContent = `${Math.round(zoom * 100)}%`;
       },
       onPreview: (preview) => this.handlePreview(preview),
+      onZoneSelect: (zone) => {
+        this.selectedZone = zone;
+        this.refreshZones();
+      },
     });
 
     this.buildPalette();
@@ -258,6 +277,7 @@ export class WorkshopPage {
     this.syncMeta();
     this.refreshValidation();
     this.refreshOpenings();
+    this.refreshZones();
   }
 
   private query<T extends HTMLElement>(selector: string): T {
@@ -276,6 +296,7 @@ export class WorkshopPage {
     this.editor.setActive(true);
     requestAnimationFrame(() => this.editor.refreshLayout(!this.hasActivated));
     this.bindDevSave();
+    this.bindDevDelete();
 
     if (!this.hasActivated) {
       this.hasActivated = true;
@@ -285,6 +306,7 @@ export class WorkshopPage {
         this.syncMeta();
         this.refreshValidation();
         this.refreshOpenings();
+        this.refreshZones();
         this.saveStatusEl.textContent = this.formatSavedAt(draft.updatedAt);
         this.showToast("已恢复上次的工坊草稿");
       }
@@ -334,19 +356,15 @@ export class WorkshopPage {
       this.refreshValidation();
       this.scheduleSave();
     });
-    this.idInput.addEventListener("input", () => {
-      this.editor.getDoc().id = this.idInput.value;
-      this.syncReadonlyState();
-      this.refreshValidation();
-      this.scheduleSave();
-    });
     this.undoBtn.onclick = () => {
       this.editor.undo();
       this.refreshOpenings();
+      this.refreshZones();
     };
     this.redoBtn.onclick = () => {
       this.editor.redo();
       this.refreshOpenings();
+      this.refreshZones();
     };
     this.clearBtn.onclick = () => {
       if (!confirm("清空当前地图内容？门窗、区域与墙体都会消失（可撤销）。")) return;
@@ -387,12 +405,14 @@ export class WorkshopPage {
     this.query<HTMLButtonElement>("#wsClearHuman").onclick = () => {
       this.editor.clearZone("human");
       this.refreshOpenings();
-      this.showToast("已清除人类区");
+      this.refreshZones();
+      this.showToast("已清除全部人类区");
     };
     this.query<HTMLButtonElement>("#wsClearSpawn").onclick = () => {
       this.editor.clearZone("spawn");
       this.refreshOpenings();
-      this.showToast("已清除出生区");
+      this.refreshZones();
+      this.showToast("已清除全部僵尸区");
     };
   }
 
@@ -400,18 +420,47 @@ export class WorkshopPage {
     const doc = this.editor.getDoc();
     this.readonlyBadge.classList.toggle("hidden", doc.builtinId === null);
     this.readonlyBadge.textContent = doc.builtinId ? "内置只读 · 请另存为副本" : "";
-    this.idInput.disabled = doc.builtinId !== null;
     const readonly = isReadOnlyMap(doc.id);
     this.exportBtn.disabled = readonly;
     this.exportBtn.title = readonly ? "内置图不能覆盖，请先另存为副本" : "导出为 public/maps 可用的 JSON";
+    this.syncDevDeleteState();
   }
 
   private syncMeta(): void {
     const doc = this.editor.getDoc();
     this.nameInput.value = doc.name;
-    this.idInput.value = doc.id;
+    this.idTextEl.textContent = doc.id;
     this.syncReadonlyState();
     this.updateHistoryButtons();
+  }
+
+  private syncDevDeleteState(): void {
+    this.syncDevDelete?.();
+  }
+
+  /** 删除入口需要的信息：只允许删 manifest 里 readOnly:false 且未被关卡 / 模式引用的图 */
+  private deleteInfo(): DevDeleteInfo {
+    const doc = this.editor.getDoc();
+    if (!this.catalogLoaded) {
+      return { id: doc.id, name: doc.name, canDelete: false, reason: "地图目录尚未加载" };
+    }
+    const entry = this.builtinCatalog.find((item) => item.id === doc.id);
+    if (!entry) {
+      return { id: doc.id, name: doc.name, canDelete: false, reason: "当前地图还没有写入项目" };
+    }
+    if (entry.readOnly) {
+      return { id: doc.id, name: entry.name, canDelete: false, reason: "内置地图不可删除" };
+    }
+    const refs = getMapReferences(doc.id);
+    if (refs.length > 0) {
+      return {
+        id: doc.id,
+        name: entry.name,
+        canDelete: false,
+        reason: `被${refs.map((ref) => ref.label).join("、")}引用`,
+      };
+    }
+    return { id: doc.id, name: entry.name, canDelete: true };
   }
 
   private updateHistoryButtons(): void {
@@ -428,6 +477,7 @@ export class WorkshopPage {
     this.updateHistoryButtons();
     this.refreshValidation();
     this.refreshOpenings();
+    this.refreshZones();
     this.scheduleSave();
   }
 
@@ -439,7 +489,7 @@ export class WorkshopPage {
     const tags: string[] = [];
     if (info.openingId) tags.push(`开口 ${info.openingId}`);
     if (info.inHumanZone) tags.push("人类区");
-    if (info.inSpawnZone) tags.push("出生点");
+    if (info.inSpawnZone) tags.push("僵尸区");
     this.hoverEl.textContent = `列 ${info.x} · 行 ${info.y} · ${info.tileName}${
       tags.length ? ` · ${tags.join(" / ")}` : ""
     }`;
@@ -463,7 +513,7 @@ export class WorkshopPage {
 
   private refreshValidation(): void {
     const doc = this.editor.getDoc();
-    const errors = validateMapJson(toRawJson(doc));
+    const errors = this.validationErrors(doc);
     this.errorsEl.innerHTML = "";
 
     if (errors.length === 0) {
@@ -496,6 +546,7 @@ export class WorkshopPage {
         .filter((e) => e.x !== undefined && e.y !== undefined)
         .map((e) => ({ x: e.x as number, y: e.y as number, message: e.message })),
     );
+    this.syncDevDeleteState();
 
     if (errors.length > 0) {
       this.compileEl.textContent = `⚠ ${errors.length} 条错误，无法编译`;
@@ -518,6 +569,26 @@ export class WorkshopPage {
       this.playBtn.disabled = true;
       if (this.saveProjectBtn) this.saveProjectBtn.disabled = true;
     }
+  }
+
+  /**
+   * 结构校验 + 名称全局唯一预校验。
+   * 名称去首尾空格后比较，区分大小写（A 与 a 视为不同）；排除当前图自身的 id。
+   */
+  private validationErrors(doc: WorkshopDoc): MapValidationError[] {
+    const errors = validateMapJson(toRawJson(doc));
+    const name = doc.name.trim();
+    if (name) {
+      const conflict = this.builtinCatalog.find(
+        (entry) => entry.id !== doc.id && entry.hasName && entry.name === name,
+      );
+      if (conflict) {
+        errors.push({
+          message: `地图名称「${name}」已被「${conflict.name}」（${conflict.id}）使用`,
+        });
+      }
+    }
+    return errors;
   }
 
   // ============================================================
@@ -609,6 +680,73 @@ export class WorkshopPage {
   }
 
   // ============================================================
+  // 区域列表（多块）
+  // ============================================================
+
+  private refreshZones(): void {
+    const doc = this.editor.getDoc();
+    const listOf = (kind: "human" | "spawn") =>
+      kind === "human" ? doc.humanZones : doc.spawnZones;
+
+    if (this.selectedZone) {
+      const list = listOf(this.selectedZone.kind);
+      if (this.selectedZone.index >= list.length) {
+        this.selectedZone = null;
+        this.editor.setSelectedZone(null);
+      }
+    }
+
+    this.zonesEl.innerHTML = "";
+    if (doc.humanZones.length === 0 && doc.spawnZones.length === 0) {
+      const empty = document.createElement("p");
+      empty.className = "ws-hint";
+      empty.textContent = "还没有区域，用人类区 / 僵尸区画笔画（可放多块）。";
+      this.zonesEl.appendChild(empty);
+      return;
+    }
+
+    const addRow = (kind: "human" | "spawn", rect: TileRect, index: number): void => {
+      const row = document.createElement("div");
+      row.className = "ws-zone-row";
+      const selected =
+        this.selectedZone?.kind === kind && this.selectedZone.index === index;
+      if (selected) row.classList.add("selected");
+
+      const nameBtn = document.createElement("button");
+      nameBtn.className = "ws-zone-name";
+      nameBtn.innerHTML = `<b>${kind === "human" ? "人类区" : "僵尸区"}</b> ${index + 1}`;
+      nameBtn.title = "选中并定位到这块区域";
+      nameBtn.onclick = () => {
+        this.editor.setSelectedZone({ kind, index });
+        this.editor.focusCell(
+          rect.x + Math.floor(rect.w / 2),
+          rect.y + Math.floor(rect.h / 2),
+        );
+      };
+
+      const size = document.createElement("span");
+      size.className = "ws-open-size";
+      size.textContent = `${rect.w}×${rect.h}`;
+
+      const del = document.createElement("button");
+      del.className = "ws-open-del";
+      del.textContent = "✕";
+      del.title = "删除这块区域（也可选中后按 Delete）";
+      del.onclick = () => {
+        this.editor.removeZone(kind, index);
+      };
+
+      row.append(nameBtn, size, del);
+      this.zonesEl.appendChild(row);
+    };
+
+    for (const kind of ["human", "spawn"] as const) {
+      const list = listOf(kind);
+      list.forEach((rect, index) => addRow(kind, rect, index));
+    }
+  }
+
+  // ============================================================
   // 存档 / 导入导出 / 试玩
   // ============================================================
 
@@ -618,10 +756,13 @@ export class WorkshopPage {
         return;
       }
       const doc = createBlankDoc();
+      doc.id = this.nextWorkshopId();
+      doc.name = this.uniqueName(doc.name);
       this.editor.replaceDoc(doc, true);
       this.syncMeta();
       this.refreshValidation();
       this.refreshOpenings();
+      this.refreshZones();
       this.saveDraftNow();
       this.showToast("已新建空白地图");
     };
@@ -674,32 +815,61 @@ export class WorkshopPage {
 
   private saveAsCopy(): void {
     const doc = this.editor.getDoc();
-    const base = doc.id.replace(/-copy\d*$/, "");
-    let suggested = `${base}-copy`;
-    for (let i = 2; isReadOnlyMap(suggested) || this.builtinCatalog.some((m) => m.id === suggested); i++) {
-      suggested = `${base}-copy${i}`;
-    }
-    const input = prompt("另存为副本：输入新的地图 id（不能与内置图相同）", suggested);
+    const suggested = this.uniqueName(`${doc.name} 副本`);
+    const input = prompt(
+      "另存为副本：输入地图名称（去首尾空格后 1–24 字，名称全局唯一）\nid 由系统自动生成",
+      suggested,
+    );
     if (input === null) return;
-    const id = input.trim();
-    if (!id) {
-      this.showToast("id 不能为空", "bad");
+    const name = input.trim();
+    if (!name) {
+      this.showToast("名称不能为空", "bad");
       return;
     }
-    if (isReadOnlyMap(id)) {
-      this.showToast(`「${id}」是内置只读地图，不能覆盖`, "bad");
+    if (name.length > 24) {
+      this.showToast(`名称最多 24 字（当前 ${name.length} 字）`, "bad");
+      return;
+    }
+    if (this.nameTaken(name)) {
+      this.showToast(`名称「${name}」已被其它地图使用，请换一个`, "bad");
       return;
     }
     const copy = cloneDoc(doc);
-    copy.id = id;
-    copy.name = `${doc.name} 副本`;
+    copy.id = this.nextWorkshopId();
+    copy.name = name;
     copy.builtinId = null;
     this.editor.replaceDoc(copy, false);
     this.syncMeta();
     this.refreshValidation();
     this.refreshOpenings();
+    this.refreshZones();
     this.saveDraftNow();
-    this.showToast(`已另存为副本「${id}」，可以导出了`);
+    this.showToast(`已另存为副本「${name}」（id ${copy.id}）`);
+  }
+
+  /** 名称是否已被目录里另一张图占用（区分大小写，忽略首尾空格） */
+  private nameTaken(name: string, excludeId?: string): boolean {
+    const trimmed = name.trim();
+    return this.builtinCatalog.some(
+      (entry) => entry.id !== excludeId && entry.hasName && entry.name === trimmed,
+    );
+  }
+
+  /** 生成一个不与现有目录冲突的系统 id */
+  private nextWorkshopId(): string {
+    return generateWorkshopId(this.builtinCatalog.map((entry) => entry.id));
+  }
+
+  /** 基于候选名称找一个可用名（冲突时追加 2 / 3 …，并压在 24 字以内） */
+  private uniqueName(base: string): string {
+    let name = base.trim().slice(0, 24) || "我的地图";
+    if (!this.nameTaken(name)) return name;
+    for (let i = 2; i < 100; i++) {
+      const suffix = ` ${i}`;
+      name = `${base.trim().slice(0, 24 - suffix.length)}${suffix}`;
+      if (!this.nameTaken(name)) return name;
+    }
+    return `${Date.now()}`.slice(-24);
   }
 
   private exportJson(): void {
@@ -708,7 +878,7 @@ export class WorkshopPage {
       this.showToast(`「${doc.id}」是内置只读地图，请先另存为副本再导出`, "bad");
       return;
     }
-    const errors = validateMapJson(toRawJson(doc));
+    const errors = this.validationErrors(doc);
     if (errors.length > 0) {
       const first = errors[0];
       const at = first.x === undefined ? "" : `(${first.x},${first.y}) `;
@@ -743,7 +913,7 @@ export class WorkshopPage {
           mod.installDevSave({
             button: btn,
             isReadOnly: () => isReadOnlyMap(this.editor.getDoc().id),
-            getErrors: () => validateMapJson(toRawJson(this.editor.getDoc())),
+            getErrors: () => this.validationErrors(this.editor.getDoc()),
             getMap: () => toMapJson(this.editor.getDoc()),
             toast: (text, kind) => this.showToast(text, kind),
             refresh: () => this.refreshValidation(),
@@ -757,6 +927,44 @@ export class WorkshopPage {
         })
         .catch((err) => {
           console.warn("[workshop] 开发态保存模块加载失败", err);
+          btn.remove();
+        });
+      return;
+    }
+    btn.remove();
+  }
+
+  /** 仅开发态：动态加载删除模块并显示按钮（生产构建整块剔除） */
+  private bindDevDelete(): void {
+    const btn = this.deleteMapBtn;
+    if (!btn) return;
+    if (this.syncDevDelete) {
+      this.syncDevDelete();
+      return;
+    }
+    if (import.meta.env.DEV) {
+      void import("./devDelete")
+        .then((mod) => {
+          this.syncDevDelete = mod.installDevDelete({
+            button: btn,
+            getInfo: () => this.deleteInfo(),
+            toast: (text, kind) => this.showToast(text, kind),
+            refresh: () => this.refreshValidation(),
+            afterDelete: async (id, name) => {
+              this.saveDraftNow();
+              resetWorkshopCatalog();
+              await this.reloadBuiltinCatalog();
+              await this.onDeleted?.(id);
+              this.refreshValidation();
+              this.refreshOpenings();
+              this.refreshZones();
+              this.showToast(`已删除「${name}」（${id}），名称已释放`);
+            },
+          });
+          this.syncDevDelete();
+        })
+        .catch((err) => {
+          console.warn("[workshop] 开发态删除模块加载失败", err);
           btn.remove();
         });
       return;
@@ -788,11 +996,12 @@ export class WorkshopPage {
       this.syncMeta();
       this.refreshValidation();
       this.refreshOpenings();
+      this.refreshZones();
       this.saveDraftNow();
       if (errors.length > 0) {
-        this.showToast(`已导入「${doc.id}」，但有 ${errors.length} 条校验错误`, "bad");
+        this.showToast(`已导入「${doc.name}」，但有 ${errors.length} 条校验错误`, "bad");
       } else {
-        this.showToast(`已导入「${doc.id}」并通过校验`);
+        this.showToast(`已导入「${doc.name}」并通过校验`);
       }
     } catch (err) {
       this.showToast(`导入失败：${err instanceof Error ? err.message : String(err)}`, "bad");
@@ -806,12 +1015,15 @@ export class WorkshopPage {
       for (const entry of this.builtinCatalog) {
         const option = document.createElement("option");
         option.value = entry.id;
-        option.textContent = `${entry.name}（${entry.id}）`;
+        option.textContent = entry.hasName ? `${entry.name}（${entry.id}）` : entry.id;
         this.builtinSelect.appendChild(option);
       }
       if (this.builtinCatalog.length === 0) {
         this.builtinSelect.disabled = true;
       }
+      // 目录加载后名称冲突校验才有意义，立刻重算一次
+      this.refreshValidation();
+      this.syncDevDeleteState();
     } catch (err) {
       console.warn("[workshop] 内置地图目录加载失败", err);
       this.showToast("内置地图目录加载失败，只能导入 / 新建", "bad");
@@ -827,13 +1039,20 @@ export class WorkshopPage {
     try {
       const json = await loadBuiltinMapJson(id);
       const doc = fromMapJson(json);
-      doc.builtinId = id;
+      const entry = this.builtinCatalog.find((item) => item.id === id);
+      const readonly = entry ? entry.readOnly : true;
+      doc.builtinId = readonly ? id : null;
       this.editor.replaceDoc(doc, true);
       this.syncMeta();
       this.refreshValidation();
       this.refreshOpenings();
+      this.refreshZones();
       this.saveDraftNow();
-      this.showToast(`已载入内置图「${doc.name}」；它是只读的，导出前请另存为副本`);
+      if (readonly) {
+        this.showToast(`已载入内置图「${doc.name}」；它是只读的，导出前请另存为副本`);
+      } else {
+        this.showToast(`已载入工坊图「${doc.name}」（${doc.id}），可直接保存覆盖`);
+      }
     } catch (err) {
       this.showToast(
         `载入失败：${err instanceof Error ? err.message : String(err)}`,

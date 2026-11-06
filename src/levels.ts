@@ -59,3 +59,43 @@ export const LEVELS: LevelDef[] = [
 export function findLevel(id: string): LevelDef | undefined {
   return LEVELS.find((l) => l.id === id);
 }
+
+export type MapReferenceKind = "level" | "placement" | "challenge";
+
+/** 一张地图被哪些关卡 / 模式引用（删除地图前的保护查询） */
+export interface MapReference {
+  kind: MapReferenceKind;
+  /** 引用方的 id（关卡 id / 模式 id） */
+  id: string;
+  /** 给用户看的原因，例如「第 1 关「初次尸潮」」 */
+  label: string;
+  mapId: string;
+}
+
+/**
+ * 未来放置 / 闯关模式的地图引用登记点：
+ * 新增模式时在初始化处调用 registerMapReference()，删除保护会自动跟着生效。
+ */
+const EXTRA_MAP_REFERENCES: MapReference[] = [];
+
+export function registerMapReference(ref: MapReference): void {
+  EXTRA_MAP_REFERENCES.push(ref);
+}
+
+/** 扫描所有关卡 / 模式对某张地图的引用；命中则不允许删除该图 */
+export function getMapReferences(mapId: string): MapReference[] {
+  const refs: MapReference[] = [];
+  LEVELS.forEach((level, index) => {
+    if (level.mapId !== mapId) return;
+    refs.push({
+      kind: "level",
+      id: level.id,
+      label: `第 ${index + 1} 关「${level.title}」`,
+      mapId,
+    });
+  });
+  for (const ref of EXTRA_MAP_REFERENCES) {
+    if (ref.mapId === mapId) refs.push(ref);
+  }
+  return refs;
+}

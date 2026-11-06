@@ -158,14 +158,16 @@ export interface MapDef {
   openings: OpeningDef[];
   /** 各开口中心点：流场多源 BFS 的源点 / 丧尸的兜底目标 */
   openingCenters: Point[];
-  /** 丧尸的主出生区域（门侧 / 通用） */
-  spawn: SpawnRegion;
+  /** 丧尸出生区域（可多块，按面积加权抽签） */
+  spawn: SpawnRegion[];
   /** 窗侧出生区域，按地图显式数据提供；缺失的方位直接不参与出怪 */
   windowSpawn: {
     top?: SpawnRegion;
     bottom?: SpawnRegion;
   };
-  /** 人类活动范围（房间内缩一点，防止贴墙） */
+  /** 人类出生区域（可多块，按面积加权抽签；不限制后续活动范围） */
+  humanZones: SpawnRegion[];
+  /** 人类移动边界（房间内缩一点，防止贴墙；只夹取位置，不决定出生点） */
   humanBounds: SpawnRegion;
   /** 丧尸啃咬门窗时每口造成的建筑伤害 */
   buildBiteDamage: number;

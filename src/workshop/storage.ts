@@ -25,7 +25,12 @@ interface DraftEnvelope {
 export interface BuiltinMapEntry {
   id: string;
   file: string;
+  /** 显示名；旧图没有 name 时回退 id */
   name: string;
+  /** 是否真的有 name 字段（名称唯一校验只比较有名字的图） */
+  hasName: boolean;
+  /** manifest 的 readOnly !== false 视为只读；false 的工坊图可删 / 可覆盖 */
+  readOnly: boolean;
 }
 
 interface ManifestEntry {
@@ -121,9 +126,22 @@ export async function loadBuiltinCatalog(): Promise<BuiltinMapEntry[]> {
       if (!entry || typeof entry.id !== "string" || typeof entry.file !== "string") return null;
       try {
         const json = await loadBuiltinMapJson(entry.id);
-        return { id: entry.id, file: entry.file, name: json.name || entry.id };
+        const hasName = typeof json.name === "string" && json.name.trim() !== "";
+        return {
+          id: entry.id,
+          file: entry.file,
+          name: hasName ? json.name!.trim() : entry.id,
+          hasName,
+          readOnly: entry.readOnly !== false,
+        };
       } catch {
-        return { id: entry.id, file: entry.file, name: entry.id };
+        return {
+          id: entry.id,
+          file: entry.file,
+          name: entry.id,
+          hasName: false,
+          readOnly: entry.readOnly !== false,
+        };
       }
     }),
   );

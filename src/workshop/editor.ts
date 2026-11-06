@@ -30,6 +30,8 @@ import {
   serializeDoc,
   deserializeDoc,
   setTile,
+  zoneAt,
+  zoneList,
   type OpeningDefaults,
   type TileCode,
   type WorkshopDoc,
@@ -37,6 +39,12 @@ import {
 } from "./doc";
 
 export type EditorTool = "empty" | "wall" | "door" | "window" | "human" | "spawn" | "erase";
+
+/** 区域选中引用：kind + 数组下标 */
+export interface ZoneRef {
+  kind: "human" | "spawn";
+  index: number;
+}
 
 export interface HoverInfo {
   x: number;
@@ -70,6 +78,8 @@ export interface EditorHooks {
   onHover(info: HoverInfo | null): void;
   onZoom(zoom: number): void;
   onPreview(preview: OpeningPreview | null): void;
+  /** 区域选中变化（画布点选 / 列表点选 / 删除后都会回调） */
+  onZoneSelect?(zone: ZoneRef | null): void;
 }
 
 const COLORS = {
@@ -106,7 +116,7 @@ interface PointerCell {
   y: number;
 }
 
-type Mode = "idle" | "paint" | "pan" | "dragOpening" | "dragZone";
+type Mode = "idle" | "paint" | "pan" | "dragOpening" | "dragZone" | "moveZone";
 
 export class WorkshopEditor {
   private readonly canvas: HTMLCanvasElement;
@@ -138,6 +148,9 @@ export class WorkshopEditor {
 
   private errorMarkers: ErrorMarker[] = [];
   private selectedOpening: string | null = null;
+  private selectedZone: ZoneRef | null = null;
+  private zoneDrag: { kind: "human" | "spawn"; index: number; startX: number; startY: number; rect: TileRect } | null =
+    null;
   private flashCell: PointerCell | null = null;
   private flashTimer = 0;
 
@@ -174,6 +187,8 @@ export class WorkshopEditor {
   replaceDoc(doc: WorkshopDoc, fitView = false): void {
     this.doc = doc;
     this.selectedOpening = null;
+    this.selectedZone = null;
+    this.hooks.onZoneSelect?.(null);
     this.undoStack = [];
     this.redoStack = [];
     this.opSnapshot = null;
@@ -205,7 +220,49 @@ export class WorkshopEditor {
 
   setSelectedOpening(id: string | null): void {
     this.selectedOpening = id;
+    if (id) this.selectedZone = null;
     this.redraw();
+  }
+
+  /** 选中某块区域；门窗与区域选中互斥 */
+  setSelectedZone(zone: ZoneRef | null): void {
+    if (zone) {
+      const list = zoneList(this.doc, zone.kind);
+      if (zone.index < 0 || zone.index >= list.length) return;
+      this.selectedOpening = null;
+    }
+    this.selectedZone = zone;
+    this.hooks.onZoneSelect?.(zone);
+    this.redraw();
+  }
+
+  getSelectedZone(): ZoneRef | null {
+    return this.selectedZone;
+  }
+
+  /** 删除一块区域（走历史栈）；下标会自动修正选中项 */
+  removeZone(kind: "human" | "spawn", index: number): void {
+    const list = zoneList(this.doc, kind);
+    if (index < 0 || index >= list.length) return;
+    this.beginOp();
+    list.splice(index, 1);
+    const selected = this.selectedZone;
+    if (selected && selected.kind === kind) {
+      if (selected.index === index) this.selectedZone = null;
+      else if (selected.index > index) selected.index--;
+    }
+    this.hooks.onZoneSelect?.(this.selectedZone);
+    this.endOp();
+  }
+
+  /** Delete / Backspace：删除当前选中的区域或门窗 */
+  private deleteSelection(): void {
+    if (this.selectedZone) {
+      const { kind, index } = this.selectedZone;
+      this.removeZone(kind, index);
+      return;
+    }
+    if (this.selectedOpening) this.removeOpening(this.selectedOpening);
   }
 
   setErrorMarkers(markers: ErrorMarker[]): void {
@@ -240,10 +297,12 @@ export class WorkshopEditor {
     this.beginOp();
     this.doc.tiles.fill(TILE_CODES.empty);
     this.doc.openings = [];
-    this.doc.humanZone = null;
-    this.doc.spawn = null;
+    this.doc.humanZones = [];
+    this.doc.spawnZones = [];
     this.doc.windowSpawn = { top: null, bottom: null };
     this.selectedOpening = null;
+    this.selectedZone = null;
+    this.hooks.onZoneSelect?.(null);
     this.endOp();
   }
 
@@ -257,12 +316,14 @@ export class WorkshopEditor {
     this.endOp();
   }
 
-  /** 清除人类区 / 出生区（走历史栈） */
+  /** 清除某一类的全部区域（走历史栈） */
   clearZone(kind: "human" | "spawn"): void {
-    if (kind === "human" ? !this.doc.humanZone : !this.doc.spawn) return;
+    const list = zoneList(this.doc, kind);
+    if (list.length === 0) return;
     this.beginOp();
-    if (kind === "human") this.doc.humanZone = null;
-    else this.doc.spawn = null;
+    list.length = 0;
+    if (this.selectedZone?.kind === kind) this.selectedZone = null;
+    this.hooks.onZoneSelect?.(this.selectedZone);
     this.endOp();
   }
 
@@ -333,6 +394,10 @@ export class WorkshopEditor {
       } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "y") {
         e.preventDefault();
         this.redo();
+      } else if (e.key === "Delete" || e.key === "Backspace") {
+        if (!this.selectedZone && !this.selectedOpening) return;
+        e.preventDefault();
+        this.deleteSelection();
       }
     });
     window.addEventListener("keyup", (e) => {
@@ -399,8 +464,26 @@ export class WorkshopEditor {
         this.beginOp();
         this.updateOpeningPreview();
       } else if (this.tool === "human" || this.tool === "spawn") {
-        this.mode = "dragZone";
-        this.beginOp();
+        const kind = this.tool;
+        const hit = zoneAt(this.doc, kind, cell.x, cell.y);
+        if (hit >= 0) {
+          // 点在已有区域上：选中并进入拖动调整（新增区域从空白处开始拖）
+          this.setSelectedZone({ kind, index: hit });
+          const rect = zoneList(this.doc, kind)[hit];
+          this.zoneDrag = {
+            kind,
+            index: hit,
+            startX: cell.x,
+            startY: cell.y,
+            rect: { ...rect },
+          };
+          this.mode = "moveZone";
+          this.beginOp();
+        } else {
+          this.setSelectedZone(null);
+          this.mode = "dragZone";
+          this.beginOp();
+        }
       } else {
         this.mode = "paint";
         this.beginOp();
@@ -436,6 +519,16 @@ export class WorkshopEditor {
       }
       if (this.mode === "dragZone") {
         this.redraw();
+      } else if (this.mode === "moveZone" && this.zoneDrag && cell) {
+        const dx = cell.x - this.zoneDrag.startX;
+        const dy = cell.y - this.zoneDrag.startY;
+        const rect = this.zoneDrag.rect;
+        const target = zoneList(this.doc, this.zoneDrag.kind)[this.zoneDrag.index];
+        if (target) {
+          target.x = Math.max(0, Math.min(GRID_COLS - rect.w, rect.x + dx));
+          target.y = Math.max(0, Math.min(GRID_ROWS - rect.h, rect.y + dy));
+        }
+        this.redraw();
       } else if (cell) {
         this.redraw(); // 仅悬停高亮
       }
@@ -451,18 +544,27 @@ export class WorkshopEditor {
       } else if (this.mode === "dragZone") {
         this.commitZone();
         this.endOp();
+      } else if (this.mode === "moveZone") {
+        this.endOp();
       }
       this.mode = "idle";
+      this.zoneDrag = null;
       this.pointerStart = null;
       this.pointerCurrent = null;
       this.redraw();
     };
     this.canvas.addEventListener("pointerup", finish);
     this.canvas.addEventListener("pointercancel", () => {
-      if (this.mode === "paint" || this.mode === "dragOpening" || this.mode === "dragZone") {
+      if (
+        this.mode === "paint" ||
+        this.mode === "dragOpening" ||
+        this.mode === "dragZone" ||
+        this.mode === "moveZone"
+      ) {
         this.cancelDrag(true);
       }
       this.mode = "idle";
+      this.zoneDrag = null;
       this.panStart = { x: 0, y: 0, camX: 0, camY: 0 };
       this.hooks.onPreview(null);
       this.redraw();
@@ -484,6 +586,7 @@ export class WorkshopEditor {
       if (doc) this.doc = doc;
     }
     this.opSnapshot = null;
+    this.zoneDrag = null;
     this.pointerStart = null;
     this.pointerCurrent = null;
     this.hooks.onPreview(null);
@@ -509,24 +612,26 @@ export class WorkshopEditor {
     if (!isInside(cell.x, cell.y)) return null;
     const tile = getTile(this.doc, cell.x, cell.y);
     const opening = openingAt(this.doc, cell.x, cell.y);
+    const inHumanZone = this.doc.humanZones.some((zone) =>
+      cell.x >= zone.x &&
+      cell.y >= zone.y &&
+      cell.x < zone.x + zone.w &&
+      cell.y < zone.y + zone.h,
+    );
+    const inSpawnZone = this.doc.spawnZones.some((zone) =>
+      cell.x >= zone.x &&
+      cell.y >= zone.y &&
+      cell.x < zone.x + zone.w &&
+      cell.y < zone.y + zone.h,
+    );
     return {
       x: cell.x,
       y: cell.y,
       tile,
       tileName: TILE_NAMES[tile],
       openingId: opening?.id,
-      inHumanZone: this.doc.humanZone
-        ? cell.x >= this.doc.humanZone.x &&
-          cell.y >= this.doc.humanZone.y &&
-          cell.x < this.doc.humanZone.x + this.doc.humanZone.w &&
-          cell.y < this.doc.humanZone.y + this.doc.humanZone.h
-        : false,
-      inSpawnZone: this.doc.spawn
-        ? cell.x >= this.doc.spawn.x &&
-          cell.y >= this.doc.spawn.y &&
-          cell.x < this.doc.spawn.x + this.doc.spawn.w &&
-          cell.y < this.doc.spawn.y + this.doc.spawn.h
-        : false,
+      inHumanZone,
+      inSpawnZone,
     };
   }
 
@@ -555,6 +660,8 @@ export class WorkshopEditor {
     if (!doc) return;
     this.doc = doc;
     this.selectedOpening = null;
+    this.selectedZone = null;
+    this.hooks.onZoneSelect?.(null);
     this.redraw();
     this.hooks.onDocChange();
   }
@@ -651,8 +758,9 @@ export class WorkshopEditor {
     if (this.tool !== "human" && this.tool !== "spawn") return;
     const rect = this.currentZoneRect();
     if (!rect) return;
-    if (this.tool === "human") this.doc.humanZone = rect;
-    else this.doc.spawn = rect;
+    const list = this.tool === "human" ? this.doc.humanZones : this.doc.spawnZones;
+    list.push(rect);
+    this.setSelectedZone({ kind: this.tool, index: list.length - 1 });
   }
 
   // ============================================================
@@ -765,8 +873,16 @@ export class WorkshopEditor {
         ctx.fillText(label, sx + 4, sy + 3);
       }
     };
-    drawZone(this.doc.humanZone, COLORS.humanFill, COLORS.humanStroke, "人类区");
-    drawZone(this.doc.spawn, COLORS.spawnFill, COLORS.spawnStroke, "出生点");
+    const drawZoneList = (
+      list: TileRect[],
+      fill: string,
+      stroke: string,
+      label: string,
+    ): void => {
+      list.forEach((rect, index) => drawZone(rect, fill, stroke, `${label} ${index + 1}`));
+    };
+    drawZoneList(this.doc.humanZones, COLORS.humanFill, COLORS.humanStroke, "人类区");
+    drawZoneList(this.doc.spawnZones, COLORS.spawnFill, COLORS.spawnStroke, "僵尸区");
     drawZone(
       this.doc.windowSpawn.top,
       COLORS.winSpawnFill,
@@ -807,6 +923,18 @@ export class WorkshopEditor {
         ctx.strokeStyle = COLORS.selected;
         ctx.lineWidth = 2;
         ctx.strokeRect(sx + 1, sy + 1, opening.w * scale - 2, opening.h * scale - 2);
+      }
+    }
+
+    // ===== 选中区域 =====
+    if (this.selectedZone) {
+      const rect = zoneList(this.doc, this.selectedZone.kind)[this.selectedZone.index];
+      if (rect) {
+        const sx = ox + rect.x * scale;
+        const sy = oy + rect.y * scale;
+        ctx.strokeStyle = COLORS.selected;
+        ctx.lineWidth = 2;
+        ctx.strokeRect(sx + 1, sy + 1, rect.w * scale - 2, rect.h * scale - 2);
       }
     }
 
@@ -941,10 +1069,10 @@ export class WorkshopEditor {
         rect.h * cell - 1,
       );
     };
-    zone(this.doc.humanZone, COLORS.humanFill, COLORS.humanStroke);
-    zone(this.doc.spawn, COLORS.spawnFill, COLORS.spawnStroke);
     zone(this.doc.windowSpawn.top, COLORS.winSpawnFill, COLORS.winSpawnStroke);
     zone(this.doc.windowSpawn.bottom, COLORS.winSpawnFill, COLORS.winSpawnStroke);
+    for (const rect of this.doc.humanZones) zone(rect, COLORS.humanFill, COLORS.humanStroke);
+    for (const rect of this.doc.spawnZones) zone(rect, COLORS.spawnFill, COLORS.spawnStroke);
 
     // 当前视口
     const scale = TILE_SIZE * this.camera.zoom;

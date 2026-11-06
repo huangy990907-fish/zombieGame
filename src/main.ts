@@ -112,6 +112,19 @@ async function boot(): Promise<void> {
       await loadBuiltinMaps();
       trainingPanel.reloadMaps(savedId);
     },
+    async (deletedId: string) => {
+      const wasTraining = training.world.map.id === deletedId;
+      const deletedName = wasTraining
+        ? training.world.map.name
+        : getMap(deletedId).name || deletedId;
+      await loadBuiltinMaps();
+      if (wasTraining) {
+        // 删掉的正是当前训练图：立刻切回默认图并重建 World / 静态层，不整页 reload
+        switchTrainingMap("arena");
+        showMapNotice(`地图「${deletedName}」已删除，训练场已切回「竞技场」`);
+      }
+      trainingPanel.reloadMaps();
+    },
   );
 
   // DOM 引用

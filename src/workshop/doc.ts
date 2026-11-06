@@ -54,14 +54,29 @@ export interface WorkshopDoc {
   name: string;
   tiles: Uint8Array;
   openings: OpeningJson[];
-  humanZone: TileRect | null;
-  spawn: TileRect | null;
+  /** 人类活动区（可多块，按并集；只决定出生点） */
+  humanZones: TileRect[];
+  /** 僵尸出生区（可多块，按面积加权出怪） */
+  spawnZones: TileRect[];
   /** 可选的上 / 下窗出生区：编辑器不改，但导入 / 载入内置图时必须原样保留 */
   windowSpawn: { top: TileRect | null; bottom: TileRect | null };
   buildBiteDamage: number;
   buildBiteSlow: number;
   /** 从哪张内置图载入的；null 表示新图 / 副本 / 导入 */
   builtinId: string | null;
+}
+
+/** 生成系统 id（用户不填）：ws-<时间戳>-<4 位随机十六进制>，冲突时自动换一个 */
+export function generateWorkshopId(existing: Iterable<string> = []): string {
+  const used = new Set(existing);
+  for (let i = 0; i < 20; i++) {
+    const random = Math.floor(Math.random() * 0x10000)
+      .toString(16)
+      .padStart(4, "0");
+    const id = `ws-${Date.now()}-${random}`;
+    if (!used.has(id)) return id;
+  }
+  return `ws-${Date.now()}-${Math.floor(Math.random() * 0x100000).toString(16)}`;
 }
 
 export interface OpeningDefaults {
@@ -81,12 +96,12 @@ export const OPENING_DEFAULTS: OpeningDefaults = {
 
 export function createBlankDoc(): WorkshopDoc {
   return {
-    id: "my-map",
+    id: generateWorkshopId(),
     name: "我的地图",
     tiles: new Uint8Array(GRID_COLS * GRID_ROWS),
     openings: [],
-    humanZone: null,
-    spawn: null,
+    humanZones: [],
+    spawnZones: [],
     windowSpawn: { top: null, bottom: null },
     buildBiteDamage: 4,
     buildBiteSlow: 1.5,
@@ -99,8 +114,8 @@ export function cloneDoc(doc: WorkshopDoc): WorkshopDoc {
     ...doc,
     tiles: new Uint8Array(doc.tiles),
     openings: doc.openings.map((o) => ({ ...o })),
-    humanZone: doc.humanZone ? { ...doc.humanZone } : null,
-    spawn: doc.spawn ? { ...doc.spawn } : null,
+    humanZones: doc.humanZones.map((z) => ({ ...z })),
+    spawnZones: doc.spawnZones.map((z) => ({ ...z })),
     windowSpawn: {
       top: doc.windowSpawn.top ? { ...doc.windowSpawn.top } : null,
       bottom: doc.windowSpawn.bottom ? { ...doc.windowSpawn.bottom } : null,
@@ -172,6 +187,25 @@ export function openingAt(doc: WorkshopDoc, x: number, y: number): OpeningJson |
   return doc.openings.find((o) => pointInRect(x, y, o));
 }
 
+/** 取某一类区域列表（人类 / 僵尸） */
+export function zoneList(doc: WorkshopDoc, kind: "human" | "spawn"): TileRect[] {
+  return kind === "human" ? doc.humanZones : doc.spawnZones;
+}
+
+/** 命中某一类区域的索引（后画的在上面，从后往前找）；未命中返回 -1 */
+export function zoneAt(
+  doc: WorkshopDoc,
+  kind: "human" | "spawn",
+  x: number,
+  y: number,
+): number {
+  const list = zoneList(doc, kind);
+  for (let i = list.length - 1; i >= 0; i--) {
+    if (pointInRect(x, y, list[i])) return i;
+  }
+  return -1;
+}
+
 /** 删除覆盖某格的开口，并把它的瓦片还原成调用方指定的类型 */
 export function removeOpeningAt(
   doc: WorkshopDoc,
@@ -240,8 +274,8 @@ export function toRawJson(doc: WorkshopDoc): Record<string, unknown> {
     tileSize: TILE_SIZE,
     tiles: toTileRows(doc),
     openings: doc.openings,
-    humanZone: doc.humanZone,
-    spawn: doc.spawn,
+    humanZone: doc.humanZones.map((z) => ({ ...z })),
+    spawn: doc.spawnZones.map((z) => ({ ...z })),
     windowSpawn: windowSpawnJson(doc),
     buildBiteDamage: doc.buildBiteDamage,
     buildBiteSlow: doc.buildBiteSlow,
@@ -250,8 +284,8 @@ export function toRawJson(doc: WorkshopDoc): Record<string, unknown> {
 
 /** 校验通过后才能调用：此时区域一定存在，直接产出可导出的 MapJson */
 export function toMapJson(doc: WorkshopDoc): MapJson {
-  if (!doc.humanZone || !doc.spawn) {
-    throw new Error("地图缺少人类区或出生区，无法导出");
+  if (doc.humanZones.length === 0 || doc.spawnZones.length === 0) {
+    throw new Error("地图缺少人类活动区或僵尸出生区，无法导出");
   }
   return {
     schemaVersion: MAP_SCHEMA_VERSION,
@@ -262,8 +296,8 @@ export function toMapJson(doc: WorkshopDoc): MapJson {
     tileSize: TILE_SIZE,
     tiles: toTileRows(doc),
     openings: doc.openings.map((o) => ({ ...o })),
-    humanZone: { ...doc.humanZone },
-    spawn: { ...doc.spawn },
+    humanZone: doc.humanZones.map((z) => ({ ...z })),
+    spawn: doc.spawnZones.map((z) => ({ ...z })),
     windowSpawn: windowSpawnJson(doc),
     buildBiteDamage: doc.buildBiteDamage,
     buildBiteSlow: doc.buildBiteSlow,
@@ -273,8 +307,9 @@ export function toMapJson(doc: WorkshopDoc): MapJson {
 /** 导入外部 JSON；这里容错读取，非法细节交给 validateMapJson 报 */
 export function fromMapJson(json: MapJson): WorkshopDoc {
   const doc = createBlankDoc();
-  doc.id = typeof json.id === "string" ? json.id : "imported";
-  doc.name = typeof json.name === "string" ? json.name : "导入地图";
+  doc.id = typeof json.id === "string" ? json.id : generateWorkshopId();
+  const incomingName = typeof json.name === "string" ? json.name.trim() : "";
+  doc.name = incomingName || doc.id;
   doc.buildBiteDamage = typeof json.buildBiteDamage === "number" ? json.buildBiteDamage : 4;
   doc.buildBiteSlow = typeof json.buildBiteSlow === "number" ? json.buildBiteSlow : 1.5;
   doc.openings = Array.isArray(json.openings) ? json.openings.map((o) => ({ ...o })) : [];
@@ -290,8 +325,8 @@ export function fromMapJson(json: MapJson): WorkshopDoc {
     }
   }
 
-  doc.humanZone = isRect(json.humanZone) ? { ...json.humanZone } : null;
-  doc.spawn = isRect(json.spawn) ? { ...json.spawn } : null;
+  doc.humanZones = readRectList(json.humanZone);
+  doc.spawnZones = readRectList(json.spawn);
   doc.windowSpawn = {
     top: isRect(json.windowSpawn?.top) ? { ...json.windowSpawn.top } : null,
     bottom: isRect(json.windowSpawn?.bottom) ? { ...json.windowSpawn.bottom } : null,
@@ -310,6 +345,14 @@ function isRect(value: unknown): value is TileRect {
   );
 }
 
+/** 旧版单个对象 / 新版数组都接受；非法项直接忽略，细节交给 validateMapJson */
+function readRectList(value: unknown): TileRect[] {
+  if (Array.isArray(value)) {
+    return value.filter(isRect).map((rect) => ({ ...rect }));
+  }
+  return isRect(value) ? [{ ...value }] : [];
+}
+
 function readWindowSpawn(value: unknown): { top: TileRect | null; bottom: TileRect | null } {
   if (typeof value !== "object" || value === null) return { top: null, bottom: null };
   const record = value as Record<string, unknown>;
@@ -324,8 +367,12 @@ interface SerializedDoc {
   name: string;
   tiles: string[];
   openings: OpeningJson[];
-  humanZone: TileRect | null;
-  spawn: TileRect | null;
+  /** 新版字段（数组） */
+  humanZones?: TileRect[] | TileRect | null;
+  spawnZones?: TileRect[] | TileRect | null;
+  /** 旧版单区域字段（读取兼容） */
+  humanZone?: TileRect[] | TileRect | null;
+  spawn?: TileRect[] | TileRect | null;
   windowSpawn: { top: TileRect | null; bottom: TileRect | null };
   buildBiteDamage: number;
   buildBiteSlow: number;
@@ -339,8 +386,8 @@ export function serializeDoc(doc: WorkshopDoc): string {
     name: doc.name,
     tiles: toTileRows(doc),
     openings: doc.openings.map((o) => ({ ...o })),
-    humanZone: doc.humanZone ? { ...doc.humanZone } : null,
-    spawn: doc.spawn ? { ...doc.spawn } : null,
+    humanZones: doc.humanZones.map((z) => ({ ...z })),
+    spawnZones: doc.spawnZones.map((z) => ({ ...z })),
     windowSpawn: {
       top: doc.windowSpawn.top ? { ...doc.windowSpawn.top } : null,
       bottom: doc.windowSpawn.bottom ? { ...doc.windowSpawn.bottom } : null,
@@ -363,8 +410,9 @@ export function deserializeDoc(raw: string): WorkshopDoc | null {
   const data = parsed as Partial<SerializedDoc>;
   if (!Array.isArray(data.tiles)) return null;
   const doc = createBlankDoc();
-  doc.id = typeof data.id === "string" ? data.id : "my-map";
-  doc.name = typeof data.name === "string" ? data.name : "我的地图";
+  doc.id = typeof data.id === "string" && data.id ? data.id : generateWorkshopId();
+  const storedName = typeof data.name === "string" ? data.name.trim() : "";
+  doc.name = storedName || doc.id;
   doc.buildBiteDamage = typeof data.buildBiteDamage === "number" ? data.buildBiteDamage : 4;
   doc.buildBiteSlow = typeof data.buildBiteSlow === "number" ? data.buildBiteSlow : 1.5;
   doc.builtinId = typeof data.builtinId === "string" ? data.builtinId : null;
@@ -379,8 +427,8 @@ export function deserializeDoc(raw: string): WorkshopDoc | null {
       setTile(doc, x, y, code);
     }
   }
-  doc.humanZone = isRect(data.humanZone) ? { ...data.humanZone } : null;
-  doc.spawn = isRect(data.spawn) ? { ...data.spawn } : null;
+  doc.humanZones = readRectList(data.humanZones ?? data.humanZone);
+  doc.spawnZones = readRectList(data.spawnZones ?? data.spawn);
   doc.windowSpawn = readWindowSpawn(data.windowSpawn);
   return doc;
 }

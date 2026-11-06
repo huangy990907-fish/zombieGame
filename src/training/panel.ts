@@ -298,8 +298,10 @@ export class TrainingPanel {
    */
   private refreshMapOptions(message?: string): void {
     const current = this.session.world.map;
-    const optionOf = (m: MapDef): string =>
-      `<option value="${escHtml(m.id)}">${escHtml(m.name)}（${escHtml(m.id)}）</option>`;
+    const optionOf = (m: MapDef): string => {
+      const label = m.name && m.name !== m.id ? `${m.name}（${m.id}）` : m.id;
+      return `<option value="${escHtml(m.id)}">${escHtml(label)}</option>`;
+    };
 
     const builtin = MAP_LIST.filter((m) => BUILTIN_MAP_IDS.has(m.id));
     const workshop = MAP_LIST.filter((m) => !BUILTIN_MAP_IDS.has(m.id));

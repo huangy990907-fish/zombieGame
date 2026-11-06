@@ -100,6 +100,11 @@ async function saveToProject(host: DevSaveHost): Promise<void> {
   btn.textContent = "保存中…";
   try {
     let result = await requestSave(map, false);
+    if (result.status === 409 && result.code === "name_taken") {
+      // 名称冲突不能靠 overwrite 解决，直接提示换名
+      host.toast(result.message || "地图名称已被其它地图使用，请换一个名称", "bad");
+      return;
+    }
     if (result.status === 409) {
       const ok = window.confirm(
         result.message || `「${map.id}」已存在，覆盖前会备份到 .bak，继续？`,

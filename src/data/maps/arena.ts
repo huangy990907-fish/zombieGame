@@ -83,11 +83,19 @@ export const arena: MapDef = {
     x: o.rect.x + o.rect.w * 0.5,
     y: o.rect.y + o.rect.h * 0.5,
   })),
-  spawn: { x0: 4, x1: 110, y0: 30, y1: 700 },
+  spawn: [{ x0: 4, x1: 110, y0: 30, y1: 700 }],
   windowSpawn: {
     top: { x0: 360, x1: 1000, y0: 6, y1: 52 },
     bottom: { x0: 360, x1: 1000, y0: 668, y1: 714 },
   },
+  humanZones: [
+    {
+      x0: ROOM.left + ROOM.wall + 20,
+      x1: ROOM.right - ROOM.wall - 20,
+      y0: ROOM.top + ROOM.wall + 20,
+      y1: ROOM.bottom - ROOM.wall - 20,
+    },
+  ],
   humanBounds: {
     x0: ROOM.left + ROOM.wall + 20,
     x1: ROOM.right - ROOM.wall - 20,

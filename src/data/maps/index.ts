@@ -52,11 +52,14 @@ export const MAP_LIST: MapDef[] = Object.values(MAPS);
 /** 当前默认地图；内置地图加载成功后会被 JSON 版本替换 */
 export let DEFAULT_MAP: MapDef = arena;
 
-/** 内置地图 id（来自 manifest；即使加载失败，arena 也始终算内置） */
+/** 内置地图 id（manifest 中 readOnly !== false 的图；arena 始终算内置） */
 export const BUILTIN_MAP_IDS = new Set<string>([arena.id]);
 
 /** 只读地图 id：工坊只能另存副本 */
 export const READONLY_MAP_IDS = new Set<string>([arena.id]);
+
+/** 上一次从 manifest 成功加载的 id，删除地图后用来清理注册表 */
+const MANIFEST_LOADED_IDS = new Set<string>();
 
 export function getMap(id: string): MapDef {
   return MAPS[id] ?? DEFAULT_MAP;
@@ -133,6 +136,22 @@ export async function loadBuiltinMaps(): Promise<void> {
   }
 
   let loaded = 0;
+  const manifestIds = new Set(
+    manifest.maps
+      .filter((entry) => entry && typeof entry.id === "string")
+      .map((entry) => entry.id),
+  );
+  // 删除地图后重新加载：把 manifest 里已经不存在的旧图从注册表移除（arena 保留 TS 兜底）
+  for (const id of [...MANIFEST_LOADED_IDS]) {
+    if (manifestIds.has(id)) continue;
+    MANIFEST_LOADED_IDS.delete(id);
+    BUILTIN_MAP_IDS.delete(id);
+    READONLY_MAP_IDS.delete(id);
+    if (id === arena.id) MAPS[id] = arena;
+    else delete MAPS[id];
+    console.info(`[maps] 地图「${id}」已从 manifest 移除，注册表同步删除`);
+  }
+
   for (const entry of manifest.maps) {
     if (!entry || typeof entry.id !== "string" || typeof entry.file !== "string") {
       console.warn("[maps] manifest 条目非法，已跳过", entry);
@@ -150,8 +169,15 @@ export async function loadBuiltinMaps(): Promise<void> {
         throw new Error(`文件 id「${map.id}」与 manifest「${entry.id}」不一致`);
       }
       MAPS[map.id] = map;
-      BUILTIN_MAP_IDS.add(map.id);
-      if (entry.readOnly !== false) READONLY_MAP_IDS.add(map.id);
+      MANIFEST_LOADED_IDS.add(map.id);
+      if (entry.readOnly !== false) {
+        BUILTIN_MAP_IDS.add(map.id);
+        READONLY_MAP_IDS.add(map.id);
+      } else {
+        // readOnly:false = 开发者保存出来的工坊图，可删、可覆盖
+        BUILTIN_MAP_IDS.delete(map.id);
+        READONLY_MAP_IDS.delete(map.id);
+      }
       loaded++;
       console.info(
         `[maps] 已加载「${map.id}」${map.width}×${map.height}，` +

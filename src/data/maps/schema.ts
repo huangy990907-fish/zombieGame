@@ -56,17 +56,24 @@ export interface OpeningJson {
 export interface MapJson {
   schemaVersion: number;
   id: string;
-  name: string;
+  /** 显示名（去首尾空格后 1–24 字）；旧图缺失时调用方回退显示 id */
+  name?: string;
   widthTiles: number;
   heightTiles: number;
   tileSize: number;
   /** GRID_ROWS 行，每行 GRID_COLS 个字符 */
   tiles: string[];
   openings: OpeningJson[];
-  /** 人类可行区（整块必须是空地格） */
-  humanZone: TileRect;
-  /** 出生区：丧尸从任意格出生，必须可通行且不与人类区重叠 */
-  spawn: TileRect;
+  /**
+   * 人类活动区：可放置多块矩形，按并集生效。
+   * 读取兼容旧版单个对象，保存统一写数组。
+   */
+  humanZone: TileRect | TileRect[];
+  /**
+   * 僵尸出生区：可放置多块矩形，按面积加权抽签。
+   * 读取兼容旧版单个对象，保存统一写数组。
+   */
+  spawn: TileRect | TileRect[];
   /**
    * 窗侧出生区（可选）：按方位显式提供，缺哪个就用不到哪个，不报错。
    * 没有对应方位的窗口由 spawn 区兜底，靠流场绕行到窗口。
@@ -116,6 +123,28 @@ function readRect(raw: unknown, label: string, errors: MapValidationError[]): Ti
     return null;
   }
   return { x, y, w, h };
+}
+
+/**
+ * 读取「单个矩形或矩形数组」：旧版 JSON 用对象，新版统一写数组。
+ * 缺失（null / undefined）返回空数组，由调用方决定是否报“缺少区域”。
+ */
+export function normalizeRectList(
+  raw: unknown,
+  label: string,
+  errors: MapValidationError[],
+): TileRect[] {
+  if (raw === null || raw === undefined) return [];
+  if (Array.isArray(raw)) {
+    const rects: TileRect[] = [];
+    for (let i = 0; i < raw.length; i++) {
+      const rect = readRect(raw[i], `${label}[${i}]`, errors);
+      if (rect) rects.push(rect);
+    }
+    return rects;
+  }
+  const rect = readRect(raw, label, errors);
+  return rect ? [rect] : [];
 }
 
 interface GridRead {
@@ -186,7 +215,7 @@ function checkReachability(
   grid: string[],
   openings: Array<{ id: string; kind: "door" | "window"; rect: TileRect }>,
   spawnRects: TileRect[],
-  humanZone: TileRect,
+  humanZones: TileRect[],
   errors: MapValidationError[],
 ): void {
   const total = GRID_COLS * GRID_ROWS;
@@ -245,10 +274,16 @@ function checkReachability(
     push(x, y - 1);
     push(x, y + 1);
   }
-  const hx = humanZone.x + Math.floor(humanZone.w / 2);
-  const hy = humanZone.y + Math.floor(humanZone.h / 2);
-  if (!visited[hy * GRID_COLS + hx]) {
-    errors.push({ message: "人类活动区与世界不可达（从门窗走不进去）", x: hx, y: hy });
+  for (const zone of humanZones) {
+    const hx = zone.x + Math.floor(zone.w / 2);
+    const hy = zone.y + Math.floor(zone.h / 2);
+    if (!visited[hy * GRID_COLS + hx]) {
+      errors.push({
+        message: `人类活动区（${zone.x},${zone.y}，${zone.w}×${zone.h}）与世界不可达（从门窗走不进去）`,
+        x: hx,
+        y: hy,
+      });
+    }
   }
 }
 
@@ -326,8 +361,14 @@ export function validateMapJson(raw: unknown): MapValidationError[] {
   if (typeof raw.id !== "string" || raw.id.trim() === "") {
     errors.push({ message: "id 必须是非空字符串" });
   }
-  if (typeof raw.name !== "string" || raw.name.trim() === "") {
-    errors.push({ message: "name 必须是非空字符串" });
+  if (typeof raw.name !== "string") {
+    if (raw.name !== undefined) errors.push({ message: "name 必须是字符串" });
+  } else {
+    const name = raw.name.trim();
+    if (name === "") errors.push({ message: "name 不能为空（去首尾空格后 1–24 字）" });
+    else if (name.length > 24) {
+      errors.push({ message: `name 最多 24 字（当前 ${name.length} 字）` });
+    }
   }
   if (raw.widthTiles !== GRID_COLS || raw.heightTiles !== GRID_ROWS) {
     errors.push({ message: `画布固定为 ${GRID_COLS}×${GRID_ROWS} 格，不支持自定义尺寸` });
@@ -437,9 +478,19 @@ export function validateMapJson(raw: unknown): MapValidationError[] {
     if (wallCount === 0) errors.push({ message: "地图至少需要一格墙体" });
   }
 
-  // ===== 人类区 / 出生区 =====
-  const humanZone = readRect(raw.humanZone, "humanZone", errors);
-  const spawn = readRect(raw.spawn, "spawn", errors);
+  // ===== 人类区 / 出生区（多块按并集） =====
+  const humanZones = normalizeRectList(raw.humanZone, "humanZone", errors);
+  const spawnZones = normalizeRectList(raw.spawn, "spawn", errors);
+  if (raw.humanZone === undefined) {
+    errors.push({ message: "缺少人类活动区（humanZone）" });
+  } else if (Array.isArray(raw.humanZone) && raw.humanZone.length === 0) {
+    errors.push({ message: "人类活动区至少需要 1 块矩形" });
+  }
+  if (raw.spawn === undefined) {
+    errors.push({ message: "缺少僵尸出生区（spawn）" });
+  } else if (Array.isArray(raw.spawn) && raw.spawn.length === 0) {
+    errors.push({ message: "僵尸出生区至少需要 1 块矩形" });
+  }
   const winSpawnRaw = raw.windowSpawn;
   let winTop: TileRect | null = null;
   let winBottom: TileRect | null = null;
@@ -456,21 +507,25 @@ export function validateMapJson(raw: unknown): MapValidationError[] {
     }
   }
 
-  if (grid && humanZone) {
-    checkEmptyRegion("人类活动区", humanZone, grid, errors);
+  for (const zone of humanZones) {
+    if (grid) checkEmptyRegion("人类活动区", zone, grid, errors);
   }
-  for (const [name, rect] of [
-    ["出生区", spawn],
-    ["上窗出生区", winTop],
-    ["下窗出生区", winBottom],
-  ] as const) {
-    if (grid && rect) checkEmptyRegion(name, rect, grid, errors);
-    if (rect && humanZone && rectsOverlap(rect, humanZone)) {
-      errors.push({
-        message: `${name}不能与人类活动区重叠`,
-        x: Math.max(rect.x, humanZone.x),
-        y: Math.max(rect.y, humanZone.y),
-      });
+  const spawnRects: Array<{ name: string; rect: TileRect }> = [
+    ...spawnZones.map((rect) => ({ name: "僵尸出生区", rect })),
+    ...(winTop ? [{ name: "上窗出生区", rect: winTop }] : []),
+    ...(winBottom ? [{ name: "下窗出生区", rect: winBottom }] : []),
+  ];
+  for (const { name, rect } of spawnRects) {
+    if (grid) checkEmptyRegion(name, rect, grid, errors);
+    for (const humanZone of humanZones) {
+      if (rectsOverlap(rect, humanZone)) {
+        errors.push({
+          message: `${name}不能与人类活动区重叠`,
+          x: Math.max(rect.x, humanZone.x),
+          y: Math.max(rect.y, humanZone.y),
+        });
+        break;
+      }
     }
   }
 
@@ -482,7 +537,7 @@ export function validateMapJson(raw: unknown): MapValidationError[] {
   }
 
   // 人类区必须在墙体包围盒内（当前只有封闭房间，未做多房间）
-  if (grid && humanZone) {
+  if (grid && humanZones.length > 0) {
     let minX = GRID_COLS;
     let minY = GRID_ROWS;
     let maxX = -1;
@@ -497,25 +552,27 @@ export function validateMapJson(raw: unknown): MapValidationError[] {
       }
     }
     if (maxX > 0) {
-      const inside =
-        humanZone.x >= minX &&
-        humanZone.y >= minY &&
-        humanZone.x + humanZone.w <= maxX &&
-        humanZone.y + humanZone.h <= maxY;
-      if (!inside) {
-        errors.push({
-          message: "人类活动区必须位于墙体包围的房间内",
-          x: humanZone.x,
-          y: humanZone.y,
-        });
+      for (const humanZone of humanZones) {
+        const inside =
+          humanZone.x >= minX &&
+          humanZone.y >= minY &&
+          humanZone.x + humanZone.w <= maxX &&
+          humanZone.y + humanZone.h <= maxY;
+        if (!inside) {
+          errors.push({
+            message: "人类活动区必须位于墙体包围的房间内",
+            x: humanZone.x,
+            y: humanZone.y,
+          });
+        }
       }
     }
   }
 
   // ===== 连通性 =====
-  if (grid && openings.length > 0 && spawn && humanZone) {
-    const spawnRects = [spawn, winTop, winBottom].filter((r): r is TileRect => r !== null);
-    checkReachability(grid, openings, spawnRects, humanZone, errors);
+  if (grid && openings.length > 0 && spawnZones.length > 0 && humanZones.length > 0) {
+    const allSpawn = spawnRects.map((s) => s.rect);
+    checkReachability(grid, openings, allSpawn, humanZones, errors);
   }
 
   return errors;

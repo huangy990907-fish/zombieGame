@@ -1709,6 +1709,75 @@ body.training .screen canvas {
   gap: 6px;
 }
 
+/* 顶部只读 id 展示（id 由系统生成，用户只填名称） */
+.ws-idline {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: #6f7a90;
+}
+
+.ws-idline code {
+  padding: 2px 6px;
+  font-size: 11px;
+  color: #9aa3b8;
+  background: #0f111c;
+  border: 1px solid #2f3a5a;
+  border-radius: 4px;
+}
+
+/* 区域列表（可多块，选中行与画布高亮联动） */
+.ws-zones {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.ws-zone-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 46px 22px;
+  align-items: center;
+  gap: 4px;
+  padding: 5px;
+  background: #0e101a;
+  border: 1px solid #1e2438;
+  border-radius: 4px;
+}
+
+.ws-zone-row.selected {
+  border-color: #8b5cf6;
+  background: rgba(139, 92, 246, 0.08);
+}
+
+.ws-zone-name {
+  padding: 2px 4px !important;
+  font-size: 11px !important;
+  text-align: left;
+  color: #c6cfdd;
+  background: transparent !important;
+  border: none !important;
+}
+
+.ws-zone-name b {
+  color: #ffd479;
+}
+
+/* 开发态专用：删除当前地图（生产构建按钮会被移除） */
+.ws-side button.ws-dev-delete {
+  width: 100%;
+  margin-top: 8px;
+  color: #ffb4b4;
+  border-color: #7f2f3a;
+  background: rgba(239, 68, 68, 0.08);
+}
+
+.ws-side button.ws-dev-delete:hover:not(:disabled) {
+  border-color: #ef4444;
+  background: rgba(239, 68, 68, 0.18);
+}
+
 .ws-controls {
   margin: 0;
   padding-left: 16px;

@@ -13,3 +13,6 @@ export const HUMAN_DEF: HumanDef = {
   sight: 420,
   turnTime: 2.8,
 };
+
+/** 通行 / 碰撞口径：身体直径 = 可见体宽 = 2 × 碰撞半径（与丧尸同一口径） */
+export const HUMAN_BODY_DIAMETER = HUMAN_DEF.radius * 2;

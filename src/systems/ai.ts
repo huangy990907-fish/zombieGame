@@ -13,7 +13,7 @@
  *   贴近完好开口时按撕咬节奏啃，破口后涌入（穿窗会被窗檐减速）；
  *   贴近人类就咬，血量归零后进入异变倒计时。
  */
-import { HUMAN_DEF } from "../data/humans";
+import { HUMAN_BODY_DIAMETER, HUMAN_DEF } from "../data/humans";
 import { MAX_ZOMBIE_RADIUS, WANDER_TUNING, ZOMBIE_IDS, ZOMBIE_SLOW } from "../data/zombies";
 import { effectiveWeapon, effectiveZombie, openingTuning, settings } from "../data/settings/runtime";
 import type { ZombiePursuitMode } from "../data/types";
@@ -173,11 +173,19 @@ export function updateHumans(world: World, dt: number): void {
       const p = world.posts[h.post];
       h.facing = turnToward(h.facing, Math.atan2(p.oy - h.y, p.ox - h.x), 5 * dt);
     } else {
-      // 没目标：在房间里闲逛，隔几秒换一个目标点
+      // 没目标：在房间里闲逛，隔几秒换一个目标点（目标点必须是可站立的空地）
       h.wTimer -= dt;
       if (h.wTimer <= 0 || dist2(h.x, h.y, h.wx, h.wy) < 900) {
-        h.wx = randRange(bounds.x0, bounds.x1);
-        h.wy = randRange(bounds.y0, bounds.y1);
+        const spot = world.findFreeSpot(
+          randRange(bounds.x0, bounds.x1),
+          randRange(bounds.y0, bounds.y1),
+          HUMAN_BODY_DIAMETER,
+          bounds,
+        );
+        if (spot) {
+          h.wx = spot.x;
+          h.wy = spot.y;
+        }
         h.wTimer = randRange(2.5, 5.5);
       }
       const wdx = h.wx - h.x;
@@ -251,8 +259,26 @@ export function updateHumans(world: World, dt: number): void {
       h.vy *= 0.82;
     }
 
-    h.x = clamp(h.x + h.vx * dt, bounds.x0, bounds.x1);
-    h.y = clamp(h.y + h.vy * dt, bounds.y0, bounds.y1);
+    /*
+     * 位置推进：被分离力推挤、被目标点吸引，最终都要过同一套阻挡判定。
+     * 逐轴判定，撞墙时只停被挡的那个轴，保留沿墙滑动。
+     * 已经被旧存档 / 极端情况放进墙里时不做阻挡，让人能自己走出来（避免永久卡死）。
+     */
+    const stuck = world.solidAt(h.x, h.y, 0, HUMAN_BODY_DIAMETER);
+    let nx = clamp(h.x + h.vx * dt, bounds.x0, bounds.x1);
+    let ny = clamp(h.y + h.vy * dt, bounds.y0, bounds.y1);
+    if (!stuck) {
+      if (world.solidAt(nx, h.y, 0, HUMAN_BODY_DIAMETER)) {
+        nx = h.x;
+        h.vx = 0;
+      }
+      if (world.solidAt(nx, ny, 0, HUMAN_BODY_DIAMETER)) {
+        ny = h.y;
+        h.vy = 0;
+      }
+    }
+    h.x = nx;
+    h.y = ny;
 
     if (h.ammo <= 0 && h.reloadTimer <= 0) h.reloadTimer = def.reload;
   }

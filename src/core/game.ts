@@ -11,12 +11,12 @@
 import { updateHumans, updateZombies } from "../systems/ai";
 import { updateCombat } from "../systems/combat";
 import { sound, SFX } from "../audio/manager";
-import { HUMAN_DEF } from "../data/humans";
+import { HUMAN_BODY_DIAMETER, HUMAN_DEF } from "../data/humans";
 import { DEFAULT_MAP, resolveMap, type MapDef } from "../data/maps";
 import { applySettings, settings } from "../data/settings/runtime";
 import type { HumanMode, SettingsOverrides, SpawnRegion } from "../data/types";
 import { LOADOUT, WEAPON_IDS } from "../data/weapons";
-import { ZOMBIE_IDS } from "../data/zombies";
+import { ZOMBIE_IDS, getZombieDef, zombieBodyDiameter } from "../data/zombies";
 import { findLevel } from "../levels";
 import { clamp, randRange } from "../utils/math";
 import type { Post } from "./world";
@@ -174,12 +174,31 @@ export class Game {
     const zones = this.map.humanZones.length > 0 ? this.map.humanZones : [this.map.humanBounds];
     for (const w of roster) {
       const zone = this.pickRegion(zones, this.map.humanBounds);
-      this.world.spawnHuman(
+      this.spawnHumanInZone(zone, w);
+    }
+  }
+
+  /**
+   * 在指定出生区随机取一个可用落点生成人类。
+   * 出生区可能包含内部墙体（自定义地图），落到墙里就就近找空地；
+   * 整块区域都不可用时退回人类活动区，避免单位卡在墙内。
+   */
+  private spawnHumanInZone(zone: SpawnRegion, weapon: string): void {
+    const spot =
+      this.world.findFreeSpot(
         randRange(zone.x0, zone.x1),
         randRange(zone.y0, zone.y1),
-        w,
+        HUMAN_BODY_DIAMETER,
+        zone,
+      ) ??
+      this.world.findFreeSpot(
+        (zone.x0 + zone.x1) * 0.5,
+        (zone.y0 + zone.y1) * 0.5,
+        HUMAN_BODY_DIAMETER,
+        this.map.humanBounds,
       );
-    }
+    if (!spot) return;
+    this.world.spawnHuman(spot.x, spot.y, weapon);
   }
 
   /**
@@ -344,11 +363,7 @@ export class Game {
     const add = Math.min(s.reinforce, Math.max(0, settings().human.cap - this.world.humans.length));
     for (let i = 0; i < add; i++) {
       const zone = this.pickRegion(zones, this.map.humanBounds);
-      this.world.spawnHuman(
-        randRange(zone.x0, zone.x1),
-        randRange(zone.y0, zone.y1),
-        this.randomWeapon(),
-      );
+      this.spawnHumanInZone(zone, this.randomWeapon());
     }
   }
 
@@ -399,12 +414,15 @@ export class Game {
     if (this.map.windowSpawn.top) regions.push(this.map.windowSpawn.top);
     if (this.map.windowSpawn.bottom) regions.push(this.map.windowSpawn.bottom);
     const region = this.pickRegion(regions, this.map.spawn[0] ?? this.map.humanBounds);
-    this.world.spawnZombie(
+    const body = zombieBodyDiameter(getZombieDef(kind));
+    const spot = this.world.findFreeSpot(
       randRange(region.x0, region.x1),
       randRange(region.y0, region.y1),
-      kind,
-      1 + (this.wave - 1) * 0.05,
+      body,
+      region,
     );
+    if (!spot) return;
+    this.world.spawnZombie(spot.x, spot.y, kind, 1 + (this.wave - 1) * 0.05);
   }
 
   /** 按固定速率往场里放丧尸，超出同屏上限则暂缓 */

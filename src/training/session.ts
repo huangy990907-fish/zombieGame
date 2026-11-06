@@ -13,10 +13,11 @@
  *
  * 新增僵尸 / 武器时，只要在 data 注册表里加一行，这里的单位库与统计桶会自动出现。
  */
+import { HUMAN_BODY_DIAMETER } from "../data/humans";
 import { DEFAULT_MAP, resolveMap, type MapDef } from "../data/maps";
 import { effectiveWeapon } from "../data/settings/runtime";
 import { WEAPON_LIST, getWeaponDef } from "../data/weapons";
-import { ZOMBIE_LIST } from "../data/zombies";
+import { ZOMBIE_LIST, getZombieDef, zombieBodyDiameter } from "../data/zombies";
 import { createWorld } from "../core/world";
 import type { DamageSource, Human, World, Zombie } from "../core/world";
 import { updateHumans, updateZombies } from "../systems/ai";
@@ -431,11 +432,12 @@ export class TrainingSession {
   // 编辑操作
   // ============================================================
 
-  /** 生成一只指定类型 id 的丧尸；落在墙里返回 null */
+  /** 生成一只指定类型 id 的丧尸；落在墙里 / 自己钻不过的开口里返回 null */
   spawnZombie(kind: string, x: number, y: number): Zombie | null {
     const cx = clamp(x, 8, this.world.map.width - 8);
     const cy = clamp(y, 8, this.world.map.height - 8);
-    if (this.world.solidAt(cx, cy, 3)) return null;
+    const body = zombieBodyDiameter(getZombieDef(kind));
+    if (this.world.solidAt(cx, cy, 3, body)) return null;
     const z = this.world.spawnZombie(cx, cy, kind);
     z.maxHp = z.hp;
     this.spawnTimes.set(z.id, this.activeTime);
@@ -443,11 +445,12 @@ export class TrainingSession {
     return z;
   }
 
-  /** 生成一个指定武器 id 的人类；人类的可行走范围会被夹到房间内 */
-  spawnHuman(weapon: string, x: number, y: number): Human {
+  /** 生成一个指定武器 id 的人类；可行走范围夹到房间内，落在墙里返回 null */
+  spawnHuman(weapon: string, x: number, y: number): Human | null {
     const bounds = this.world.map.humanBounds;
     const cx = clamp(x, bounds.x0, bounds.x1);
     const cy = clamp(y, bounds.y0, bounds.y1);
+    if (this.world.solidAt(cx, cy, 0, HUMAN_BODY_DIAMETER)) return null;
     const h = this.world.spawnHuman(cx, cy, weapon);
     h.post = -1;
     return h;
@@ -457,8 +460,7 @@ export class TrainingSession {
   handleClick(x: number, y: number): boolean {
     if (this.armed) {
       if (this.armed.kind === "zombie") return this.spawnZombie(this.armed.id, x, y) !== null;
-      this.spawnHuman(this.armed.id, x, y);
-      return true;
+      return this.spawnHuman(this.armed.id, x, y) !== null;
     }
     if (this.tool === "delete") {
       return this.deleteAt(x, y);

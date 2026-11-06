@@ -13,10 +13,11 @@
 import { DEFAULT_MAP, type MapDef } from "../data/maps";
 import { effectiveHuman, effectiveWeapon, effectiveZombie, openingInstance, setActiveMap, settings } from "../data/settings/runtime";
 import { zombieBodyDiameter } from "../data/zombies";
-import type { HumanMode, Rect, ZombieMode } from "../data/types";
+import type { HumanMode, Rect, SpawnRegion, ZombieMode } from "../data/types";
 import { FlowField, openingNetWidth } from "../systems/flowField";
+import { findFreePoint, isBlockedForBody } from "../systems/collision";
 import { RegionMap } from "../systems/regions";
-import { gaussClamped, insideRect, randRange, segRectHit } from "../utils/math";
+import { gaussClamped, randRange, segRectHit } from "../utils/math";
 import { SpatialHash } from "../utils/spatialHash";
 
 export interface Human {
@@ -410,20 +411,24 @@ export class World {
   }
 
   /**
-   * 点是否卡在墙体或“完好”的门窗里 —— 丧尸移动碰撞用。
-   * 破损的门窗不算：僵尸可以从破口钻进来。
-   * bodyDiameter > 0 时，破损但净宽小于该直径的开口也算实体墙：
-   * 这是通用体型规则，不为某一种僵尸写特例（胖子 22 进不了 18 的窗）。
+   * 点是否卡在墙体或不可穿越的开口里 —— 人类与丧尸共用的移动 / 生成阻挡判定。
+   * 完好门窗一律阻挡；破损开口仅在净宽 >= 身体直径时放行。
+   * bodyDiameter <= 0 表示不做体型过滤（只判墙体与完好开口）。
+   * 具体条件集中在 systems/collision.ts，新地形只需在那里登记。
    */
   solidAt(x: number, y: number, pad = 0, bodyDiameter = 0): boolean {
-    for (const w of this.map.walls) {
-      if (insideRect(x, y, w, pad)) return true;
-    }
-    for (const o of this.openings) {
-      const tooNarrow = bodyDiameter > 0 && openingNetWidth(o.rect) < bodyDiameter;
-      if ((!o.broken || tooNarrow) && insideRect(x, y, o.rect, pad)) return true;
-    }
-    return false;
+    return isBlockedForBody(bodyDiameter, x, y, this.map.walls, this.openings, pad);
+  }
+
+  /** 在指定区域内找最近的可用落点（生成人类 / 巡逻目标点用） */
+  findFreeSpot(
+    x: number,
+    y: number,
+    bodyDiameter: number,
+    area: SpawnRegion,
+    pad = 0,
+  ): { x: number; y: number } | null {
+    return findFreePoint(bodyDiameter, x, y, this.map.walls, this.openings, area, pad);
   }
 
   /**

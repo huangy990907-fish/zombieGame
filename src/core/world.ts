@@ -83,7 +83,7 @@ export interface Zombie {
   speed: number;
   /** 物理碰撞半径（生成时快照，设置面板不覆盖半径） */
   radius: number;
-  /** 通行直径 = 体型直径；开口净宽小于它时不可通过（胖子 44 > 窗 36） */
+  /** 通行直径 = 身体直径(2r)；开口净宽小于它时不可通过（胖子 22 > 窗 18） */
   bodyDiameter: number;
   /** 随机相位，用于行走摇摆，避免尸群完全同步 */
   phase: number;
@@ -277,7 +277,7 @@ export class World {
    * 点是否卡在墙体或“完好”的门窗里 —— 丧尸移动碰撞用。
    * 破损的门窗不算：僵尸可以从破口钻进来。
    * bodyDiameter > 0 时，破损但净宽小于该直径的开口也算实体墙：
-   * 这是通用体型规则，不为某一种僵尸写特例（胖子 44 进不了 36 的窗）。
+   * 这是通用体型规则，不为某一种僵尸写特例（胖子 22 进不了 18 的窗）。
    */
   solidAt(x: number, y: number, pad = 0, bodyDiameter = 0): boolean {
     for (const w of this.map.walls) {

@@ -71,14 +71,12 @@ export interface ZombieDef {
   name: string;
   hp: number;
   speed: number;
-  /** 物理碰撞半径：分离、咬人判定、子弹命中用 */
-  radius: number;
   /**
-   * 体型半径（视觉 + 通行判定），不填则等于 radius。
-   * 渲染直径 = visualRadius * 2 * VISUAL_SCALE；
-   * 通行判定用 bodyDiameter = visualRadius * 2，开口净宽小于它时不可通过。
+   * 物理碰撞半径：分离、咬人判定、子弹命中用。
+   * 体型口径也由它推导：可见体宽 / 通行直径 = radius * 2，
+   * 渲染盒宽 = radius * 2 * VISUAL_SCALE（含精灵透明留白）。两者都不再二次放大半径。
    */
-  visualRadius?: number;
+  radius: number;
   color: number;
   /** 两次撕咬的间隔（秒） */
   bite: number;

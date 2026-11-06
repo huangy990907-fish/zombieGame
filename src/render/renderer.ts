@@ -433,7 +433,7 @@ export class Renderer {
       const frame = st.moving ? (st.step ? "walk2" : "walk1") : "idle";
       s.position.set(z.x, z.y);
       s.rotation = spriteRotation(st.angle);
-      // 渲染直径 = 体型直径 * 视觉放大（普通 11→16.5，胖子 44→66）
+      // 渲染直径 = 身体直径(2r) * 视觉放大（普通 11→16.5，胖子 22→33）
       s.scale.set(spriteScale(z.bodyDiameter * VISUAL_SCALE));
       s.alpha = 1;
       this.applyFrame(s, st, def, frame);
@@ -488,7 +488,7 @@ export class Renderer {
         continue;
       }
       const d = this.deaths[i];
-      // 按僵尸类型选倒地精灵：胖子用自己的暗粉配色 + 44px 体型
+      // 按僵尸类型选倒地精灵：胖子用自己的暗粉配色 + 与活体一致的 33px 体型
       const def = spriteDef(zombieDeathSpriteId(d.kind));
       const textures = framesOf(def.id);
       s.anchor.set(def.anchor.x / SPRITE_SIZE, def.anchor.y / SPRITE_SIZE);

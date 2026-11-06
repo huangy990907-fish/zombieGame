@@ -15,7 +15,7 @@ import type { MapDef, Rect } from "../data/types";
 export const CELL = 16;
 const UNREACHABLE = 65535;
 
-/** 开口净宽：门是 12×80 → 80，窗是 36×12 → 36（取长边） */
+/** 开口净宽：门是 12×80 → 80，窗是 18×12 → 18（取长边） */
 export function openingNetWidth(rect: Rect): number {
   return Math.max(rect.w, rect.h);
 }

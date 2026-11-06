@@ -105,8 +105,10 @@ export class Game {
 
   /**
    * 防守分岗：门是主动脉（走廊出生的丧尸全走门），配 32 人重兵
-   * （喷火 + 霰弹 + 大量机枪），每扇窗 6 个机枪岗（隔玻璃点射 +
+   * （喷火 + 霰弹 + 大量机枪），每扇窗 4 个机枪岗（隔玻璃点射 +
    * 窗檐减速的漏网），剩下的火箭/机枪进中央预备队线。
+   * 窗净宽 18px 后火力线从 6 人收窄到 4 人（间距 12px = 人类身体直径），
+   * 省下的 4 人补进预备队，总岗位数仍与开局人数对齐。
    * 岗位坐标按开口位置摊开，(ox,oy) 记下各自看守的开口中心。
    */
   private assignPosts(): void {
@@ -130,16 +132,16 @@ export class Game {
       });
     }
 
-    // 窗口：紧贴窗洞正后方排开（横向 ±32px），偏太多子弹会被墙沿挡住
+    // 窗口：紧贴窗洞正后方排开（横向 ±18px），偏太多子弹会被墙沿挡住
     const winPosts: Post[] = [];
     for (const w of wins) {
       const wcx = w.rect.x + w.rect.w * 0.5;
       const wcy = w.rect.y + w.rect.h * 0.5;
       const inward = w.rect.y < 360 ? 1 : -1; // 顶窗往房间里(+y)，底窗往上(-y)
       const postY = wcy + inward * 40;
-      for (let i = 0; i < 6; i++) {
+      for (let i = 0; i < 4; i++) {
         winPosts.push({
-          x: wcx + (i - 2.5) * 13 + randRange(-2, 2),
+          x: wcx + (i - 1.5) * 12 + randRange(-2, 2),
           y: postY + randRange(-2, 2),
           ox: wcx,
           oy: wcy,
@@ -150,8 +152,9 @@ export class Game {
     ws.posts.push(...doorPosts, ...winPosts);
 
     // 中央预备队线：房间中部作第二道防线，不主动出击
+    // 窗口缩编后空出的 4 人补到这里（6 → 10），总岗位数仍为 50
     const reservePosts: Post[] = [];
-    for (let i = 0; i < 6; i++) {
+    for (let i = 0; i < 10; i++) {
       reservePosts.push({
         x: 620 + (i % 2) * 70 + randRange(-3, 3),
         y: 210 + Math.floor(i / 2) * 70 + randRange(-3, 3),

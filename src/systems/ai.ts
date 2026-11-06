@@ -379,7 +379,7 @@ export function updateZombies(world: World, dt: number): void {
         z.x > room.right - 6;
       if (outside) {
         // 房间外：查流场方向，涌向最近的“自己能通过”的开口。
-        // 胖子体型 44 > 窗宽 36，走的是按体型过滤后的流场，只会绕向门。
+        // 胖子身体直径 22 > 窗宽 18，走的是按体型过滤后的流场，只会绕向门。
         const f = world.flowFor(z.bodyDiameter).sample(z.x, z.y);
         dx = f.x;
         dy = f.y;
@@ -442,7 +442,7 @@ export function updateZombies(world: World, dt: number): void {
     // 撞墙 / 撞上完好的门窗时被挡住（破口可以钻）
     let blockedX = false;
     let blockedY = false;
-    // 体型过窄的开口（如 36px 窗 vs 胖子 44px 身体）按墙处理，防止从破损窗钻过去
+    // 体型过窄的开口（如 18px 窗 vs 胖子 22px 身体）按墙处理，防止从破损窗钻过去
     if (world.solidAt(x, z.y, 0, z.bodyDiameter)) {
       x = z.x;
       blockedX = true;

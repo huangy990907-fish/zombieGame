@@ -19,14 +19,13 @@ export const ZOMBIE_LIST: ZombieDef[] = Object.values(ZOMBIE_DEFS);
 /** 全部僵尸里最大的物理碰撞半径 —— 空间查询边距按它推导，避免写死常量 */
 export const MAX_ZOMBIE_RADIUS = Math.max(...ZOMBIE_LIST.map((z) => z.radius));
 
-/** 体型半径：显式 visualRadius 优先，否则就是物理半径 */
-export function zombieBodyRadius(def: ZombieDef): number {
-  return def.visualRadius ?? def.radius;
-}
-
-/** 通行判定用的身体直径：开口净宽小于它时不可通过 */
+/**
+ * 通行判定用的身体直径 = 可见体宽 = 2 × 碰撞半径。
+ * 开口净宽小于它时不可通过；渲染盒宽再乘 VISUAL_SCALE（见 render/pixel.ts），
+ * 1.5 只是精灵透明留白的视觉补偿，不参与通行 / 碰撞。
+ */
 export function zombieBodyDiameter(def: ZombieDef): number {
-  return zombieBodyRadius(def) * 2;
+  return def.radius * 2;
 }
 
 /**

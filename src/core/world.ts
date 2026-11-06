@@ -11,7 +11,7 @@
  * 流程调度在 core/game.ts。
  */
 import { DEFAULT_MAP, type MapDef } from "../data/maps";
-import { effectiveHuman, effectiveWeapon, effectiveZombie, openingTuning, settings } from "../data/settings/runtime";
+import { effectiveHuman, effectiveWeapon, effectiveZombie, openingInstance, setActiveMap, settings } from "../data/settings/runtime";
 import { zombieBodyDiameter } from "../data/zombies";
 import type { HumanMode, Rect, ZombieMode } from "../data/types";
 import { FlowField, openingNetWidth } from "../systems/flowField";
@@ -268,16 +268,17 @@ export class World {
   private readonly bulletWalls: Rect[];
 
   constructor(readonly map: MapDef = DEFAULT_MAP) {
-    const tuning = openingTuning(map);
+    // 先切设置口径，再按每扇开口自己的 JSON 默认值建实例
+    setActiveMap(map);
     this.openings = map.openings.map((def) => {
-      const maxHp = def.kind === "door" ? tuning.doorHp : tuning.winHp;
+      const { maxHp, passSpeed } = openingInstance(def);
       return {
         id: def.id,
         kind: def.kind,
         rect: def.rect,
         hp: maxHp,
         maxHp,
-        passSpeed: def.kind === "window" ? tuning.winPassSpeed : 1,
+        passSpeed,
         broken: false,
       };
     });

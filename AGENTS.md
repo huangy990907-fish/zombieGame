@@ -13,7 +13,7 @@
 | 目录 | 职责 | 关键约束 |
 |---|---|---|
 | `src/data/` | **唯一数值来源**：实体定义、地图、默认设置、滑块元数据 | 调平衡只改这里；玩家改动只存覆盖值，读取时合并 |
-| `public/maps/` | **地图运行时来源**：`manifest.json` + `<id>.json` 瓦片地图（内置 `arena` / `test-yard`） | 内置只读；加载失败回退 `src/data/maps/arena.ts` |
+| `public/maps/` | **地图运行时来源**：`manifest.json` + `<id>.json` 瓦片地图（内置 `arena` / `test-yard` / `test-multi`） | 内置只读；加载失败回退 `src/data/maps/arena.ts` |
 | `src/core/` | 运行时状态与流程：`world.ts` 实体/空间索引/开口，`game.ts` 波次与胜负，`storage.ts` 存档 | `world` 只存状态和查询；行为不放这里 |
 | `src/systems/` | 行为与规则：`ai.ts` 人类/丧尸/感染/受击减速推进，`combat.ts` 开火、命中与减速结算，`flowField.ts` BFS 寻路 | 新玩法规则优先落在这里 |
 | `src/render/` | PixiJS 绘制：`renderer.ts` 场景/单位/粒子/倒地，`pixel.ts` 精灵与坐标换算 | 只读 World，不改数据 |
@@ -80,9 +80,10 @@ npx tsc --noEmit  # 单项类型检查
 - 0.4.3 规则：**受击减速**由 `combat.ts` 的 `applyHitSlow` 写入 `slowMul/slowTimer`，`ai.ts` 每帧线性恢复并乘到 hunt/wander 移速；每点伤害 4%、最低 40%，0.6 秒恢复，不叠加只取最强并刷新计时；大体型（`bodyDiameter >= 20`）幅度减半、最低 70%；喷火每秒最多结算一次。受击反馈是 `flash > 0` 时渲染层加法混合提亮 0.08 秒。
 - 0.4.3 规则：**电击枪** `tesla` 是独立 hitscan（射线投影 + 目标半径 + 墙体/完好门窗视线），不复用 Bullet 扫掠；首个目标 96px 内无其他僵尸时 ×2.2，否则向最近可见僵尸逐只跳跃，最多 5 只（含首个），每跳衰减到 75%。参数集中在 `src/data/weapons/tesla.ts` 的 `tesla` 字段。闪电是 `EffectKind = "arc"` 的折线（`Effect.points`），每跳一段，渲染在 `renderer.ts` 的 `renderArcs()`；训练场链式读数走 `World.onTeslaVolley` 钩子，独立于 DPS 表。
 - 0.5.0 规则（阶段 0）：地图运行时来源是 `public/maps/manifest.json` + `<id>.json`；`main.ts` 先 `await loadBuiltinMaps()` 再构造任何依赖地图的实例。瓦片固定 `74×45` / `16px`，加载时 `compileTilesToMapDef()` 编译回 `walls[] + openings[]`，World / 流场 / 渲染结构不变。每扇门窗有独立 `id`，玩家覆盖仍按门 / 窗种类生效。加载失败或校验不通过时回退 `src/data/maps/arena.ts`（0.4.3 的 `1180 × 720` / 窗宽 18），正常路径为 `1184 × 720` / 窗宽 16。
-- 0.5.0 规则（阶段 1A）：`Game` / `TrainingSession` 构造与 `TrainingSession.reset()` 接受 `MapDef | id`，`Game.start()` 优先级为「显式选择 > `LevelDef.mapId` > 当前地图」；`resolveMap()` 对不存在的 id 输出 warning 并回退 `DEFAULT_MAP`，`main.ts` 用 `.map-notice` 做可见提示。换图时 `createWorld(map)` 重建 World / 流场 / 空间索引，`Renderer.setMap()` 清空并重画地板、墙体、训练场装饰与门窗层。临时选图入口为 `?map=<id>`；内置只读地图为 `arena` 与 `test-yard`。
+- 0.5.0 规则（阶段 1B）：`assignPosts()` 不依赖开口下标与方位，门岗按门洞长度分名额、窗岗按窗净宽推导、预备队按开局人数 20%，坐标由开口中心与房间几何推导；出怪只从 `spawn` / 可选 `windowSpawn.top/bottom` 按面积加权。`World` 按每扇门窗自身 JSON 的 `maxHp/passSpeed` 初始化，`setActiveMap()` 让 `settings()` / `openingTuning()` 跟随当前地图；玩家覆盖仍按门 / 窗种类优先。内置新增 `test-multi`（2 门 3 窗）。
+- 0.5.0 规则（阶段 1A）：`Game` / `TrainingSession` 构造与 `TrainingSession.reset()` 接受 `MapDef | id`，`Game.start()` 优先级为「显式选择 > `LevelDef.mapId` > 当前地图」；`resolveMap()` 对不存在的 id 输出 warning 并回退 `DEFAULT_MAP`，`main.ts` 用 `.map-notice` 做可见提示。换图时 `createWorld(map)` 重建 World / 流场 / 空间索引，`Renderer.setMap()` 清空并重画地板、墙体、训练场装饰与门窗层。临时选图入口为 `?map=<id>`；内置只读地图为 `arena`、`test-yard` 与 `test-multi`。
 
-## 已知限制（0.4.3 + 0.5.0 阶段 1A 现状）
+## 已知限制（0.4.3 + 0.5.0 阶段 1B 现状）
 
 - 人类会真实掉血，但血量归零不会立刻死亡，而是进入原有的 2.8 秒转化倒计时；训练场可调人类血量与僵尸攻击力来观察。
 - 电击枪链式最多 5 只（含首个），每跳都要求视线可见：未破的门窗会挡住后续跳跃；链式半径 / 上限 / 衰减 / 单体加成只有 `src/data/weapons/tesla.ts` 一处参数，没有全局滑块。首个目标的单体加成按“96px 内是否有其他存活僵尸”判断，不检查它们是否被墙挡住。
@@ -90,8 +91,8 @@ npx tsc --noEmit  # 单项类型检查
 - `screenshots/` 固定只保留 6 张长期设计图，新增验证图不要提交（见强制约定）。
 - 无 BGM；只有一次性音效，且同一事件全局限频，**没有随机音效变体**（音高/时长变化）。
 - `weapon-reload`、`human-hurt` 两个事件已声明、文件已备好，但当前没有调用点。
-- 只有一个关卡（`level-1`），内置 2 张只读地图（`arena` / `test-yard`）；`#/levels` 仍保留但主菜单不再入口。地图 JSON 阶段 0/1A 只支持固定 `74×45` / `16px` 画布与 **1 门 + 2 窗**（`assignPosts()` 仍按下标取门/窗），任意户型、通用守岗与工坊编辑器尚未实现；玩家可见的选图 UI 也未做，调试只能用 `?map=<id>`。内置图只能另存副本。
-- `openingTuning()` 仍按「第一扇门 / 第一扇窗」取 JSON 默认 `maxHp` / `passSpeed`，`World` 对同类门窗统一初始化；逐扇独立数值与关卡覆盖的种类泛化属于阶段 1B。
+- 只有一个关卡（`level-1`），内置 3 张只读地图（`arena` / `test-yard` / `test-multi`）；`#/levels` 仍保留但主菜单不再入口。地图 JSON 支持固定 `74×45` / `16px` 画布与任意数量门窗（至少 1 扇门），守岗与出怪已泛化，工坊编辑器尚未实现；玩家可见的选图 UI 也未做，调试只能用 `?map=<id>`。内置图只能另存副本。
+- 开口参数折中：`World` 按每扇门窗自身 JSON 初始化 `maxHp/passSpeed`，但玩家设置的门 / 窗覆盖仍按种类统一生效且优先级更高；`#/play` 下 `level-1` 的 `doorHp=450 / winHp=100 / winPassSpeed=0.45` 会覆盖 `test-multi` 的逐扇默认值，逐扇差异需在 `#/training` 或无关卡覆盖的场景观察。逐扇独立覆盖 UI 属于后续阶段。
 - 「闯关模式」只有主菜单入口与占位说明，**尚未实现**，不会进入空页面。
 - 主菜单「清空存档」只清玩法进度（放置抵抗关卡进度 + 预留的 `zombieGame.challenge.*`），保留音量偏好与参数覆盖值。
 - 没有自动化测试；`npm run build` 只保证类型与打包，行为正确性依赖浏览器实跑。

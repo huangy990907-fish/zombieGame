@@ -13,6 +13,7 @@ import type {
   AudioSettings,
   HumanDef,
   HumanSettings,
+  OpeningDef,
   OpeningTuning,
   RuntimeSettings,
   SettingsOverrides,
@@ -54,6 +55,8 @@ const WEAPON_KEYS = [
 
 let overrides: SettingsOverrides = {};
 let cache: RuntimeSettings | null = null;
+/** 当前场景使用的地图；settings() / openingTuning() 的默认口径跟随它，而不是固定默认图 */
+let activeMap: MapDef = DEFAULT_MAP;
 /** 合并后的实体定义缓存，避免每帧为每只单位重复创建对象 */
 let humanCache: HumanDef | null = null;
 const zombieCache = new Map<string, ZombieDef>();
@@ -127,13 +130,23 @@ function build(map: MapDef): RuntimeSettings {
   };
 }
 
-/** 当前生效设置（默认地图口径；只有一个地图时足够用） */
-export function settings(): RuntimeSettings {
-  return (cache ??= build(DEFAULT_MAP));
+/**
+ * 切换当前地图口径（World 构造时调用）。
+ * 同一张图不重复清缓存；换图后 settings() / openingTuning() 的默认值立刻跟随。
+ */
+export function setActiveMap(map: MapDef): void {
+  if (activeMap === map) return;
+  activeMap = map;
+  invalidate();
 }
 
-/** 把地图自带的开口默认值和玩家覆盖值合并 */
-export function openingTuning(map: MapDef = DEFAULT_MAP): OpeningTuning {
+/** 当前生效设置（开口默认值跟随当前地图，其余数值与地图无关） */
+export function settings(): RuntimeSettings {
+  return (cache ??= build(activeMap));
+}
+
+/** 把地图自带的开口默认值和玩家覆盖值合并（聚合口径，滑块展示与啃咬参数用） */
+export function openingTuning(map: MapDef = activeMap): OpeningTuning {
   if (openingCache && openingCache.map === map) return openingCache.value;
   const door = map.openings.find((o) => o.kind === "door") ?? map.openings[0];
   const win = map.openings.find((o) => o.kind === "window") ?? map.openings[0];
@@ -146,6 +159,20 @@ export function openingTuning(map: MapDef = DEFAULT_MAP): OpeningTuning {
   };
   openingCache = { map, value };
   return value;
+}
+
+/**
+ * 单扇开口的生效参数：优先玩家全局覆盖（仍按门 / 窗种类），否则用该扇 JSON 自己的默认值。
+ * 门没有全局速度覆盖，始终用自身 JSON 的 `passSpeed`。
+ */
+export function openingInstance(def: OpeningDef): { maxHp: number; passSpeed: number } {
+  const maxHp =
+    def.kind === "door"
+      ? overrides.opening?.doorHp ?? def.maxHp
+      : overrides.opening?.winHp ?? def.maxHp;
+  const passSpeed =
+    def.kind === "window" ? overrides.opening?.winPassSpeed ?? def.passSpeed : def.passSpeed;
+  return { maxHp, passSpeed };
 }
 
 /** 合并过覆盖值的僵尸定义（unknown id 回落 normal） */

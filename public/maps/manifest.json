@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "maps": [
+    {
+      "id": "arena",
+      "file": "arena.json",
+      "readOnly": true
+    }
+  ]
+}

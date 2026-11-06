@@ -15,6 +15,7 @@
  */
 import { getSetting, setSetting } from "./data/settings/runtime";
 import { SLIDER_GROUPS } from "./data/settings/sliders";
+import { loadBuiltinMaps } from "./data/maps";
 import { sound, SFX } from "./audio/manager";
 import {
   FSA_SUPPORTED,
@@ -43,6 +44,9 @@ const STEP = 1 / 60;
 async function boot(): Promise<void> {
   const host = document.getElementById("screen");
   if (!host) throw new Error("missing #screen");
+
+  // ====== 先加载内置地图（JSON -> MapDef），再构造任何依赖地图的实例 ======
+  await loadBuiltinMaps();
 
   // ====== 先加载存档，再构造 Game（覆盖值先就位，Game 启动按合并后的值读） ======
   const loadedFrom = await loadSettings();

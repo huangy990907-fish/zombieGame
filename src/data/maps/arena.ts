@@ -1,4 +1,7 @@
-/** 默认地图「竞技场」—— 一间封闭房间，左墙有门、上下墙各有一扇窗。 */
+/**
+ * 默认地图「竞技场」的 TS 定义 —— 仅作 `public/maps/arena.json` 加载失败时的兜底。
+ * 正常运行时以 JSON（16px 瓦片网格）编译结果为准，本文件保持 0.4.3 的旧几何。
+ */
 import type { MapDef, Rect, OpeningDef } from "../types";
 
 /** 逻辑画布尺寸（CSS 会等比缩放，不影响游戏逻辑） */
@@ -46,18 +49,21 @@ const WALLS: Rect[] = [
 /** 三个可破坏开口：下标 0 必须是门（分岗逻辑依赖这个顺序） */
 const OPENINGS: OpeningDef[] = [
   {
+    id: "door-main",
     kind: "door",
     rect: { x: ROOM.left, y: DOOR_RANGE.y0, w: ROOM.wall, h: DOOR_RANGE.y1 - DOOR_RANGE.y0 },
     maxHp: 450,
     passSpeed: 1,
   },
   {
+    id: "window-top",
     kind: "window",
     rect: { x: WIN_TOP.x0, y: ROOM.top, w: WIN_TOP.x1 - WIN_TOP.x0, h: ROOM.wall },
     maxHp: 100,
     passSpeed: 0.45,
   },
   {
+    id: "window-bottom",
     kind: "window",
     rect: { x: WIN_BOTTOM.x0, y: ROOM.bottom - ROOM.wall, w: WIN_BOTTOM.x1 - WIN_BOTTOM.x0, h: ROOM.wall },
     maxHp: 100,

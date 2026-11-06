@@ -159,6 +159,8 @@ export interface Bullet {
  * hp 被丧尸啃到归零后 broken，僵尸即可穿过；窗穿过时还会被窗檐减速。
  */
 export interface Opening {
+  /** 与 MapDef.openings 的 id 一致，便于编辑器 / 存档按实例定位 */
+  id: string;
   kind: "door" | "window";
   rect: Rect;
   hp: number;
@@ -270,6 +272,7 @@ export class World {
     this.openings = map.openings.map((def) => {
       const maxHp = def.kind === "door" ? tuning.doorHp : tuning.winHp;
       return {
+        id: def.id,
         kind: def.kind,
         rect: def.rect,
         hp: maxHp,

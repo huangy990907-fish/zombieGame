@@ -122,6 +122,8 @@ export interface HumanDef {
 export type OpeningKind = "door" | "window";
 
 export interface OpeningDef {
+  /** 地图内唯一 id（如 "door-main" / "window-top"） */
+  id: string;
   kind: OpeningKind;
   /** 开口矩形（正好嵌在墙洞里） */
   rect: Rect;
@@ -144,7 +146,10 @@ export interface MapDef {
   height: number;
   room: RoomDef;
   walls: Rect[];
-  /** 三个可破坏开口；约定下标 0 必须是门（分岗逻辑依赖这个顺序） */
+  /**
+   * 可破坏开口。编译时门排在窗之前 —— 当前守岗逻辑仍按下标取
+   * 「0 = 门、1/2 = 窗」，任意户型泛化留到后续阶段。
+   */
   openings: OpeningDef[];
   /** 各开口中心点：流场多源 BFS 的源点 / 丧尸的兜底目标 */
   openingCenters: Point[];

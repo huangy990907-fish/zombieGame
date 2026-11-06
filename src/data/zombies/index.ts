@@ -29,6 +29,31 @@ export function zombieBodyDiameter(def: ZombieDef): number {
 }
 
 /**
+ * 受击减速参数（战斗层 systems/combat.ts 写入，行为层 systems/ai.ts 读取）。
+ *
+ * 每次受击按伤害量换算成一次减速：倍率 = 1 - damage * perDamage，
+ * 最低压到 floorMul；随后 duration 秒内线性恢复到 100%。
+ * 多次受击不叠加，只保留当前最强的一次并刷新恢复计时。
+ * 大体型（身体直径达到 heavyDiameter）减速幅度减半，最低只到 heavyFloorMul。
+ */
+export const ZOMBIE_SLOW = {
+  /** 线性恢复到满速所需的时间（秒） */
+  duration: 0.6,
+  /** 每 1 点伤害造成的减速比例 */
+  perDamage: 0.04,
+  /** 普通体型的最低移速倍率 */
+  floorMul: 0.4,
+  /** 大体型单位（胖子等）的最低移速倍率 */
+  heavyFloorMul: 0.7,
+  /** 大体型的减速幅度乘数（0.5 = 减半） */
+  heavyScale: 0.5,
+  /** 身体直径达到该值即视为大体型（胖子 22） */
+  heavyDiameter: 20,
+  /** 喷火这类持续伤害最多每秒结算一次减速（秒） */
+  flameInterval: 1,
+} as const;
+
+/**
  * 零人类时丧尸的漫游参数（行为层 systems/ai.ts 读取）。
  * 以后若要做不同索敌机制的僵尸，可把这份参数扩展成 ZombieDef 的可选字段，
  * 按类型覆盖而不必改行为逻辑。

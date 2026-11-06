@@ -10,7 +10,7 @@
  *       破口后涌入（穿窗会被窗檐减速）-> 直扑最近人类 -> 贴近就咬
  */
 import { HUMAN_DEF } from "../data/humans";
-import { MAX_ZOMBIE_RADIUS, WANDER_TUNING, ZOMBIE_IDS } from "../data/zombies";
+import { MAX_ZOMBIE_RADIUS, WANDER_TUNING, ZOMBIE_IDS, ZOMBIE_SLOW } from "../data/zombies";
 import { effectiveWeapon, effectiveZombie, openingTuning, settings } from "../data/settings/runtime";
 import { openingNetWidth } from "./flowField";
 import { tryFire, updateFlame } from "./combat";
@@ -27,6 +27,7 @@ const queryZ2: Zombie[] = [];
 function convertHuman(world: World, h: Human): void {
   h.alive = false;
   world.infected++;
+  world.onHumanTurn?.(h);
   world.spawnZombie(h.x, h.y, ZOMBIE_IDS.normal);
   world.effects.push({
     kind: "blast",
@@ -74,6 +75,8 @@ export function updateHumans(world: World, dt: number): void {
   for (let i = 0; i < world.humans.length; i++) {
     const h = world.humans[i];
     if (!h.alive) continue;
+    // 血条存续时间：受伤后 3 秒淡出，与朝向 / 移动无关
+    if (h.hurtTimer > 0) h.hurtTimer = Math.max(0, h.hurtTimer - dt);
     const def = effectiveWeapon(h.weapon);
     const posted = postedMode && h.post >= 0 && h.post < world.posts.length;
 
@@ -334,6 +337,12 @@ export function updateZombies(world: World, dt: number): void {
   for (let i = 0; i < world.zombies.length; i++) {
     const z = world.zombies[i];
     if (!z.alive) continue;
+    if (z.flash > 0) z.flash = Math.max(0, z.flash - dt);
+    // 受击减速：0.6 秒内线性恢复到满速；到点后清空，等下一次受击重新计算
+    if (z.slowTimer > 0) {
+      z.slowTimer = Math.max(0, z.slowTimer - dt);
+      if (z.slowTimer <= 0) z.slowMul = 1;
+    }
     if (z.bite > 0) z.bite -= dt;
 
     /*
@@ -435,7 +444,10 @@ export function updateZombies(world: World, dt: number): void {
     }
     const len = Math.hypot(dx, dy) || 1;
     const wanderMul = z.mode === "wander" ? WANDER_TUNING.speedScale : 1;
-    const speed = z.speed * passMul * (cnt >= 5 ? 0.72 : 1) * wanderMul;
+    // 受击减速对索敌和漫游同时生效；不碰咬合间隔与咬人伤害
+    const slowMul =
+      z.slowTimer > 0 ? 1 - (1 - z.slowMul) * (z.slowTimer / ZOMBIE_SLOW.duration) : 1;
+    const speed = z.speed * passMul * (cnt >= 5 ? 0.72 : 1) * wanderMul * slowMul;
     let x = z.x + (dx / len) * speed * dt;
     let y = z.y + (dy / len) * speed * dt;
 
@@ -530,7 +542,13 @@ export function updateZombies(world: World, dt: number): void {
         const h = queryH[k];
         if (!h.alive || h.turning > 0 || h.invincible) continue;
         if (dist2(z.x, z.y, h.x, h.y) <= reach * reach) {
-          h.turning = s.human.turnTime;
+          // 撕咬先扣真实血量，血量归零才进入异变倒计时；
+          // 无敌单位在上一行已被跳过，完全免疫掉血与转化。
+          const applied = Math.min(z.damage, Math.max(0, h.hp));
+          h.hp = Math.max(0, h.hp - z.damage);
+          h.hurtTimer = 3;
+          world.onHumanDamage?.(h, applied);
+          if (h.hp <= 0) h.turning = s.human.turnTime;
           h.vx = 0;
           h.vy = 0;
           z.bite = z.biteCycle ?? zdef.bite;

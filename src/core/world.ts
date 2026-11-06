@@ -41,6 +41,11 @@ export interface Human {
   sight: number;
   /** >0 表示已被咬、正在转化，倒计时结束后倒戈成丧尸 */
   turning: number;
+  /**
+   * 受伤后血条剩余可见时间（秒）。每次被咬重置为 3 秒，
+   * 归零后血条淡出；只影响渲染，不参与玩法。
+   */
+  hurtTimer: number;
   /** 朝向（弧度） */
   facing: number;
   /** 闲逛目标点 */
@@ -69,7 +74,7 @@ export interface Human {
   dmgMul?: number;
   /** 射速倍率，默认 1（越大射击间隔越短） */
   cdMul?: number;
-  /** 无敌：不会被丧尸咬成僵尸 */
+  /** 无敌：完全免疫撕咬掉血与异变（训练场专用） */
   invincible?: boolean;
 }
 
@@ -89,6 +94,16 @@ export interface Zombie {
   phase: number;
   /** 撕咬冷却 */
   bite: number;
+  /** 每次撕咬对人类的伤害（生成时按定义快照，训练场可单独调整） */
+  damage: number;
+  /** 受击减速：当前最强一次减速的移速倍率（1 = 未减速） */
+  slowMul: number;
+  /** 受击减速：剩余恢复时间（秒）；0 表示已完全恢复 */
+  slowTimer: number;
+  /** 受击闪白剩余时间（秒），只影响渲染 */
+  flash: number;
+  /** 喷火持续伤害上一次结算减速的 world.time，用于每秒最多一次的限制 */
+  lastFlameSlow: number;
   /** 重新索敌的计时 */
   retarget: number;
   /** 追击目标坐标（漫游时保留最后一次索敌坐标，仅供扩展逻辑参考） */
@@ -239,6 +254,10 @@ export class World {
    */
   onDamage?: (z: Zombie, amount: number, source?: DamageSource) => void;
   onKill?: (z: Zombie, source?: DamageSource) => void;
+  /** 人类被撕咬（训练场统计“被咬次数 / 掉血”，与武器伤害表分开） */
+  onHumanDamage?: (h: Human, amount: number) => void;
+  /** 人类异变完成（训练场统计转化数） */
+  onHumanTurn?: (h: Human) => void;
   private nextId = 1;
   private readonly bulletWalls: Rect[];
 
@@ -355,6 +374,7 @@ export class World {
       target: null,
       sight: randRange(0, 0.35),
       turning: 0,
+      hurtTimer: 0,
       facing: randRange(-Math.PI, Math.PI),
       wx: x,
       wy: y,
@@ -388,6 +408,11 @@ export class World {
       bodyDiameter: zombieBodyDiameter(def),
       phase: randRange(0, Math.PI * 2),
       bite: 0,
+      damage: def.damage,
+      slowMul: 1,
+      slowTimer: 0,
+      flash: 0,
+      lastFlameSlow: -1000,
       retarget: randRange(0, 0.3),
       tx: x,
       ty: y,

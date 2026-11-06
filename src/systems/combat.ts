@@ -8,7 +8,7 @@
  * 只看当前点会穿透丧尸，所以拿“上一帧位置 -> 当前位置”线段去撞。
  */
 import { effectiveWeapon } from "../data/settings/runtime";
-import { MAX_ZOMBIE_RADIUS } from "../data/zombies";
+import { MAX_ZOMBIE_RADIUS, ZOMBIE_SLOW } from "../data/zombies";
 import { WEAPON_IDS } from "../data/weapons";
 import type { WeaponDef } from "../data/types";
 import { dist2, mixColor, pointSegDistSq } from "../utils/math";
@@ -172,12 +172,35 @@ function spawnBullet(
   });
 }
 
+/**
+ * 受击减速 + 闪白反馈。
+ *  - 按实际伤害换算减速倍率，最低 40%；大体型只降到 70%
+ *  - 不叠加：只保留当前最强的一次；每次受击都把恢复计时刷回 0.6 秒
+ *  - 喷火这类持续伤害每秒最多结算一次，避免每帧刷新把僵尸钉死在最低速
+ */
+function applyHitSlow(world: World, z: Zombie, damage: number, source?: DamageSource): void {
+  const flame = source?.weapon === WEAPON_IDS.flame;
+  if (flame) {
+    if (world.time - z.lastFlameSlow < ZOMBIE_SLOW.flameInterval) return;
+    z.lastFlameSlow = world.time;
+  }
+  // 体型按生成时快照的身体直径判定，不受设置面板事后覆盖影响
+  const heavy = z.bodyDiameter >= ZOMBIE_SLOW.heavyDiameter;
+  const scale = heavy ? ZOMBIE_SLOW.heavyScale : 1;
+  const floor = heavy ? ZOMBIE_SLOW.heavyFloorMul : ZOMBIE_SLOW.floorMul;
+  const target = Math.max(floor, 1 - damage * ZOMBIE_SLOW.perDamage * scale);
+  if (z.slowTimer <= 0 || target < z.slowMul) z.slowMul = target;
+  z.slowTimer = ZOMBIE_SLOW.duration;
+  z.flash = 0.08; // 短促亮起，渲染层用加法混合做受击提亮
+}
+
 /** 对丧尸造成伤害，死亡时计数（source 仅供训练场统计，正式对局不传） */
 export function damageZombie(world: World, z: Zombie, dmg: number, source?: DamageSource): void {
   if (!z.alive) return;
   // 实际生效伤害（不超过剩余血量），DPS 统计更准确
   const applied = Math.min(dmg, z.hp);
   z.hp -= dmg;
+  applyHitSlow(world, z, applied, source);
   world.onDamage?.(z, applied, source);
   sound.play(SFX.ZOMBIE_HIT);
   if (z.hp <= 0) {

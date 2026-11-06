@@ -35,7 +35,7 @@ const WAVE_KEYS = [
   "reinforce",
 ] as const;
 const HUMAN_KEYS = ["start", "cap", "hp", "speed", "sight", "turnTime"] as const;
-const ZOMBIE_KEYS = ["hp", "speed", "bite"] as const;
+const ZOMBIE_KEYS = ["hp", "speed", "bite", "damage"] as const;
 const OPENING_KEYS = ["doorHp", "winHp", "winPassSpeed", "buildBiteDamage", "buildBiteSlow"] as const;
 const AUDIO_KEYS = ["master", "sfx"] as const;
 const WEAPON_KEYS = [
@@ -159,6 +159,7 @@ export function effectiveZombie(id: string): ZombieDef {
     hp: o?.hp ?? def.hp,
     speed: o?.speed ?? def.speed,
     bite: o?.bite ?? def.bite,
+    damage: o?.damage ?? def.damage,
   };
   zombieCache.set(def.id, value);
   return value;

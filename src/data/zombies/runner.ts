@@ -9,4 +9,5 @@ export const runner: ZombieDef = {
   radius: 4.5,
   color: 0xc77dff,
   bite: 0.7,
+  damage: 18,
 };

@@ -80,12 +80,15 @@ export interface ZombieDef {
   color: number;
   /** 两次撕咬的间隔（秒） */
   bite: number;
+  /** 每次成功撕咬对人类造成的伤害（人类血量归零才进入异变） */
+  damage: number;
 }
 
 export interface ZombieTunables {
   hp: number;
   speed: number;
   bite: number;
+  damage: number;
 }
 
 export interface HumanDef {

@@ -36,6 +36,8 @@ export interface ZombieOption {
   color: number;
   hp: number;
   speed: number;
+  /** 每次撕咬对人类的伤害 */
+  damage: number;
 }
 
 export interface HumanOption {
@@ -54,6 +56,7 @@ export const TRAIN_ZOMBIE_TYPES: ZombieOption[] = ZOMBIE_LIST.map((d) => ({
   color: d.color,
   hp: d.hp,
   speed: d.speed,
+  damage: d.damage,
 }));
 
 export const TRAIN_HUMAN_TYPES: HumanOption[] = WEAPON_LIST.map((w) => ({
@@ -79,6 +82,19 @@ export interface ZombieTypeStat {
   ttkSum: number;
   ttkCount: number;
   spawns: number;
+}
+
+/**
+ * 人类挨咬统计 —— 与武器 DPS 表完全分开：
+ * 武器表记录“人类对僵尸造成的伤害”，这里记录“僵尸对人类造成的伤害”。
+ */
+export interface HumanStat {
+  /** 被咬次数（每次成功撕咬算一次） */
+  bites: number;
+  /** 累计掉血 */
+  damage: number;
+  /** 异变完成数量 */
+  turns: number;
 }
 
 /** 面板需要区分人类 / 僵尸，用判别联合避免类型断言 */
@@ -127,6 +143,8 @@ export class TrainingSession {
   readonly zombieStats = new Map<string, ZombieTypeStat>(
     ZOMBIE_LIST.map((z) => [z.id, emptyZombieStat()]),
   );
+  /** 人类挨咬统计（独立于武器 DPS 表） */
+  readonly humanStat: HumanStat = { bites: 0, damage: 0, turns: 0 };
 
   /** 每个丧尸的出生时间（训练场生成 / 波次生成都记），用于算击杀耗时 */
   private spawnTimes = new Map<number, number>();
@@ -169,6 +187,9 @@ export class TrainingSession {
     for (const s of this.zombieStats.values()) {
       Object.assign(s, emptyZombieStat());
     }
+    this.humanStat.bites = 0;
+    this.humanStat.damage = 0;
+    this.humanStat.turns = 0;
     for (const z of this.world.zombies) this.spawnTimes.set(z.id, 0);
     for (const b of this.buckets.values()) b.fill(0);
     for (const s of this.stamps.values()) s.fill(-1);
@@ -203,6 +224,13 @@ export class TrainingSession {
   private installHooks(): void {
     this.world.onDamage = (z, amount, source) => this.recordDamage(z, amount, source);
     this.world.onKill = (z, source) => this.recordKill(z, source);
+    this.world.onHumanDamage = (_h, amount) => {
+      this.humanStat.bites++;
+      this.humanStat.damage += amount;
+    };
+    this.world.onHumanTurn = () => {
+      this.humanStat.turns++;
+    };
   }
 
   private recordDamage(z: Zombie, amount: number, source?: DamageSource): void {

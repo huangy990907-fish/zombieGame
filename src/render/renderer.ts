@@ -96,6 +96,8 @@ export class Renderer {
   private unitLayer = new Container();
   private wallLayer = new Graphics();
   private openingLayer = new Graphics();
+  /** 人类血条：始终水平、不随精灵朝向旋转，画在墙体之上 */
+  private hpBarLayer = new Graphics();
   private fxLayer = new Container();
   private selectionLayer = new Graphics();
   private textLayer = new Container();
@@ -140,6 +142,7 @@ export class Renderer {
       this.fxLayer,
       this.openingLayer,
       this.wallLayer,
+      this.hpBarLayer,
       this.selectionLayer,
       this.textLayer,
     );
@@ -435,7 +438,10 @@ export class Renderer {
       s.rotation = spriteRotation(st.angle);
       // 渲染直径 = 身体直径(2r) * 视觉放大（普通 11→16.5，胖子 22→33）
       s.scale.set(spriteScale(z.bodyDiameter * VISUAL_SCALE));
-      s.alpha = 1;
+      // 受击反馈：短促加法混合提亮（闪白），比新建滤镜/叠加精灵成本低
+      s.blendMode = z.flash > 0 ? "add" : "normal";
+      s.tint = 0xffffff;
+      s.alpha = z.flash > 0 ? 0.9 : 1;
       this.applyFrame(s, st, def, frame);
     }
 
@@ -556,8 +562,34 @@ export class Renderer {
     }
 
     this.renderOpenings(w);
+    this.renderHumanHealth(w.humans);
     this.renderSelection(extra?.selection ?? null);
     this.renderFloatingText(extra?.floating);
+  }
+
+  /**
+   * 人类头顶细血条：只在受伤后出现，3 秒不再受伤则最后 0.6 秒淡出。
+   * 画在独立 Graphics 层上、不读精灵旋转，所以永远保持水平；
+   * 宽度取人类可见体宽，颜色按血量比例分三档。
+   */
+  private renderHumanHealth(humans: Human[]): void {
+    const g = this.hpBarLayer;
+    g.clear();
+    for (let i = 0; i < humans.length; i++) {
+      const h = humans[i];
+      if (!h.alive || h.hurtTimer <= 0) continue;
+      const maxHp = Math.max(1, h.maxHp ?? h.hp);
+      const ratio = Math.max(0, Math.min(1, h.hp / maxHp));
+      const w = HUMAN_DIAMETER;
+      const hgt = 3;
+      const x = h.x - w * 0.5;
+      const y = h.y - HUMAN_DIAMETER * 0.5 - 6;
+      const alpha = Math.min(1, h.hurtTimer / 0.6);
+      // 底色 / 边框让细血条在深色地板上也清楚
+      g.rect(x - 1, y - 1, w + 2, hgt + 2).fill({ color: 0x05070c, alpha: 0.72 * alpha });
+      const color = ratio > 0.6 ? 0x7cf29a : ratio > 0.3 ? 0xfacc15 : 0xef4444;
+      g.rect(x, y, w * ratio, hgt).fill({ color, alpha });
+    }
   }
 
   /**

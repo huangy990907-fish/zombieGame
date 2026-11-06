@@ -218,7 +218,7 @@ export class TrainingPanel {
       (t) => `<button class="tp-lib-btn" data-kind="zombie" data-id="${t.id}">
         <span class="tp-dot" style="background:${hexColor(t.color)}"></span>
         <span class="tp-lib-name">${t.name}</span>
-        <span class="tp-lib-sub">${t.hp} HP · ${t.speed} 速</span>
+        <span class="tp-lib-sub">${t.hp} HP · ${t.speed} 速 · ${t.damage} 攻</span>
       </button>`,
     ).join("");
 
@@ -349,7 +349,8 @@ export class TrainingPanel {
       ${sliderRow("血量", "tpZombieHp", maxHp, 1, 1000, 5)}
       ${sliderRow("移动速度", "tpZombieSpeed", Math.round(z.speed), 5, 200, 1)}
       ${sliderRow("撕咬间隔", "tpZombieBite", bite, 0.1, 3, 0.05, 2)}
-      <div class="tp-hint">撕咬间隔越小，啃人/拆门窗越快</div>
+      ${sliderRow("攻击力", "tpZombieDamage", Math.round(z.damage), 1, 100, 1)}
+      <div class="tp-hint">撕咬间隔越小，啃人/拆门窗越快；攻击力只影响咬人掉血</div>
       <button class="tp-del" id="tpDeleteUnit">删除该单位</button>
     `;
 
@@ -369,6 +370,9 @@ export class TrainingPanel {
     bind("tpZombieBite", (v) => {
       z.biteCycle = v;
     }, 2);
+    bind("tpZombieDamage", (v) => {
+      z.damage = v;
+    });
 
     (document.getElementById("tpDeleteUnit") as HTMLButtonElement).onclick = () => {
       this.session.deleteSelected();
@@ -407,7 +411,7 @@ export class TrainingPanel {
       ${sliderRow("射速倍率", "tpHumanCd", cdMul, 0.2, 5, 0.05, 2)}
       <label class="tp-check">
         <input type="checkbox" id="tpHumanInvincible" ${h.invincible ? "checked" : ""} />
-        无敌（不会被丧尸咬成僵尸）
+        无敌（免疫撕咬掉血与异变）
       </label>
       <button class="tp-del" id="tpDeleteUnit">删除该单位</button>
     `;
@@ -503,9 +507,13 @@ export class TrainingPanel {
       </tr>`;
     }).join("");
 
+    const hs = this.session.humanStat;
     this.statsEl.innerHTML = `
       <div class="tp-statline">
         ⏱ ${fmtTime(this.session.activeTime)} · 人类 ${counts.humans} · 僵尸 ${counts.zombies} · 击杀 ${this.session.totalKills()}
+      </div>
+      <div class="tp-statline">
+        🩸 人类被咬 ${hs.bites} 次 · 掉血 ${Math.round(hs.damage)} · 异变 ${hs.turns}
       </div>
       <table class="tp-table">
         <thead><tr><th>武器</th><th>总伤</th><th>DPS</th><th>近4s</th><th>击杀</th><th>均杀</th></tr></thead>
@@ -515,7 +523,7 @@ export class TrainingPanel {
         <thead><tr><th>僵尸类型</th><th>存活</th><th>承伤</th><th>击杀</th><th>均杀</th></tr></thead>
         <tbody>${zombieRows}</tbody>
       </table>
-      <div class="tp-hint">DPS = 累计伤害 / 运行时间；「近4s」是最近 4 秒滚动窗口</div>
+      <div class="tp-hint">武器表与「承伤」统计人类对僵尸造成的伤害；「人类被咬 / 掉血 / 异变」是僵尸对人类的反向读数，两者不混算。DPS = 累计伤害 / 运行时间，「近4s」是最近 4 秒滚动窗口</div>
     `;
   }
 }

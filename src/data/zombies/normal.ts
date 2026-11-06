@@ -9,4 +9,5 @@ export const normal: ZombieDef = {
   radius: 5.5,
   color: 0x8b5cf6,
   bite: 0.55,
+  damage: 25,
 };

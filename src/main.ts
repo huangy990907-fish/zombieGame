@@ -18,6 +18,7 @@
 import { getSetting, setSetting } from "./data/settings/runtime";
 import { SLIDER_GROUPS } from "./data/settings/sliders";
 import { loadBuiltinMaps, getMap, registerRuntimeMap } from "./data/maps";
+import { levelLoadError, levelsFallback, loadLevels } from "./data/levels";
 import { sound, SFX } from "./audio/manager";
 import { WorkshopPage } from "./workshop/page";
 import { WORKSHOP_PREVIEW_MAP_ID, compileWorkshopPreview } from "./workshop/storage";
@@ -41,7 +42,7 @@ import { Hud } from "./ui/hud";
 import { Renderer } from "./render/renderer";
 import { TrainingSession } from "./training/session";
 import { TrainingPanel } from "./training/panel";
-import { LEVELS, findLevel, type LevelDef } from "./levels";
+import { LEVELS, findLevel, refreshLevelDefs, type LevelDef } from "./levels";
 import { router, type Route } from "./router";
 
 const STEP = 1 / 60;
@@ -70,6 +71,10 @@ async function boot(): Promise<void> {
 
   // ====== 先加载内置地图（JSON -> MapDef），再构造任何依赖地图的实例 ======
   await loadBuiltinMaps();
+
+  // ====== 关卡 JSON 依赖地图注册表（校验 mapId），必须在地图之后加载 ======
+  await loadLevels();
+  refreshLevelDefs();
 
   // 调试 / 阶段 1A 的临时选图入口：?map=<id>（正式选图 UI 留到阶段 3）
   const mapOverrideId = new URLSearchParams(window.location.search).get("map") ?? undefined;
@@ -391,6 +396,11 @@ async function boot(): Promise<void> {
       showMapNotice(`地图「${requested}」不存在，已回退默认图「${actualName}」`);
     }
   };
+
+  // 关卡清单 / JSON 校验失败时给出可见提示，不静默回退
+  if (levelsFallback && levelLoadError) {
+    showMapNotice(`关卡加载异常：${levelLoadError}；已回退安全默认关卡`);
+  }
 
   const applyRoute = (route: Route): void => {
     // 隐藏结算弹窗和菜单弹窗（切路由时清掉）

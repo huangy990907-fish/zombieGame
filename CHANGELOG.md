@@ -8,6 +8,24 @@
 
 暂无待发布变更。
 
+## [0.8.1] - 2026-11-07
+
+Electron 桌面版打包，只做「打完包能玩」，不包含桌面版地图工坊保存。
+
+### 新增
+
+- Electron 桌面版外壳 `electron/main.cjs`：启动时在 `127.0.0.1` 的随机端口起只读静态服务指向 `dist`，再 `loadURL`。不使用 `file://`，保证 `fetch("/maps/*.json")` 与 `fetch("/levels/*.json")` 正常加载；窗口 1280×720、最小 960×600、可缩放，保留系统菜单栏，关闭窗口即退出。
+- 安全基线：`contextIsolation: true`、`nodeIntegration: false`、`sandbox: true`；拒绝新窗口、拒绝离开本地服务地址的导航、拒绝网页权限请求；不加载 dev server，也不暴露任何 dev 保存接口。
+- `electron-builder` 打包配置（`package.json` 的 `build` 字段）：macOS 输出 `.dmg`（含 `ZombieSwarm.app`），Windows 输出 NSIS 安装包；均不签名、不公证。产物目录 `release/`。
+- 应用图标 `build/icon.png`（1024×1024，深色圆角底 + 普通僵尸像素精灵）、`build/icon.icns`、`build/icon.ico`，随源码提交。
+- `npm run app:build`（先 `npm run build` 再按当前平台打包）与 `npm run app:build:win`（Windows NSIS 打包）。
+
+### 变更
+
+- 版本号升至 `0.8.1`。
+- 桌面版沿用浏览器版的存档（localStorage），位置固定在应用 userData 目录（macOS `~/Library/Application Support/ZombieSwarm`，Windows `%APPDATA%\ZombieSwarm`）。
+- 桌面版不提供地图工坊保存 / 删除：相关按钮与接口在生产构建里本就剥离，桌面版保持不可用。
+
 ## [0.8.0] - 2026-11-07
 
 地形系统与尸潮求生升级扩展，并新增可重复执行的回归脚本。

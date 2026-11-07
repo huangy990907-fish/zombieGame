@@ -3,7 +3,7 @@
 一个运行在浏览器里的 2D 自主对抗小游戏：玩家在关卡的人类区内放置不同武器的人类，管理各自的库存与恢复，抵御一波波从门和窗户涌入的丧尸。玩家不直接操控单个单位，而是通过放置、切行为模式和游戏速度来观察战局；另有独立的「训练场」，用于自由生成单位、改数值、测武器 DPS；「尸潮求生」是单角色 Roguelike 生存模式，玩家亲自移动、自动开火、升级变强，只计失败。开发者还可以在选关页新建 / 编辑关卡。
 
 - 技术栈：TypeScript + Vite + PixiJS（渲染到 Canvas）
-- 版本：`0.8.0`，变更记录见 [CHANGELOG.md](./CHANGELOG.md)
+- 版本：`0.8.1`，变更记录见 [CHANGELOG.md](./CHANGELOG.md)
 - 入口：主菜单 → 放置抵抗（选关）/ 尸潮求生 / 训练场 / 设置；开启开发者模式后主菜单额外出现「地图工坊」，选关页额外出现关卡编辑入口
 
 ## 目录
@@ -18,6 +18,7 @@
 - [技术栈](#技术栈)
 - [目录结构](#目录结构)
 - [快速开始](#快速开始)
+- [桌面版（Electron）](#桌面版electron)
 - [操作说明](#操作说明)
 - [美术资源](#美术资源)
 - [音效系统](#音效系统)
@@ -284,6 +285,7 @@
 | 路由 | 自写 hash 路由（`#/menu`、`#/levels`、`#/play`、`#/training`、`#/workshop`） |
 | 存档 | localStorage + File System Access API + JSON 导入导出 |
 | 测试 | `npm run regression`（Node + esbuild 加载真实模块跑 10 个场景）；行为仍以浏览器实跑为准 |
+| 桌面版 | Electron + electron-builder；主进程在回环地址起只读静态服务加载 `dist`，不使用 `file://` |
 
 逻辑采用固定步长 1/60 秒 + 累加器：渲染帧率波动不影响模拟；速度倍率通过「一帧多走几步」实现。空间查询使用空间哈希网格，寻路使用 BFS 流场，子弹与飘字使用对象池 / 数量上限控制内存与 GC 压力。
 
@@ -292,10 +294,14 @@
 ```
 zombieGame/
 ├── index.html              # 页面骨架：顶栏、画布容器、主菜单/选关/结算/设置/训练场面板
-├── package.json            # 版本号与 scripts（dev / build / preview / regression）
+├── package.json            # 版本号与 scripts（dev / build / preview / regression / app:build）
 ├── vite.config.ts          # Vite 配置：注册 dev 保存插件 + 构建期清理 .bak
+├── electron/
+│   └── main.cjs            # 桌面版主进程：回环静态服务 + BrowserWindow + 安全策略
+├── build/                  # 桌面版图标源资产（icon.png / icon.icns / icon.ico）
 ├── scripts/
 │   ├── workshop-save-plugin.ts # 地图 / 关卡「保存、删除」dev 中间件（校验 / 名称唯一 / 备份 / manifest / 静态 JSON）
+│   ├── make-dmg.mjs        # 桌面版 dmg 封装（electron-builder 出 .app 后用 hdiutil 打包）
 │   └── regression/         # 回归脚本：run.mjs（esbuild 打包） + suite.ts（10 个场景）
 ├── README.md               # 本文件
 ├── CHANGELOG.md            # 变更记录
@@ -398,6 +404,8 @@ zombieGame/
 └── dist/                   # npm run build 产物（不提交）
 ```
 
+桌面版打包产物输出到 `release/`（不提交），结构随平台不同：macOS 为 `.dmg` + `mac-arm64/ZombieSwarm.app`，Windows 为 NSIS 安装包。
+
 各模块职责边界：
 
 - `data/` 是唯一的数值来源：实体数值写在各自的定义文件里，地图几何写在地图定义里，玩家改动只作为「覆盖值」保存在设置中，读取时合并。调平衡优先改定义文件。
@@ -416,11 +424,49 @@ npm run dev       # 开发服务器，默认 http://localhost:5173/
 npm run build     # tsc --noEmit 类型检查 + vite build，产物输出到 dist/
 npm run preview   # 本地预览 dist/ 构建产物
 npm run regression # Node + esbuild 回归脚本（10 个场景，失败返回非零退出码）
+npm run app:build # 先 build，再按当前平台打包桌面版（macOS 输出 dmg）
+npm run app:build:win # 在 Windows 上先 build，再出 NSIS 安装包
 ```
 
 **必须通过 HTTP 服务访问，不能双击 `index.html`。**
 
 原因：`index.html` 通过 `<script type="module" src="/src/main.ts">` 加载源码，浏览器在 `file://` 协议下会拒绝模块加载与部分资源请求，路径也会解析错误；构建后的 `dist/` 同样需要 `npm run preview` 或任意静态文件服务器。直接双击打开只会得到空白页或控制台报错。
+
+## 桌面版（Electron）
+
+桌面版把同一份 `dist/` 构建产物装进 Electron 外壳，玩法与浏览器版一致（放置抵抗、尸潮求生、训练场），**不提供地图工坊的保存 / 删除**（这些入口只存在于 `npm run dev`，生产构建里已剥离）。
+
+### 打包
+
+```bash
+npm install
+npm run app:build      # 先 tsc + vite build，再按当前平台打包（macOS 出 dmg，内含 ZombieSwarm.app）
+npm run app:build:win  # 在 Windows 上执行：先 build，再出 NSIS 安装包
+```
+
+- 产物在 `release/`（已加入 `.gitignore`，不提交）：
+  - macOS：`release/ZombieSwarm-0.8.1-mac-arm64.dmg`，以及同目录 `mac-arm64/ZombieSwarm.app`（Apple Silicon；在 Intel Mac 上打包时架构名随之变化）。
+  - Windows：`release/ZombieSwarm-0.8.1-win-x64.exe`（NSIS 安装包）。
+- 打包流程：`npm run app:build` 先 `tsc + vite build`，再由 `electron-builder` 产出 `.app`（macOS）或 NSIS 安装包（Windows），最后在 macOS 上用 `scripts/make-dmg.mjs` 调 `hdiutil` 把 `.app` 封成 dmg。DMG 不走 electron-builder 的 dmgbuild，避免受限环境写挂载卷隐藏文件被拦截。
+- 主进程启动时在 `127.0.0.1` 的随机端口起一个只读静态服务指向 `dist`，再 `loadURL`，因此地图 / 关卡 JSON 的 `fetch` 正常；窗口 1280×720、最小 960×600、可缩放，保留系统菜单栏，关闭窗口即退出。
+- 本地调试：先 `npm run build`，再执行 `npx electron .`。
+- 在 macOS 上交叉编译 Windows 安装包（已验证可出包，但未在 Windows 实跑）：`npx electron-builder --win nsis --x64 --publish never`。不指定 `--x64` 时按当前机器架构产出（Apple Silicon 会得到 `win-arm64`）。
+
+### 未签名如何打开
+
+产物未签名、未公证，首次启动会被系统拦截：
+
+- macOS：把 `ZombieSwarm.app` 拖进「应用程序」后，**按住 Control 点击 → 打开**，在弹窗里再点「打开」；或到「系统设置 → 隐私与安全性」点「仍要打开」。若仍被拦，执行 `xattr -dr com.apple.quarantine /Applications/ZombieSwarm.app`。
+- Windows：SmartScreen 提示「Windows 已保护你的电脑」时，点「更多信息 → 仍要运行」。
+
+### 存档位置
+
+桌面版沿用浏览器版的 localStorage 存档（设置覆盖值、关卡进度、求生最佳记录），位置固定在应用 userData 目录：
+
+- macOS：`~/Library/Application Support/ZombieSwarm/`
+- Windows：`%APPDATA%\ZombieSwarm\`
+
+删除整个目录等于清空全部桌面版存档；主菜单「清空存档」仍只清玩法进度，不动音量与参数覆盖值。
 
 ## 操作说明
 
@@ -681,6 +727,9 @@ npm run dev
 - 面向桌面浏览器：训练场需要鼠标精确点选，未做移动端触控适配。
 - 顶栏速度按钮支持 8x；速度只有按钮，没有键盘快捷键（数字键留给选择人类种类）。
 - 训练场的单位、改动和统计不落盘，退出路由即重置；在训练场内切换地图同样会清空单位与全部读数（不跨图共用会话），退出再进入时回到进入训练场时指定的地图（`?map=` 或默认图）。
+- 桌面版产物未签名、未公证，首次启动需要按「未签名如何打开」里的步骤放行；正式分发前必须签名 + 公证（Windows 需代码签名证书），否则 Gatekeeper / SmartScreen 会持续拦截。
+- 桌面版不提供地图工坊保存 / 删除，也不加载 dev server；新建地图仍需在 `npm run dev` 的工坊里保存，再重新 `npm run app:build`。桌面版用户地图目录（`app.getPath("userData")/maps`）仍在待评估，没有实现。
+- 桌面版主进程只监听 `127.0.0.1` 的随机端口并服务打包内的 `dist`，不对外提供 HTTP 服务；关闭窗口即退出，没有托盘驻留与自动更新。
 
 ## 版本与 CHANGELOG 约定
 
@@ -688,9 +737,9 @@ npm run dev
 - `package.json` 的 `version` 是版本的唯一来源。发版时同步更新 `package.json`、`CHANGELOG.md`，并打 **annotated tag** `vX.Y.Z`：
 
 ```bash
-git tag -a v0.8.0 -m "0.8.0: 地形系统、尸潮求生升级扩展与回归脚本"
+git tag -a v0.8.1 -m "0.8.1: Electron 桌面版打包"
 git push origin main
-git push origin v0.8.0
+git push origin v0.8.1
 ```
 
 - `CHANGELOG.md` 采用 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 风格，中文条目，新版本在上、旧版本在下；日期统一写 `YYYY-MM-DD`。

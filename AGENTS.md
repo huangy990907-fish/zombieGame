@@ -6,7 +6,7 @@
 
 浏览器 2D 关卡制自动对抗小游戏：玩家在关卡里的人类区放置不同武器的人类（各自有库存与恢复），抵御从门/窗涌入的丧尸；开发者可在选关页新建 / 编辑关卡。玩家不直接操控单位，通过放置、切行为模式与速度观察战局；「尸潮求生」则是单角色 Roguelike 生存，玩家自己移动、自动开火、吃经验升级，只计失败；另有独立训练场做单位与武器回归。技术栈 **PixiJS 8 + TypeScript 5.7 + Vite 6**，像素美术与音效全部内置于仓库，无外部 CDN / 在线美术依赖。
 
-当前版本 **0.8.0**。路由只有 6 个：`#/menu`（主菜单）、`#/levels`（选关与关卡编辑入口，`?level=<id>` 进关；`#/levels/edit?id=<id>` 是编辑器直达别名，映射到本路由且仅开发者模式可打开）、`#/play`（对局）、`#/survival`（尸潮求生，单角色 Roguelike 生存）、`#/training`（训练场）、`#/workshop`（工坊编辑器，仅开发者模式可见，玩家模式直达会被挡回主菜单）。
+当前版本 **0.8.1**。路由只有 6 个：`#/menu`（主菜单）、`#/levels`（选关与关卡编辑入口，`?level=<id>` 进关；`#/levels/edit?id=<id>` 是编辑器直达别名，映射到本路由且仅开发者模式可打开）、`#/play`（对局）、`#/survival`（尸潮求生，单角色 Roguelike 生存）、`#/training`（训练场）、`#/workshop`（工坊编辑器，仅开发者模式可见，玩家模式直达会被挡回主菜单）。
 
 ## 顶层目录职责
 
@@ -24,11 +24,13 @@
 | `src/survival/` | `session.ts` 单角色生存会话（输入移动、自动战斗、经验/升级、出怪、失败），`ui.ts` 选图/HUD/三选一/结算，`storage.ts` 最佳记录 | 复用 world/ai/combat/collision，不复制战斗逻辑 |
 | `src/levelEditor/` | `page.ts` 开发者关卡编辑器弹层，`devSave.ts` / `devDelete.ts` 开发态请求封装 | 只编辑 JSON，不直接改运行时数据 |
 | `src/workshop/` | `doc.ts` 瓦片文档与历史快照，`editor.ts` 2D 画布，`page.ts` 整页 UI，`devSave.ts` 开发态保存请求，`storage.ts` 草稿与试玩预览 | 只编辑 JSON，不直接改运行时 World |
-| `scripts/` | `workshop-save-plugin.ts`：地图 / 关卡「保存、删除」Vite dev 中间件（只读保护 / 名称唯一 / 备份 / manifest 登记与移除 / `/maps/*.json`、`/levels/*.json` 即时读取）；`regression/run.mjs` + `suite.ts`：Node + esbuild 加载真实模块的回归脚本 | 保存插件只在 dev 注册、不进入构建产物；回归脚本只读仓库、不写盘 |
+| `scripts/` | `workshop-save-plugin.ts`：地图 / 关卡「保存、删除」Vite dev 中间件（只读保护 / 名称唯一 / 备份 / manifest 登记与移除 / `/maps/*.json`、`/levels/*.json` 即时读取）；`make-dmg.mjs`：macOS 桌面版 dmg 封装（electron-builder 出 `.app` 后调 `hdiutil`）；`regression/run.mjs` + `suite.ts`：Node + esbuild 加载真实模块的回归脚本 | 保存插件只在 dev 注册、不进入构建产物；回归脚本只读仓库、不写盘；dmg 脚本在非 macOS 平台直接跳过 |
 | `src/ui/` | `hud.ts` 对局顶栏读数，`inventory.ts` 准备阶段库存卡片与开始按钮 | 只做展示 |
 | `src/utils/` | `math.ts` 数学工具，`spatialHash.ts` 空间哈希 | 无游戏语义 |
+| `electron/` | `main.cjs` 桌面版主进程：`127.0.0.1` 随机端口只读静态服务指向 `dist`、BrowserWindow、安全策略 | 只服务打包内的 `dist`，不加载 dev server；不引入游戏代码依赖 |
+| `build/` | 桌面版图标源资产：`icon.png`（1024）、`icon.icns`、`icon.ico` | 源码资产随仓库提交；打包产物在 `release/`（已 gitignore） |
 
-根目录：`index.html`（骨架与所有覆盖层）、`src/main.ts`（启动/路由/主循环/菜单事件/选关与编辑器接线）、`src/style.css`、`src/levels.ts`（关卡展示投影与地图 / 关卡引用登记）、`src/router.ts`、`vite.config.ts`（注册 dev 保存插件 + 构建期清理 `.bak`）、`sprites.html`（仅开发期预览）、`public/audio/`、`public/maps/`、`public/levels/`、`README.md`、`CHANGELOG.md`、`TODO.md`、`AGENTS.md`。
+根目录：`index.html`（骨架与所有覆盖层）、`src/main.ts`（启动/路由/主循环/菜单事件/选关与编辑器接线）、`src/style.css`、`src/levels.ts`（关卡展示投影与地图 / 关卡引用登记）、`src/router.ts`、`vite.config.ts`（注册 dev 保存插件 + 构建期清理 `.bak`）、`sprites.html`（仅开发期预览）、`electron/main.cjs`（桌面版主进程）、`build/`（桌面版图标）、`release/`（桌面版打包产物，不提交）、`public/audio/`、`public/maps/`、`public/levels/`、`README.md`、`CHANGELOG.md`、`TODO.md`、`AGENTS.md`。
 
 ## 改 X 去哪几个文件
 
@@ -59,6 +61,7 @@
 | 改放置 / 库存 / 胜负 | `src/core/game.ts`（`PlacementResult` / `placeHuman` / `beginBattle` / `regenInventory` / 胜负判定）、`src/ui/inventory.ts`、`src/render/renderer.ts`（`setPlacementZones`） | `src/core/world.ts`（`spawnHuman` 血量覆盖、`solidAt` / `findFreeSpot`）、`index.html` + `src/style.css`（库存面板）、`src/ui/hud.ts`（波次 / 人数读数） |
 | 改关卡编辑器 | `src/levelEditor/page.ts`（表单 / 波次 / 校验 / 保存删除流程）、`scripts/workshop-save-plugin.ts`（`/__levels/save` / `/__levels/delete` 与 `/levels/*.json` 静态服务） | `src/levelEditor/devSave.ts` / `devDelete.ts`（请求封装）、`src/data/levels/schema.ts`（`LevelValidationContext`）、`src/levels.ts`（`getLevelReferences`）、`src/main.ts`（列表按钮与热刷新）、`src/style.css`（`.le-*`）、`vite.config.ts`（build 清理 `.bak`） |
 | 改主菜单 / 路由 | `index.html`、`src/main.ts`、`src/style.css` | `src/router.ts`（含 `#/levels/edit` 别名映射）、`src/levels.ts`、`src/core/devMode.ts`（工坊入口显隐、`#/workshop` 与 `#/levels/edit` 的开发者模式守卫） |
+| 改桌面版 / 打包 | `electron/main.cjs`（静态服务 / 窗口 / 安全策略）、`package.json`（`main` 入口、`app:build` 脚本、`build` 配置）、`build/icon.*`、`scripts/make-dmg.mjs` | `README.md` 桌面版章节、`CHANGELOG.md`、`.gitignore`（`release/`）、`electron-builder` 的 mac / win / nsis 配置 |
 
 ## 新增实体「三件套」流程（缺一项视为未完成）
 
@@ -88,6 +91,8 @@ npm run build     # tsc --noEmit + vite build，产物 dist/
 npm run preview   # 预览构建产物
 npm run regression # Node + esbuild 回归脚本（10 个场景，失败返回非零退出码）
 npx tsc --noEmit  # 单项类型检查
+npm run app:build # 先 build，再按当前平台打包桌面版（macOS 出 .app 后用 hdiutil 封 dmg，产物在 release/）
+npm run app:build:win # 在 Windows 上先 build，再出 NSIS 安装包
 ```
 
 - **必须走 HTTP 服务**：不能双击 `index.html`，`file://` 下模块与资源会加载失败。
@@ -173,3 +178,6 @@ npx tsc --noEmit  # 单项类型检查
 - `npm run regression` 覆盖 10 个逻辑场景（开口通行 / 碰撞 / breach / 求生经验与目标 / JSON 校验 / 地形 / 双武器 / 额外投射物），但不覆盖渲染、输入与 DOM；`npm run build` 只保证类型与打包，行为正确性仍需浏览器实跑。
 - 美术只有朝上的单套帧，运行时按朝向旋转，任意角度会有轻微锯齿；特效/场景装饰仍由 Pixi 代码绘制。
 - 碰撞只按躯干圆处理：人类武器枪管、丧尸头饰等装饰不参与碰撞，贴墙时可能少量越入墙面；这是美术层表现，不影响移动与通行。
+- 桌面版（Electron）产物未签名、未公证，macOS 首次启动需 Control + 打开或到「隐私与安全性 → 仍要打开」，Windows 需 SmartScreen「仍要运行」；正式分发前必须签名 + 公证。
+- 桌面版不包含地图工坊保存 / 删除（生产构建已剥离 dev 接口），也不加载 dev server；改地图仍需在 `npm run dev` 的工坊里保存后重新打包。桌面版用户地图目录（`app.getPath("userData")/maps`）仍在待评估。
+- 桌面版主进程只在 `127.0.0.1` 随机端口服务打包内的 `dist`，不对外提供 HTTP；窗口 1280×720 / 最小 960×600，关闭窗口即退出（所有平台一致），没有托盘驻留与自动更新。产物 `release/` 已 gitignore，图标源资产在 `build/`。

@@ -24,16 +24,7 @@
 
 ### 中优先级
 
-#### 桌面版打包（Electron）
-
-- 状态：后续做，不进当前版本（0.8.0）。
-- 范围：只做「打完包能玩」，不包含地图工坊保存。
-- 要点：
-  - 加 `electron` / `electron-builder` 两个 dev 依赖；主进程在 `127.0.0.1` 起临时静态服务指向 `dist`，再 `loadURL`——不能用 `file://`，否则 `fetch` 读取 `/maps/*.json`、`/levels/*.json` 会失败。
-  - 游戏代码不改；开发者模式入口与 dev 保存接口在生产构建里本就剥离，桌面版保持不可用。
-  - 打包产物 macOS 约 150–250 MB；未签名首次启动会被 Gatekeeper 拦截，正式分发需签名公证。
-  - 优先级建议：中，草丛 / 水池已落地，可作为下一个版本的主线。
-- 涉及：`package.json`、Electron 主进程与打包配置、`README.md`（构建说明）、`CHANGELOG.md`。
+（暂无）
 
 ### 低优先级
 
@@ -59,6 +50,7 @@
 
 ## 已完成
 
+- **0.8.1 桌面版打包（Electron）**：`electron/main.cjs` 在 `127.0.0.1` 随机端口起只读静态服务指向 `dist`（不用 `file://`，保证地图 / 关卡 JSON 的 fetch 正常），窗口 1280×720 / 最小 960×600、关闭即退出；`electron-builder` 配置 macOS dmg 与 Windows NSIS，产物在 `release/`；`npm run app:build` / `app:build:win`；应用图标 `build/icon.png` / `.icns` / `.ico`。不签名、不公证，不包含桌面版工坊保存。
 - **0.8.0 地形系统**：新增草丛 / 水池瓦片与 `MapDef.grassTiles / waterTiles / waterBlockers`；草丛移速 ×0.8、人类索敌 ×0.5，喷火点燃 1.5 秒后效果失效，熄灭 10 秒后 1 秒渐隐重生；水池阻挡单位与寻路但不挡子弹与视线；工坊与训练场新增地形画笔与擦除。
 - **0.8.0 尸潮求生升级扩展**：新增「获得新武器」二段选择（最多同时持有 2 把，独立冷却与同帧开火）、额外投射物最多 4 层、暴击率 / 暴击伤害 / 击杀吸血 / 经验拾取范围，并上调出怪同屏上限与僵尸血量成长。
 - **0.8.0 回归脚本**：`scripts/regression/`（Node + esbuild 加载真实模块）与 `npm run regression`，10 个场景覆盖开口通行、人类碰撞、breach 破门、求生经验与目标、地图 / 关卡 JSON 校验、草丛与水池、双武器与额外投射物。

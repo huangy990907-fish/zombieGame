@@ -29,15 +29,6 @@ export const WEAPON_IDS = {
   tesla: tesla.id,
 } as const;
 
-/** 初始 50 人的兵种配比，顺序与 HUD 顶栏一致 */
-export const LOADOUT: ReadonlyArray<{ id: string; count: number }> = [
-  { id: mg.id, count: 20 },
-  { id: flame.id, count: 8 },
-  { id: shotgun.id, count: 8 },
-  { id: rocket.id, count: 4 },
-  { id: tesla.id, count: 10 },
-];
-
 /** 按 id 取定义；未知 id 回落到机枪，保证旧存档 / 脏数据不崩溃 */
 export function getWeaponDef(id: string): WeaponDef {
   return WEAPONS[id] ?? mg;

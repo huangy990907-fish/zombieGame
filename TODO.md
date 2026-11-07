@@ -1,102 +1,83 @@
 # TODO
 
-按优先级记录待办事项。完成一项后把「状态」改为「已完成」，并在对应提交里同步 `CHANGELOG.md`。
+按优先级记录待办事项。完成一项后把对应内容挪到文末「已完成」，并在提交里同步 `CHANGELOG.md`。
 
 ## 交付约定
 
-新增**僵尸 / 武器 / 地图**时必须同时交付以下内容，缺一不算完成：
+新增**僵尸 / 武器 / 地图 / 关卡**时必须同时交付以下内容，缺一不算完成：
 
-- 代码：实体定义文件 + 注册表登记（僵尸 `src/data/zombies/`、武器 `src/data/weapons/`、地图 `public/maps/<id>.json` + `public/maps/manifest.json`，并在 `src/data/maps/index.ts` 注册）。
-- 精灵：`src/art/` 里的 32×32 像素精灵与全部动画帧（含死亡/开火等），并在预览页核对 anchor / muzzle / footprintRadius。
-- 音效：`public/audio/` 的音频文件 + `src/audio/events.ts` 的事件、`SFX_MAP`、`SFX_THROTTLE` 登记，并在 `public/audio/CREDITS.md` 补授权台账。
-- 文档：同步更新 `README.md` 与 `CHANGELOG.md`。
-- 训练场：确认新实体在训练场单位库自动出现、可生成、统计列正常。
+- 代码：实体定义 + 注册表登记（僵尸 `src/data/zombies/`、武器 `src/data/weapons/`、地图 `public/maps/` + manifest、关卡 `public/levels/` + manifest）。
+- 精灵：`src/art/` 里的 32×32 像素精灵与全部动画帧，并在 `sprites.html` 核对 anchor / muzzle / footprintRadius。
+- 音效：`public/audio/` 文件 + `src/audio/events.ts` 三处登记 + `public/audio/CREDITS.md` 授权台账。
+- 文档：同步更新 `README.md`、`CHANGELOG.md`、`AGENTS.md`。
+- 验证：`npx tsc --noEmit`、`npm run build`，并在训练场 / 选关页实跑。
 
-## 高优先级
+## 待办
 
-### 0.5.0 地图工坊阶段 3：训练场选图与关卡绑定（已完成）
+### 高优先级
 
-- 优先级：高
-- 状态：已完成
-- 说明：训练场面板顶部新增地图下拉，按「内置地图 / 工坊地图」分组列出 manifest 与运行时注册图；换图由 `TrainingPanel.onMapChange` → `main.ts` 的 `switchTrainingMap()` 重建 World / 流场 / 静态层，并清空单位、选中与全部读数（不跨图共用会话）。`level-1` 的 `mapId` 在选关节点、详情与开始按钮显示地图名，仍指向 `arena`；`#/play` 不改行为。工坊「用当前图试玩」进入的 `workshop-draft` 可在下拉中看到并切回。
-- 约束：不改主菜单入口、不做开发者模式开关（阶段 4）；`#/play` 仍按关卡绑定地图运行。
-- 涉及模块：`src/training/panel.ts`、`src/training/session.ts`、`src/main.ts`、`src/data/maps/index.ts`、`src/levels.ts`、`src/style.css`。
+#### 草丛（瓦片地形）
 
-### 0.5.0 地图工坊阶段 2：工坊编辑器（本体已完成）
-
-- 优先级：高
-- 状态：编辑器本体已完成（`#/workshop` 直达）；剩余主菜单入口 / 开发者模式（阶段 4）
-- 说明：独立 `#/workshop` 整页 UI，按 16px 网格绘制空地 / 墙 / 门 / 窗 / 人类区 / 出生区，设置每扇门窗的血量 / 通行速度；草稿 localStorage、导入导出 JSON、另存副本、强校验与错误定位、`compileTilesToMapDef()` 即时编译与 `?map=workshop-draft` 试玩均已实现。
-- 约束：`arena` 内置只读；加载期非法地图回退默认图；错误要能定位到格子；画布固定 74×45，不做自定义尺寸。
-- 涉及模块：`src/workshop/`、`src/data/maps/schema.ts`、`src/data/maps/index.ts`、`index.html`、`src/style.css`、`src/router.ts`、`src/main.ts`。
-
-## 中优先级
-
-### 人为操控单位
-
-- 优先级：中
 - 状态：待办
-- 说明：训练场支持手动操控某个单位（键盘/点击移动、手动开火），用于手动验证手感与 AI 行为。
-- 涉及模块：`src/training/`、`src/systems/ai.ts`、`src/systems/combat.ts`、`src/core/world.ts`、`src/main.ts`（输入）、`src/render/renderer.ts`（选中与操控提示）。
+- 说明：新增可通行瓦片；人类索敌半径缩短、双方在草丛内略微减速；喷火灼烧 1–2 秒后草丛暂时失效并在一段时间后重生。玩家视角不变，僵尸索敌不受限。
+- 涉及：`src/data/maps/schema.ts`、`compile.ts`、`src/core/world.ts`、`src/systems/ai.ts`、`combat.ts`、`flowField.ts`、`render/renderer.ts`、`src/training/`。
 
-## 低优先级
+#### 水池（瓦片地形）
 
-### AI 生成音效
-
-- 优先级：低
 - 状态：待办
-- 说明：引入 AI 音效生成路线（ElevenLabs 官方托管 MCP 或本地 Stable Audio 3 Small SFX），替换当前合成的干瘪音色，尤其是僵尸吼叫与枪械。
-- 涉及模块：`public/audio/`、`src/audio/events.ts`、`src/audio/manager.ts`、`public/audio/CREDITS.md`。
+- 说明：新增不可通行瓦片（暂等同墙体），子弹与电击枪射线可穿过，不影响视野。
+- 涉及：`schema.ts`、`compile.ts`、`world.ts`、`collision.ts`、`combat.ts`、`flowField.ts`、`renderer.ts`。
 
-## 待定
+#### 多关卡扩展
 
-### 多地图与多关卡
+- 状态：待办（0.6.0 已具备关卡 JSON、选关解锁与编辑器，内置仍只有教学关）
+- 说明：补充更多内置关卡与难度曲线，验证不同地图 / 波次组合；为「闯关模式」等新模式登记关卡引用，避免被删除。
+- 涉及：`public/levels/`、`src/data/levels/`、`src/levels.ts`、`src/main.ts`、README/CHANGELOG。
 
-- 优先级：待定
-- 状态：部分具备（地图 JSON 加载、`LevelDef.mapId`、`Game` / `TrainingSession` 地图注入、训练场选图已完成；对局内选图 / 地图解锁 / HUD 展示未做）
-- 说明：注册表已能从 manifest 加载多张地图，`level-1` 通过 `mapId` 指向 `arena` 并在选关页显示地图名；训练场可在内置图与工坊图之间切换（阶段 3），`#/play` 仍按关卡绑定运行，调试可用 `?map=<id>`。
-- 涉及模块：`src/data/maps/`、`src/levels.ts`、`src/router.ts`、选关与 HUD。
+### 中优先级
 
-### 地图工坊（瓦片地图编辑器）
+#### 人为操控单位
 
-- 优先级：待定
-- 状态：已完成（阶段 0 地图 JSON 化、阶段 1A 地图注入、阶段 1B 任意户型守岗与出怪、阶段 2 工坊编辑器本体、阶段 3 训练场选图与关卡绑定、阶段 4 开发者模式入口均已交付，随 0.5.0 发布）；后续瓦片类型（草丛 / 水池）拆到 0.5.1
-- 分层定位：工坊是**内容生产工具**，不是玩家功能。开发者模式可见并可新增地图；玩家模式只提供已发布地图的游玩，界面不出现工坊入口。
-- 权限边界：纯浏览器游戏没有后端账号，开发者模式只能做到「界面隐藏」，**不是安全边界**——玩家改 localStorage 或直接访问 URL 仍可进入。若未来需要真隔离，得走服务端发布或维护两套构建产物；文档里写明这一点，避免后来者误以为有权限校验。
-- 数据形态：瓦片 JSON 只作编辑 / 存储格式，加载时编译回 `walls[] + openings[]` 的 `MapDef`；运行时读 `public/maps/*.json` + manifest。开发者产出走「导出 JSON → 进仓库 `public/maps/` + 更新 manifest → 随版本发布」；localStorage 只作草稿，不能当成发布。
-- 校验：编辑期提示 + 保存前强校验 + 加载期非法回退默认图，错误尽量定位到格子。
-- 已确认决策（照此执行，不再回头确认）：
-  1. **数据**：瓦片 JSON 只作编辑与存储格式，加载时编译成现有 `walls[] + openings[]`；`World` / 流场 / 渲染结构不动。
-  2. **网格**：16px 一格，画布固定 `74 × 45 = 1184 × 720`，不做自定义尺寸。门窗宽度必须落在 16 的整数倍：门 80 = 5 格；窗取 16 = 1 格（原 18）。通行规则「净宽 < 体宽不可通行」不变，胖子仍过不去。
-  3. **开口**：每扇门窗有独立 `id`、宽度、默认血量、通行速度；玩家全局覆盖仍按「门 / 窗」种类生效。
-  4. **区域**：地图显式标记出生点与人类可行区，不推断哪边是外侧；出生点不要求墙外，但必须落在可通行格且不与人类区冲突。
-  5. **存储**：`public/maps/*.json` + manifest，运行时加载；localStorage 只作草稿（后续阶段用）。
-  6. **校验**：编辑期提示 + 保存前强校验 + 加载期非法回退默认图，错误能定位到格子。
-  7. **只读内置图**：`arena` 作为内置只读地图，工坊只能另存副本。
-  8. **开发者模式**：设置里输入密码切换；密码明文可接受；放 gitignore 文件（可用 `.env.local` 的 `VITE_` 前缀）；默认密码 `zb9993`。已按阶段 4 完成：`src/core/devMode.ts` + 主菜单设置区块 + 工坊入口显隐 + `#/workshop` 路由守卫。
-- 开发顺序：①地图 JSON 化（阶段 0，已完成）→ ①.5 地图注入（阶段 1A，已完成）→ ②工坊编辑器（阶段 2，已完成）→ ③训练场选图与关卡绑定（阶段 3，已完成）→ ④开发者模式入口（阶段 4，已完成）/ 闯关模式（关卡 = 地图 + 波次 + 目标，工坊只管前半段）。
-- 涉及模块：`src/data/maps/schema.ts`、`src/data/maps/compile.ts`、`src/data/maps/index.ts`、`src/core/world.ts`、`src/systems/flowField.ts`、`src/core/game.ts`、`src/render/renderer.ts`、`src/training/`、`src/levels.ts`、`src/main.ts`、`index.html`、`src/style.css`。
-
-### 建筑模组：草丛与水池（0.5.1，整块推迟但需求已确认）
-
-- 优先级：待定（排在工坊编辑器之后）
 - 状态：待办
-- 说明：作为新的瓦片类型加入 schema（字符待定），编辑器可绘制；实现时通行、视线、射线、流场、渲染与训练场都要接入，不能只改一格判定。
-- **草丛**：
-  - 绿色，可通行。
-  - 人类 AI 索敌半径按原视野的某个比例缩短（比例在实现阶段给建议值）；玩家视角不变；僵尸索敌不受限。
-  - 双方在草丛中通行都会略微减速（幅度在实现阶段给建议值）。
-  - 喷火器灼烧 1–2 秒后草丛暂时失效：颜色变浅；隔一段时间重新长出并恢复颜色（重生时长在实现阶段给建议值）。
-- **水池**：
-  - 蓝色；人类与僵尸均不可通行（暂时等同墙体）。
-  - 子弹与闪电射线可穿过。
-  - 不影响视野。
-- 涉及模块：`src/data/maps/schema.ts`、`src/data/maps/compile.ts`、`src/core/world.ts`（通行与实心判定）、`src/systems/ai.ts`（人类索敌 / 移速）、`src/systems/combat.ts`（喷火清草、子弹与射线放行）、`src/systems/flowField.ts`、`src/render/renderer.ts`、`src/training/`。
+- 说明：训练场支持手动操控单个单位（移动、手动开火），用于验证手感与 AI 行为。
+- 涉及：`src/training/`、`src/systems/ai.ts`、`combat.ts`、`src/core/world.ts`、`src/main.ts`、`render/renderer.ts`。
 
-### 开发者模式（密码切换）—— 已完成
+#### 电击枪视觉优化
 
-- 优先级：已完成（0.5.0 阶段 4）
-- 状态：已完成
-- 说明：主菜单「设置」新增开发者模式区块，输入密码后开启；状态存 localStorage（`zombieGame.devMode.v1`）并跨刷新保持，可手动退出。开发者模式显示主菜单「地图工坊」入口；玩家模式入口不出现，直达 `#/workshop` 会被挡回主菜单。密码优先读 `.env.local` 的 `VITE_DEV_PASSWORD`，缺失回退 `zb9993`。
-- 边界：仅 UI 隐藏，不构成安全边界；不对外宣传密码。
-- 涉及模块：`src/core/devMode.ts`、`src/main.ts`、`index.html`、`src/style.css`、`src/router.ts`。
+- 状态：待办
+- 说明：强化电弧折线与链式跳跃的视觉反馈（起点 / 落点、逐跳衰减、命中高亮），不改变数值与链式规则。
+- 涉及：`src/systems/combat.ts`（特效数据）、`src/render/renderer.ts`（`renderArcs`）、`src/art/`（如新增贴图）。
+
+### 低优先级
+
+#### AI 生成音效
+
+- 状态：待办
+- 说明：引入 AI 音效生成路线（ElevenLabs 托管 MCP 或本地 Stable Audio），替换当前合成音色，优先僵尸吼叫与枪械；保留现有 CC0 素材作为降级。
+- 涉及：`public/audio/`、`src/audio/events.ts`、`manager.ts`、`CREDITS.md`。
+
+#### 音效随机变体
+
+- 状态：待办
+- 说明：同一事件支持音高 / 时长随机变化，避免重复音过于机械；仍受全局限频约束。
+- 涉及：`src/audio/events.ts`、`manager.ts`。
+
+### 待定
+
+#### 闯关模式
+
+- 状态：待办（主菜单入口为占位说明，不会进入空页面）
+- 说明：在放置模式之外增加「闯关」玩法与多种胜负条件；关卡引用通过 `registerLevelReference()` 登记。
+- 涉及：`src/levels.ts`、`src/main.ts`、`src/core/game.ts`、`index.html`、`src/style.css`。
+
+## 已完成
+
+- **0.6.0 放置模式关卡制**：关卡 JSON + manifest 加载与回退、选关逐关解锁、准备阶段 / 放置 / 库存恢复 / 波次 / 胜负、大号库存面板与 HUD。
+- **0.6.0 开发者关卡编辑器**：选关页新建 / 编辑 / 复制 / 删除，表单覆盖人类与波次，dev-only 保存 / 删除中间件与热刷新。
+- **0.6.0 胖子精灵重绘**：圆润体型、工装遮不住肚子，倒地帧同步更新。
+- **0.5.1 工坊 dev 保存 / 删除**：loopback 限制、schema 二次校验、名称唯一、备份、原子写入、manifest 登记与引用保护。
+- **0.5.1 地图名称与多区域**：名称 1–24 字全局唯一，人类区 / 僵尸区支持多块矩形。
+- **0.5.1 breach 追击**：按体型连通区域图 + 区域邻接图选择破门窗路径，`direct` 模式保留。
+- **0.5.0 地图工坊**：地图 JSON 化、任意户型守岗与出怪、工坊编辑器本体、训练场选图、开发者模式入口。
+- **0.4.x 战斗与表现**：人类真实血量与撕咬扣血、受击减速、电击枪链式 hitscan、头顶血条与受击闪白。
+- **0.3.0 存档与参数面板**：设置覆盖值、localStorage / 本地目录 / 导入导出三层兜底、音量与静音。

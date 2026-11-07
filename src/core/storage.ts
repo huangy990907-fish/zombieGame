@@ -324,13 +324,15 @@ export function saveProgress(p: Progress): void {
 }
 
 /**
- * 清空玩法进度（放置抵抗的关卡解锁/通关 + 闯关模式预留的进度 key）。
+ * 清空玩法进度（放置抵抗的关卡解锁/通关 + 尸潮求生的最佳记录 + 预留的挑战进度 key）。
  * 只删进度相关的 key，不碰设置覆盖值 / 音量偏好，也不碰 FSA 目录里的 settings.json。
  */
 export function clearProgress(): void {
   try {
     localStorage.removeItem(LS_PROGRESS);
-    // 闯关模式尚未实现，但按前缀预留：将来它的进度也只落在这些 key 上
+    // 尸潮求生只持久化最佳存活时间 / 最高等级（见 src/survival/storage.ts）
+    localStorage.removeItem("zombieGame.survival.v1");
+    // 预留：未来挑战模式的进度也只落在这些 key 上
     const keys: string[] = [];
     for (let i = 0; i < localStorage.length; i++) {
       const k = localStorage.key(i);

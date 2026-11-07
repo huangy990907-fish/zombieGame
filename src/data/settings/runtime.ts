@@ -151,9 +151,10 @@ export function openingTuning(map: MapDef = activeMap): OpeningTuning {
   const door = map.openings.find((o) => o.kind === "door") ?? map.openings[0];
   const win = map.openings.find((o) => o.kind === "window") ?? map.openings[0];
   const value: OpeningTuning = {
-    doorHp: overrides.opening?.doorHp ?? door.maxHp,
-    winHp: overrides.opening?.winHp ?? win.maxHp,
-    winPassSpeed: overrides.opening?.winPassSpeed ?? win.passSpeed,
+    // 「空旷地」这类没有门窗的图：缺省值取 0 / 1，不参与任何门窗结算
+    doorHp: overrides.opening?.doorHp ?? door?.maxHp ?? 0,
+    winHp: overrides.opening?.winHp ?? win?.maxHp ?? 0,
+    winPassSpeed: overrides.opening?.winPassSpeed ?? win?.passSpeed ?? 1,
     buildBiteDamage: overrides.opening?.buildBiteDamage ?? map.buildBiteDamage,
     buildBiteSlow: overrides.opening?.buildBiteSlow ?? map.buildBiteSlow,
   };

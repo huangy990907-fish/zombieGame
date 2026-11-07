@@ -78,6 +78,17 @@ export interface Human {
   cdMul?: number;
   /** 无敌：完全免疫撕咬掉血与异变（训练场专用） */
   invincible?: boolean;
+  /**
+   * 「尸潮求生」的玩家操控标记：true 时不走 AI 走位 / 闲逛，
+   * 改用 moveX / moveY 输入移动，索敌与开火仍复用 AI 逻辑。
+   */
+  manual?: boolean;
+  moveX?: number;
+  moveY?: number;
+  /** 覆盖武器散布（弧度半宽）；生存模式单人射击用，未设置时沿用武器定义 */
+  spreadOverride?: number;
+  /** 承伤倍率：撕咬伤害乘以该值；未设置时按 1（生存模式单独调低） */
+  damageTakenMul?: number;
 }
 
 export interface Zombie {

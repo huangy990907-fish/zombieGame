@@ -85,23 +85,12 @@
         <p class="subtitle">人类 vs 丧尸</p>
         <div class="menu-buttons">
           <button class="menu-btn primary" id="btnPlacement">🧱 放置抵抗</button>
-          <button class="menu-btn" id="btnChallenge">🗺 闯关模式</button>
+          <button class="menu-btn" id="btnSurvival">🧟 尸潮求生</button>
           <button class="menu-btn training" id="btnTraining">🧪 训练场</button>
           <button class="menu-btn workshop hidden" id="btnWorkshop">🛠 地图工坊</button>
           <button class="menu-btn" id="btnMenuSettings">⚙ 设置</button>
         </div>
-        <p class="menu-footer">放置人类守住房间 · 训练场可自由生成单位、测武器 DPS</p>
-      </div>
-    </div>
-
-    <!-- ===== 闯关模式占位说明（尚未实现，不做成空页面） ===== -->
-    <div id="challengeOverlay" class="overlay menu-modal hidden">
-      <div class="menu-modal-card small">
-        <h2>闯关模式</h2>
-        <p class="menu-modal-desc">该模式将由玩家直接操控人类闯关，目前尚未实现。0.4.2 只保留入口占位，请先体验「放置抵抗」或到训练场试玩。</p>
-        <div class="menu-modal-actions">
-          <button class="menu-btn primary" id="btnChallengeClose">知道了</button>
-        </div>
+        <p class="menu-footer">放置人类守住房间 · 尸潮求生单角色 Roguelike · 训练场可自由生成单位</p>
       </div>
     </div>
 
@@ -135,7 +124,7 @@
         <p class="dev-mode-feedback" id="devModeFeedback"></p>
 
         <h3>进度存档</h3>
-        <p class="menu-modal-desc">清空「放置抵抗」的关卡进度与「闯关模式」的进度存档。音量偏好和参数覆盖值会保留。</p>
+        <p class="menu-modal-desc">清空「放置抵抗」的关卡进度与「尸潮求生」的最佳记录。音量偏好和参数覆盖值会保留。</p>
         <button class="menu-btn danger" id="btnClearProgress">🗑 清空存档</button>
       </div>
     </div>
@@ -144,7 +133,7 @@
     <div id="clearSaveOverlay" class="overlay menu-modal hidden">
       <div class="menu-modal-card small">
         <h2>确认清空存档？</h2>
-        <p class="menu-modal-desc">放置抵抗的解锁/通关记录与闯关模式进度将被删除，且无法恢复。音量与参数设置不受影响。</p>
+        <p class="menu-modal-desc">放置抵抗的解锁/通关记录与尸潮求生的最佳存活记录将被删除，且无法恢复。音量与参数设置不受影响。</p>
         <div class="menu-modal-actions">
           <button class="menu-btn" id="btnClearCancel">取消</button>
           <button class="menu-btn danger" id="btnClearConfirm">确认清空</button>
@@ -178,6 +167,67 @@
 
     <!-- ===== 工坊编辑器 —— 只在 #/workshop 路由显示（阶段 2 不接主菜单入口） ===== -->
     <div id="workshopOverlay" class="overlay workshop-overlay hidden"></div>
+
+    <!-- ===== 尸潮求生：选图 ===== -->
+    <div id="survivalSelect" class="overlay survival-select hidden">
+      <div class="survival-select-card">
+        <button class="back-btn" id="btnSurvivalBack">← 返回主菜单</button>
+        <h2 class="survival-title">尸潮求生</h2>
+        <p class="survival-subtitle">单角色生存 · 没有胜利，只有更久的存活</p>
+        <div class="survival-map-list" id="survivalMapList">
+          <!-- 地图列表由 main.ts 按 MAP_LIST 动态生成 -->
+        </div>
+        <div class="survival-record-line" id="survivalRecordLine"></div>
+        <div class="survival-select-actions">
+          <button class="menu-btn primary" id="btnSurvivalStart">▶ 开始求生</button>
+          <button class="menu-btn hidden" id="btnSurvivalWorkshop">🛠 去地图工坊</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== 尸潮求生：局内 HUD ===== -->
+    <div id="survivalHud" class="survival-hud hidden">
+      <div class="sv-bars">
+        <div class="sv-bar-row">
+          <span class="sv-bar-label">HP</span>
+          <div class="sv-bar"><i id="svHpFill" class="sv-fill hp"></i></div>
+          <span class="sv-bar-text" id="svHpText">100 / 100</span>
+        </div>
+        <div class="sv-bar-row">
+          <span class="sv-bar-label">Lv <b id="svLevel">1</b></span>
+          <div class="sv-bar"><i id="svXpFill" class="sv-fill xp"></i></div>
+          <span class="sv-bar-text" id="svXpText">0 / 6</span>
+        </div>
+      </div>
+      <div class="sv-meta">
+        <span id="svTime">00:00</span>
+        <span id="svKills">击杀 0</span>
+        <span id="svTier">强度 1</span>
+      </div>
+      <div class="sv-paused hidden" id="svPaused">已暂停 · 空格继续</div>
+    </div>
+
+    <!-- ===== 尸潮求生：升级三选一 ===== -->
+    <div id="survivalUpgrade" class="overlay survival-upgrade hidden">
+      <div class="survival-upgrade-card">
+        <h2>升级！</h2>
+        <p class="survival-subtitle">选择一项强化（数字键 1–3 也可选择）</p>
+        <div class="survival-upgrade-list" id="survivalUpgradeCards"></div>
+      </div>
+    </div>
+
+    <!-- ===== 尸潮求生：失败结算 ===== -->
+    <div id="survivalDefeat" class="overlay survival-defeat hidden">
+      <div class="survival-defeat-card">
+        <h2>尸潮吞没了你</h2>
+        <div class="survival-defeat-stats" id="survivalDefeatStats"></div>
+        <div class="survival-defeat-best" id="survivalDefeatBest"></div>
+        <div class="menu-modal-actions">
+          <button class="menu-btn primary" id="btnSurvivalReplay">重开</button>
+          <button class="menu-btn" id="btnSurvivalMenu">主菜单</button>
+        </div>
+      </div>
+    </div>
 
     <!-- ===== 结算弹窗 —— victory / defeat ===== -->
     <div id="resultOverlay" class="overlay result-overlay hidden">

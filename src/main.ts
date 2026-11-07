@@ -17,7 +17,10 @@
  */
 import { getSetting, setSetting } from "./data/settings/runtime";
 import { SLIDER_GROUPS } from "./data/settings/sliders";
-import { loadBuiltinMaps, getMap, registerRuntimeMap } from "./data/maps";
+import { loadBuiltinMaps, getMap, isReadOnlyMap, registerRuntimeMap, MAP_LIST } from "./data/maps";
+import { SURVIVAL } from "./data/survival/config";
+import { SurvivalSession } from "./survival/session";
+import { SurvivalUi } from "./survival/ui";
 import {
   isReadOnlyLevel,
   levelLoadError,
@@ -125,6 +128,27 @@ async function boot(): Promise<void> {
   const trainingPanel = new TrainingPanel(training, () => router.go("menu"), switchTrainingMap);
   trainingPanel.attachCanvas(renderer.app.canvas as HTMLCanvasElement);
 
+  // ====== 尸潮求生：单角色生存会话，独立于关卡流程 ======
+  const survival = new SurvivalSession();
+  const startSurvival = (mapId: string): void => {
+    survival.start(mapId);
+    renderer.setMap(survival.world.map);
+    survivalUi.showGame();
+    // 点击按钮后焦点会留在按钮上，空格键会再次触发按钮点击（看起来像暂停失败）
+    (document.activeElement as HTMLElement | null)?.blur();
+    sound.resumeAudio();
+  };
+  const survivalUi = new SurvivalUi(survival, {
+    onStart: startSurvival,
+    onUpgrade: (id) => {
+      (document.activeElement as HTMLElement | null)?.blur();
+      survival.chooseUpgrade(id);
+    },
+    onReplay: () => startSurvival(survival.map.id),
+    onMenu: () => router.go("menu"),
+    onWorkshop: () => router.go("workshop"),
+  });
+
   // ====== 放置：play 路由下点击人类区空地放下当前选中的人类 ======
   (renderer.app.canvas as HTMLCanvasElement).addEventListener("pointerdown", (e) => {
     if (router.get() !== "play") return;
@@ -186,8 +210,7 @@ async function boot(): Promise<void> {
   const resultTitle = document.getElementById("resultTitle") as HTMLElement;
   const resultSubtitle = document.getElementById("resultSubtitle") as HTMLElement;
 
-  // 主菜单弹窗：闯关占位 / 设置 / 清档二次确认
-  const challengeOverlay = document.getElementById("challengeOverlay") as HTMLElement;
+  // 主菜单弹窗：设置 / 清档二次确认
   const menuSettingsOverlay = document.getElementById("menuSettingsOverlay") as HTMLElement;
   const clearSaveOverlay = document.getElementById("clearSaveOverlay") as HTMLElement;
   const menuVolMaster = document.getElementById("menuVolMaster") as HTMLInputElement;
@@ -463,10 +486,12 @@ async function boot(): Promise<void> {
     el.classList.add("hidden");
   };
   const closeMenuModals = (): void => {
-    closeModal(challengeOverlay);
     closeModal(menuSettingsOverlay);
     closeModal(clearSaveOverlay);
   };
+
+  /** 生存模式按住式按键（WASD / 方向键），路由切换时清空 */
+  const heldKeys = new Set<string>();
 
   /** 地图 id 缺失时的可见提示：回退默认图不静默 */
   let mapNoticeTimer = 0;
@@ -611,6 +636,12 @@ async function boot(): Promise<void> {
     document.body.classList.remove("training");
     document.body.classList.remove("placement");
     workshop.deactivate();
+    // 生存模式离开路由即停止推进；镜头与 HUD 一律复位
+    if (route !== "survival") survival.stop();
+    survivalUi.hideAll();
+    renderer.setCamera(null);
+    document.body.classList.remove("survival");
+    heldKeys.clear();
     // 离开选关页时关闭关卡编辑器弹层，避免覆盖其它页面
     if (route !== "levels" && levelEditor?.isOpen) levelEditor.close();
 
@@ -709,6 +740,23 @@ async function boot(): Promise<void> {
         workshop.activate();
         sound.pause();
         break;
+      case "survival": {
+        showOverlay(null);
+        topbar.classList.add("hidden");
+        bottom.classList.add("hidden");
+        settingsPanel.classList.remove("open");
+        document.body.classList.add("survival");
+        // 进入先选图：默认展示「空旷地」，实际开局由玩家选择
+        renderer.setMap(getMap(SURVIVAL.defaultMapId));
+        const mapOptions = MAP_LIST.map((m) => ({
+          id: m.id,
+          name: m.name || m.id,
+          readOnly: isReadOnlyMap(m.id),
+        }));
+        survivalUi.showSelect(mapOptions, SURVIVAL.defaultMapId);
+        sound.pause();
+        break;
+      }
     }
   };
 
@@ -789,6 +837,36 @@ async function boot(): Promise<void> {
       return;
     }
 
+    if (route === "survival") {
+      survival.setInput(
+        (heldKeys.has("KeyD") || heldKeys.has("ArrowRight") ? 1 : 0) -
+          (heldKeys.has("KeyA") || heldKeys.has("ArrowLeft") ? 1 : 0),
+        (heldKeys.has("KeyS") || heldKeys.has("ArrowDown") ? 1 : 0) -
+          (heldKeys.has("KeyW") || heldKeys.has("ArrowUp") ? 1 : 0),
+      );
+      if (survival.state === "playing") {
+        acc += real;
+        let steps = 0;
+        while (acc >= STEP && steps < 15 && survival.state === "playing") {
+          survival.tick(STEP);
+          acc -= STEP;
+          steps++;
+        }
+        if (acc > 0.75 || survival.state !== "playing") acc = 0;
+      } else {
+        acc = 0;
+      }
+      const player = survival.player;
+      if (player && survival.state !== "idle") {
+        renderer.setCamera(player.x, player.y, SURVIVAL.cameraZoom);
+      } else {
+        renderer.setCamera(null);
+      }
+      renderer.render(survival.world, real, { orbs: survival.orbsForRender() });
+      survivalUi.sync();
+      return;
+    }
+
     // menu / levels：完全冻结逻辑
     acc = 0;
     renderer.render(game.world, real);
@@ -857,7 +935,7 @@ async function boot(): Promise<void> {
 
   // ====== 主菜单按钮 ======
   const placementBtn = document.getElementById("btnPlacement") as HTMLButtonElement;
-  const challengeBtn = document.getElementById("btnChallenge") as HTMLButtonElement;
+  const survivalBtn = document.getElementById("btnSurvival") as HTMLButtonElement;
   const trainingBtn = document.getElementById("btnTraining") as HTMLButtonElement;
   const workshopBtn = document.getElementById("btnWorkshop") as HTMLButtonElement;
   const menuSettingsBtn = document.getElementById("btnMenuSettings") as HTMLButtonElement;
@@ -882,11 +960,11 @@ async function boot(): Promise<void> {
     sound.play(SFX.UI_CLICK);
     router.go("levels");
   };
-  // 闯关模式：只弹占位说明，不做成可点进去的空页面
-  challengeBtn.onclick = () => {
+  // 尸潮求生：单角色生存 Roguelike，先选地图再开局
+  survivalBtn.onclick = () => {
     sound.resume();
     sound.play(SFX.UI_CLICK);
-    openModal(challengeOverlay);
+    router.go("survival");
   };
   trainingBtn.onclick = () => { sound.resume(); sound.play(SFX.UI_CLICK); router.go("training"); };
   updateMuteIcon();
@@ -927,10 +1005,7 @@ async function boot(): Promise<void> {
     sound.play(SFX.UI_CLICK);
     closeModal(menuSettingsOverlay);
   };
-  document.getElementById("btnChallengeClose")!.onclick = () => {
-    sound.play(SFX.UI_CLICK);
-    closeModal(challengeOverlay);
-  };
+
 
   // ====== 开发者模式：密码开启 / 退出；入口只在开发者模式下出现 ======
   const syncDevModeUI = (message = "", ok = false): void => {
@@ -948,6 +1023,8 @@ async function boot(): Promise<void> {
     if (!on && levelEditor?.isOpen) levelEditor.close();
     // 开发者模式切换会改变选关列表的可玩范围与操作按钮
     if (router.get() === "levels") refreshLevelsPage();
+    // 尸潮求生的选图页同样只对开发者显示「去地图工坊」
+    if (router.get() === "survival") survivalUi.refreshDevMode();
   };
 
   const tryEnableDevMode = (): void => {
@@ -990,7 +1067,7 @@ async function boot(): Promise<void> {
   };
   document.getElementById("btnClearCancel")!.onclick = () => closeModal(clearSaveOverlay);
   document.getElementById("btnClearConfirm")!.onclick = () => {
-    clearProgress();
+    clearProgress(); // 含尸潮求生的最佳存活 / 最高等级
     progress = loadProgress(); // 内存里的进度同步重置，下一次开局从第一关起
     closeModal(clearSaveOverlay);
     sound.play(SFX.UI_CLICK);
@@ -1060,7 +1137,31 @@ async function boot(): Promise<void> {
         training.paused = false;
         trainingPanel.refresh(1);
       }
+    } else if (router.get() === "survival") {
+      const moveKeys = [
+        "KeyW", "KeyA", "KeyS", "KeyD",
+        "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight",
+      ];
+      if (moveKeys.includes(e.code)) {
+        e.preventDefault();
+        heldKeys.add(e.code);
+        return;
+      }
+      if (e.code === "Space" || e.key === " ") {
+        e.preventDefault();
+        survival.togglePause();
+      } else if (e.key === "r" || e.key === "R") {
+        if (survival.state !== "idle") startSurvival(survival.map.id);
+      } else if (survival.state === "choosing" && /^[1-3]$/.test(e.key)) {
+        const up = survival.choices[Number(e.key) - 1];
+        if (up) survival.chooseUpgrade(up.id);
+      }
     }
+  });
+  window.addEventListener("keyup", (e) => {
+    heldKeys.delete(e.code);
+    // 阻止空格在 keyup 阶段激活残留焦点的按钮（暂停后会误开新局）
+    if (router.get() === "survival" && (e.code === "Space" || e.key === " ")) e.preventDefault();
   });
 
   // ============================================================
@@ -1078,6 +1179,7 @@ async function boot(): Promise<void> {
     (window as unknown as { __game: Game; __router: typeof router }).__game = game;
     (window as unknown as { __game: Game; __router: typeof router }).__router = router;
     (window as unknown as { __training: TrainingSession }).__training = training;
+    (window as unknown as { __survival: SurvivalSession }).__survival = survival;
   }
 }
 

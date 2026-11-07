@@ -31,6 +31,8 @@ export interface FloatingText {
 export interface RenderExtra {
   selection?: { x: number; y: number; radius: number } | null;
   floating?: FloatingText[];
+  /** 「尸潮求生」的经验球 */
+  orbs?: Array<{ x: number; y: number; radius: number }>;
 }
 
 /** 圆点贴图的实心核心半径，缩放时以此为基准（只用于子弹/特效，单位已改用像素精灵） */
@@ -96,6 +98,8 @@ export class Renderer {
   /** 准备阶段的出生区标记（人类区绿色 / 僵尸区红色），战斗中隐藏 */
   private placementLayer = new Container();
   private placementKey = "";
+  /** 生存模式的经验球，画在单位与尸体下面 */
+  private pickupLayer = new Graphics();
   /** 倒地定格画在活单位下面 */
   private deathLayer = new Container();
   private unitLayer = new Container();
@@ -122,6 +126,36 @@ export class Renderer {
   private textPool: Text[] = [];
   private t = 0;
   private map: MapDef = DEFAULT_MAP;
+  /** 镜头：null = 默认整图展示 */
+  private camX: number | null = null;
+  private camY = 0;
+  private camZoom = 1;
+
+  /**
+   * 设置镜头。生存模式传玩家坐标与放大倍数：地图大于可视区域时跟随玩家，
+   * 并把镜头中心夹在地图边界内。传 null 恢复整图。
+   */
+  setCamera(x: number | null, y = 0, zoom = 1): void {
+    this.camX = x;
+    this.camY = y;
+    this.camZoom = Math.max(1, zoom);
+  }
+
+  private applyCamera(): void {
+    const stage = this.app.stage;
+    if (this.camX === null) {
+      stage.position.set(0, 0);
+      stage.scale.set(1);
+      return;
+    }
+    const zoom = this.camZoom;
+    const viewW = this.map.width / zoom;
+    const viewH = this.map.height / zoom;
+    const cx = Math.max(viewW * 0.5, Math.min(this.map.width - viewW * 0.5, this.camX));
+    const cy = Math.max(viewH * 0.5, Math.min(this.map.height - viewH * 0.5, this.camY));
+    stage.scale.set(zoom);
+    stage.position.set(this.map.width * 0.5 - cx * zoom, this.map.height * 0.5 - cy * zoom);
+  }
 
   /** 初始化 PixiJS、生成贴图、画静态场景（地板网格 / 墙体） */
   async init(host: HTMLElement, map: MapDef = DEFAULT_MAP): Promise<void> {
@@ -147,6 +181,7 @@ export class Renderer {
       this.floorLayer,
       this.placementLayer,
       this.trainingLayer,
+      this.pickupLayer,
       this.deathLayer,
       this.unitLayer,
       this.fxLayer,
@@ -360,6 +395,19 @@ export class Renderer {
     for (let py = y; py < y + h; py += step) {
       g.moveTo(x, py).lineTo(x, Math.min(py + dash, y + h));
       g.moveTo(x + w, py).lineTo(x + w, Math.min(py + dash, y + h));
+    }
+  }
+
+  /** 经验球：中心亮紫、外圈呼吸光晕 */
+  private renderPickups(orbs?: Array<{ x: number; y: number; radius: number }>): void {
+    const g = this.pickupLayer;
+    g.clear();
+    if (!orbs || orbs.length === 0) return;
+    for (const orb of orbs) {
+      const pulse = 0.72 + 0.28 * Math.sin(this.t * 6 + orb.x * 0.05);
+      g.circle(orb.x, orb.y, orb.radius * 2.6).fill({ color: 0xa855f7, alpha: 0.16 * pulse });
+      g.circle(orb.x, orb.y, orb.radius * 1.5).fill({ color: 0xa855f7, alpha: 0.45 * pulse });
+      g.circle(orb.x, orb.y, orb.radius).fill({ color: 0xf3e8ff, alpha: 0.95 });
     }
   }
 
@@ -626,8 +674,10 @@ export class Renderer {
   /** 每帧把 World 的状态同步到 Sprite（位置 / 朝向 / 动画帧 / 缩放） */
   render(world: World, dt: number, extra?: RenderExtra): void {
     this.t += dt;
+    this.applyCamera();
     const w = world;
 
+    this.renderPickups(extra?.orbs);
     this.renderHumans(w.humans, dt);
     this.renderZombies(w.zombies, dt);
     this.renderDeaths(dt);

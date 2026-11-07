@@ -384,6 +384,8 @@ export function validateMapJson(raw: unknown): MapValidationError[] {
   const covered = new Map<string, string>();
   const openings: Array<{ id: string; kind: "door" | "window"; rect: TileRect }> = [];
   let doorCount = 0;
+  /** 全空地画布：生存模式的「空旷地」允许 0 墙 0 开口 */
+  let emptyCanvas = false;
 
   if (!Array.isArray(raw.openings)) {
     errors.push({ message: "openings 必须是数组" });
@@ -452,8 +454,20 @@ export function validateMapJson(raw: unknown): MapValidationError[] {
       }
     }
 
-    // 任意数量的门窗：守岗按类型 / 朝向 / 房间几何推导（1B 起）
-    if (doorCount === 0) {
+    /*
+     * 唯一豁免：全空地画布（没有任何墙体 / 门 / 窗，openings 也为空）。
+     * 「空旷地」是生存模式的专用图；有墙或有开口的地图仍按旧规则要求至少 1 扇门。
+     */
+    emptyCanvas =
+      grid !== null &&
+      openings.length === 0 &&
+      grid.every(
+        (row) =>
+          !row.includes(TILE_CHARS.wall) &&
+          !row.includes(TILE_CHARS.door) &&
+          !row.includes(TILE_CHARS.window),
+      );
+    if (doorCount === 0 && !emptyCanvas) {
       errors.push({ message: "地图至少需要 1 扇门（胖子只能走门）" });
     }
   }
@@ -475,7 +489,7 @@ export function validateMapJson(raw: unknown): MapValidationError[] {
         }
       }
     }
-    if (wallCount === 0) errors.push({ message: "地图至少需要一格墙体" });
+    if (wallCount === 0 && !emptyCanvas) errors.push({ message: "地图至少需要一格墙体" });
   }
 
   // ===== 人类区 / 出生区（多块按并集） =====

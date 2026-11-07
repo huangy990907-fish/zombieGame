@@ -1,0 +1,429 @@
+/**
+ * 「尸潮求生」会话 —— 单角色 Roguelike 生存。
+ *
+ * 复用正式玩法的 World / AI / 战斗 / 碰撞：本类只负责
+ *  - 玩家操控（输入写进 Human.manual + moveX/moveY）
+ *  - 距离 / 屏幕外 / 可通行的出怪选点
+ *  - 时间档位、等级权重、经验球、升级三选一
+ *  - 失败与两项记录（最佳存活时间 / 最高等级）
+ */
+import { HUMAN_DEF } from "../data/humans";
+import { resolveMap, type MapDef } from "../data/maps";
+import { effectiveHuman } from "../data/settings/runtime";
+import { SURVIVAL, SURVIVAL_XP_BY_KIND, xpNeedFor, type SurvivalUpgradeDef } from "../data/survival/config";
+import { ZOMBIE_IDS, getZombieDef, zombieBodyDiameter } from "../data/zombies";
+import type { SpawnRegion } from "../data/types";
+import { createWorld, type Human, type World, type Zombie } from "../core/world";
+import { updateHumans, updateZombies } from "../systems/ai";
+import { updateCombat } from "../systems/combat";
+import { sound, SFX } from "../audio/manager";
+import { clamp, randRange } from "../utils/math";
+import { loadSurvivalRecord, saveSurvivalRecord, type SurvivalRecord } from "./storage";
+
+export type SurvivalState = "idle" | "playing" | "paused" | "choosing" | "defeat";
+
+export interface SurvivalOrb {
+  x: number;
+  y: number;
+  radius: number;
+  /** 拾取时获得的经验值（胖子等大型目标更高） */
+  value: number;
+}
+
+export class SurvivalSession {
+  map: MapDef;
+  world: World;
+  player: Human | undefined = undefined;
+
+  state: SurvivalState = "idle";
+  elapsed = 0;
+  level = 1;
+  xp = 0;
+  xpNeed = xpNeedFor(1);
+  /** 升到新等级后等待选择的数量（连续升级会排队） */
+  pendingLevelUps = 0;
+  /** 当前三选一候选 */
+  choices: SurvivalUpgradeDef[] = [];
+  record: SurvivalRecord = loadSurvivalRecord();
+
+  private baseHp = HUMAN_DEF.hp;
+  private attackMul = 1;
+  private fireRateMul = 1;
+  private maxHpBonus = 0;
+  private moveMul = 1;
+  private weaponLevel = 1;
+
+  private inputX = 0;
+  private inputY = 0;
+  private spawnTimer = 0;
+  private orbs: SurvivalOrb[] = [];
+  private readonly area: SpawnRegion;
+
+  constructor() {
+    const resolved = resolveMap(SURVIVAL.defaultMapId);
+    this.map = resolved.map;
+    this.world = createWorld(this.map);
+    const pad = SURVIVAL.spawn.areaPad;
+    this.area = { x0: pad, y0: pad, x1: this.map.width - pad, y1: this.map.height - pad };
+  }
+
+  get kills(): number {
+    return this.world.kills;
+  }
+
+  get maxHp(): number {
+    return this.player?.maxHp ?? this.baseHp;
+  }
+
+  get hp(): number {
+    return this.player?.hp ?? 0;
+  }
+
+  get weaponLevelMax(): number {
+    return SURVIVAL.weaponLevels.length;
+  }
+
+  /** 开始 / 重开一局；记录不重置 */
+  start(mapOrId?: string): void {
+    this.map = resolveMap(mapOrId ?? this.map.id).map;
+    this.world = createWorld(this.map);
+    this.elapsed = 0;
+    this.level = 1;
+    this.xp = 0;
+    this.xpNeed = xpNeedFor(1);
+    this.pendingLevelUps = 0;
+    this.choices = [];
+    this.attackMul = 1;
+    this.fireRateMul = 1;
+    this.maxHpBonus = 0;
+    this.moveMul = 1;
+    this.weaponLevel = 1;
+    this.inputX = 0;
+    this.inputY = 0;
+    this.spawnTimer = SURVIVAL.spawn.initialDelay;
+    this.orbs = [];
+    this.record = loadSurvivalRecord();
+
+    const spot = this.findSpawnPoint();
+    const baseHp = effectiveHuman().hp;
+    this.baseHp = baseHp;
+    const player = this.world.spawnHuman(spot.x, spot.y, SURVIVAL.weapon, baseHp);
+    player.manual = true;
+    player.moveX = 0;
+    player.moveY = 0;
+    player.spreadOverride = SURVIVAL.weaponSpread;
+    player.damageTakenMul = SURVIVAL.damageTakenMul;
+    player.maxHp = baseHp;
+    player.hp = baseHp;
+    this.player = player;
+    this.syncPlayerStats();
+
+    this.world.onKill = (z) => this.onZombieKilled(z);
+    this.state = "playing";
+  }
+
+  /** 重开当前地图 */
+  restart(): void {
+    this.start(this.map.id);
+  }
+
+  /** 离开路由：停止推进，保留最后画面做背景 */
+  stop(): void {
+    this.state = "idle";
+    this.inputX = 0;
+    this.inputY = 0;
+    this.choices = [];
+    this.pendingLevelUps = 0;
+  }
+
+  /** WASD / 方向键输入（-1..1），由入口每帧写入 */
+  setInput(x: number, y: number): void {
+    this.inputX = clamp(x, -1, 1);
+    this.inputY = clamp(y, -1, 1);
+  }
+
+  togglePause(): void {
+    if (this.state === "playing") this.state = "paused";
+    else if (this.state === "paused") this.state = "playing";
+  }
+
+  /** 固定步长推进，只在 playing 时由入口调用 */
+  tick(dt: number): void {
+    if (this.state !== "playing") return;
+    const player = this.player;
+    if (!player) return;
+
+    this.elapsed += dt;
+    this.world.time += dt;
+    player.moveX = this.inputX;
+    player.moveY = this.inputY;
+
+    this.world.rebuildGrids();
+    updateHumans(this.world, dt);
+    updateZombies(this.world, dt);
+    updateCombat(this.world, dt);
+    this.world.ageEffects(dt);
+    this.world.compact();
+
+    if (player.hp <= 0) {
+      // 生存模式没有转化倒计时：血量归零立刻失败
+      player.turning = 0;
+      this.finish();
+      return;
+    }
+
+    this.updateOrbs(dt);
+    this.spawnTick(dt);
+
+    if (this.pendingLevelUps > 0) this.beginChoice();
+  }
+
+  /** 选择一张升级卡；连续升级时继续弹下一组 */
+  chooseUpgrade(id: string): void {
+    if (this.state !== "choosing") return;
+    const up = this.choices.find((c) => c.id === id);
+    if (!up) return;
+    this.applyUpgrade(up);
+    this.pendingLevelUps = Math.max(0, this.pendingLevelUps - 1);
+    sound.play(SFX.UI_CLICK);
+    if (this.pendingLevelUps > 0) {
+      this.choices = this.rollChoices();
+    } else {
+      this.choices = [];
+      this.state = "playing";
+    }
+  }
+
+  /** 渲染层读取：经验球位置 */
+  orbsForRender(): SurvivalOrb[] {
+    return this.orbs;
+  }
+
+  // ============================================================
+  // 内部
+  // ============================================================
+
+  private findSpawnPoint(): { x: number; y: number } {
+    const zones = this.map.humanZones;
+    let cx = this.map.width * 0.5;
+    let cy = this.map.height * 0.5;
+    if (zones.length > 0) {
+      // 多块人类区按面积加权求质心
+      let total = 0;
+      let sx = 0;
+      let sy = 0;
+      for (const z of zones) {
+        const area = Math.max(0, (z.x1 - z.x0) * (z.y1 - z.y0));
+        if (area <= 0) continue;
+        total += area;
+        sx += (z.x0 + z.x1) * 0.5 * area;
+        sy += (z.y0 + z.y1) * 0.5 * area;
+      }
+      if (total > 0) {
+        cx = sx / total;
+        cy = sy / total;
+      }
+    }
+    return (
+      this.world.findFreeSpot(cx, cy, HUMAN_DEF.radius * 2, this.area) ?? { x: cx, y: cy }
+    );
+  }
+
+  private syncPlayerStats(): void {
+    const player = this.player;
+    if (!player) return;
+    const wl = SURVIVAL.weaponLevels[this.weaponLevel - 1] ?? SURVIVAL.weaponLevels[0];
+    player.dmgMul = this.attackMul * wl.damage * SURVIVAL.baseDamageMul;
+    player.cdMul = this.fireRateMul * wl.cooldown;
+    player.speedOverride = effectiveHuman().speed * this.moveMul;
+    player.maxHp = this.baseHp + this.maxHpBonus;
+    player.hp = Math.min(player.hp, player.maxHp);
+  }
+
+  private applyUpgrade(up: SurvivalUpgradeDef): void {
+    switch (up.kind) {
+      case "attack":
+        this.attackMul += up.amount;
+        break;
+      case "fireRate":
+        this.fireRateMul *= up.amount;
+        break;
+      case "maxHp": {
+        this.maxHpBonus += up.amount;
+        const player = this.player;
+        if (player) {
+          player.maxHp = this.baseHp + this.maxHpBonus;
+          player.hp = Math.min(player.maxHp, player.hp + up.amount);
+        }
+        break;
+      }
+      case "moveSpeed":
+        this.moveMul += up.amount;
+        break;
+      case "weapon":
+        this.weaponLevel = Math.min(this.weaponLevelMax, this.weaponLevel + 1);
+        break;
+    }
+    this.syncPlayerStats();
+  }
+
+  private rollChoices(): SurvivalUpgradeDef[] {
+    const pool: SurvivalUpgradeDef[] = [];
+    for (const u of SURVIVAL.upgrades) {
+      if (u.kind === "weapon" && this.weaponLevel >= this.weaponLevelMax) continue;
+      pool.push(u as SurvivalUpgradeDef);
+    }
+    for (let i = pool.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [pool[i], pool[j]] = [pool[j], pool[i]];
+    }
+    return pool.slice(0, 3);
+  }
+
+  private beginChoice(): void {
+    this.state = "choosing";
+    this.choices = this.rollChoices();
+  }
+
+  private addXp(value: number): void {
+    this.xp += value;
+    while (this.xp >= this.xpNeed) {
+      this.xp -= this.xpNeed;
+      this.level++;
+      this.pendingLevelUps++;
+      this.xpNeed = xpNeedFor(this.level);
+    }
+  }
+
+  private onZombieKilled(z: Zombie): void {
+    if (Math.random() > SURVIVAL.xp.dropChance) return;
+    const off = SURVIVAL.xp.orbOffset;
+    this.orbs.push({
+      x: z.x + randRange(-off, off),
+      y: z.y + randRange(-off, off),
+      radius: SURVIVAL.xp.orbRadius,
+      value: SURVIVAL_XP_BY_KIND[z.kind] ?? 1,
+    });
+  }
+
+  private updateOrbs(dt: number): void {
+    const player = this.player;
+    if (!player) return;
+    const pickup2 = SURVIVAL.xp.pickupRadius * SURVIVAL.xp.pickupRadius;
+    const collect = SURVIVAL.xp.collectRadius;
+    for (let i = this.orbs.length - 1; i >= 0; i--) {
+      const orb = this.orbs[i];
+      const dx = player.x - orb.x;
+      const dy = player.y - orb.y;
+      const d2 = dx * dx + dy * dy;
+      if (d2 > pickup2) continue;
+      const d = Math.sqrt(d2) || 1;
+      if (d <= collect) {
+        this.addXp(orb.value);
+        this.orbs.splice(i, 1);
+        continue;
+      }
+      const step = Math.min(SURVIVAL.xp.magnetSpeed * dt, d - collect);
+      orb.x += (dx / d) * step;
+      orb.y += (dy / d) * step;
+    }
+  }
+
+  private spawnTick(dt: number): void {
+    const cfg = SURVIVAL.spawn;
+    const tier = Math.floor(this.elapsed / cfg.tierSeconds);
+    const interval = Math.max(cfg.minInterval, cfg.baseInterval - tier * cfg.intervalStep);
+    const maxAlive = Math.min(cfg.maxAliveCap, cfg.baseMaxAlive + tier * cfg.maxAliveStep);
+
+    this.spawnTimer -= dt;
+    let guard = 0;
+    while (this.spawnTimer <= 0 && guard++ < 8) {
+      if (this.world.zombies.length < maxAlive) this.spawnOne();
+      this.spawnTimer += interval;
+    }
+    if (this.spawnTimer < 0) this.spawnTimer = 0;
+  }
+
+  private spawnOne(): void {
+    const player = this.player;
+    if (!player) return;
+    const kind = this.rollKind();
+    const body = zombieBodyDiameter(getZombieDef(kind));
+    const cfg = SURVIVAL.spawn;
+    const min2 = cfg.minDistance * cfg.minDistance;
+    const viewW = this.map.width / SURVIVAL.cameraZoom;
+    const viewH = this.map.height / SURVIVAL.cameraZoom;
+
+    for (let i = 0; i < cfg.attempts; i++) {
+      const x = randRange(this.area.x0, this.area.x1);
+      const y = randRange(this.area.y0, this.area.y1);
+      const dx = x - player.x;
+      const dy = y - player.y;
+      if (dx * dx + dy * dy < min2) continue;
+      const offscreen =
+        Math.abs(dx) > viewW * 0.5 + cfg.offscreenMargin ||
+        Math.abs(dy) > viewH * 0.5 + cfg.offscreenMargin;
+      if (!offscreen) continue;
+      const spot = this.world.findFreeSpot(x, y, body, this.area);
+      if (!spot) continue;
+      this.world.spawnZombie(spot.x, spot.y, kind, 1);
+      return;
+    }
+  }
+
+  private rollKind(): string {
+    const d = SURVIVAL.difficulty;
+    const options: Array<{ kind: string; weight: number }> = [
+      { kind: ZOMBIE_IDS.normal, weight: d.normalWeight },
+      { kind: ZOMBIE_IDS.runner, weight: d.runnerBase + d.runnerPerLevel * (this.level - 1) },
+    ];
+    if (this.level >= d.fatStartLevel) {
+      options.push({
+        kind: ZOMBIE_IDS.fat,
+        weight: d.fatBase + d.fatPerLevel * (this.level - d.fatStartLevel),
+      });
+    }
+    let total = 0;
+    for (const o of options) total += o.weight;
+    let roll = Math.random() * total;
+    for (const o of options) {
+      roll -= o.weight;
+      if (roll < 0) return o.kind;
+    }
+    return ZOMBIE_IDS.normal;
+  }
+
+  private finish(): void {
+    this.state = "defeat";
+    const prev = loadSurvivalRecord();
+    this.record = {
+      bestTime: Math.max(prev.bestTime, this.elapsed),
+      bestLevel: Math.max(prev.bestLevel, this.level),
+    };
+    saveSurvivalRecord(this.record);
+    sound.play(SFX.DEFEAT);
+  }
+
+  /** 供 HUD 显示当前档位（0 基） */
+  get tier(): number {
+    return Math.floor(this.elapsed / SURVIVAL.spawn.tierSeconds);
+  }
+
+  /** 供 HUD 显示同屏上限 */
+  get maxAlive(): number {
+    const tier = this.tier;
+    return Math.min(
+      SURVIVAL.spawn.maxAliveCap,
+      SURVIVAL.spawn.baseMaxAlive + tier * SURVIVAL.spawn.maxAliveStep,
+    );
+  }
+
+  /** 只读导出僵尸数量与设置口径，避免 UI 直接摸 world */
+  get aliveZombies(): number {
+    return this.world.zombies.length;
+  }
+
+  get activeMapName(): string {
+    return this.map.name || this.map.id;
+  }
+}

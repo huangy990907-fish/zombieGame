@@ -5,7 +5,7 @@
  * 所有页面共享同一个 PixiJS renderer，只是用 CSS 控制哪个显隐。
  */
 
-export type Route = "menu" | "levels" | "play" | "training" | "workshop";
+export type Route = "menu" | "levels" | "play" | "training" | "workshop" | "survival";
 
 const VALID_ROUTES: Record<string, Route> = {
   "": "menu",
@@ -16,6 +16,7 @@ const VALID_ROUTES: Record<string, Route> = {
   "/play": "play",
   "/training": "training",
   "/workshop": "workshop",
+  "/survival": "survival",
 };
 
 export type RouteListener = (route: Route, old: Route) => void;

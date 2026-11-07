@@ -30,6 +30,8 @@ export function tryFire(world: World, h: Human, angle: number): void {
   // 训练场可给单个人类覆盖伤害 / 射速；普通对局两个倍率都是 undefined → 1
   const dmgMul = h.dmgMul ?? 1;
   const cooldown = def.cooldown * (h.cdMul ?? 1);
+  // 生存模式等的单角色操控可以单独收窄散布（其余模式不设置，沿用武器定义）
+  const spread = h.spreadOverride ?? def.spread;
 
   if (def.kind === "flame") {
     if (h.burst > 0 || h.reloadTimer > 0 || h.ammo <= 0) return;
@@ -62,12 +64,12 @@ export function tryFire(world: World, h: Human, angle: number): void {
   if (def.kind === "pellet") {
     // 霰弹：一发多颗弹丸，每颗独立散布
     for (let i = 0; i < def.pellets; i++) {
-      const a = angle + (Math.random() - 0.5) * def.spread * 2;
+      const a = angle + (Math.random() - 0.5) * spread * 2;
       spawnBullet(world, h, a, def.speed, def.damage * dmgMul, "bullet", 0, def.range / def.speed);
     }
   } else {
     // 机枪 / 火箭：单发弹道
-    const a = angle + (Math.random() - 0.5) * def.spread * 2;
+    const a = angle + (Math.random() - 0.5) * spread * 2;
     const kind: BulletKind = def.kind === "rocket" ? "rocket" : "bullet";
     spawnBullet(world, h, a, def.speed, def.damage * dmgMul, kind, def.blast, def.range / def.speed);
   }

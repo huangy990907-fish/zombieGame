@@ -77,10 +77,18 @@ export function updateHumans(world: World, dt: number): void {
   const postedMode = world.mode !== "attack";
   const s = settings();
   const bounds = world.map.humanBounds;
+  // 生存模式的玩家不受人类区限制，只按身体半径夹在地图边界内
+  const freeBounds = {
+    x0: HUMAN_BODY_DIAMETER * 0.5,
+    y0: HUMAN_BODY_DIAMETER * 0.5,
+    x1: world.map.width - HUMAN_BODY_DIAMETER * 0.5,
+    y1: world.map.height - HUMAN_BODY_DIAMETER * 0.5,
+  };
 
   for (let i = 0; i < world.humans.length; i++) {
     const h = world.humans[i];
     if (!h.alive) continue;
+    const moveBounds = h.manual ? freeBounds : bounds;
     // 血条存续时间：受伤后 3 秒淡出，与朝向 / 移动无关
     if (h.hurtTimer > 0) h.hurtTimer = Math.max(0, h.hurtTimer - dt);
     const def = effectiveWeapon(h.weapon);
@@ -168,6 +176,13 @@ export function updateHumans(world: World, dt: number): void {
         }
       }
       // 防守模式不动：走位交给下面的“归岗 / 拒止”逻辑
+    } else if (h.manual) {
+      // 玩家操控：没有目标时朝输入方向转身，不走闲逛逻辑
+      const mx = h.moveX ?? 0;
+      const my = h.moveY ?? 0;
+      if (Math.hypot(mx, my) > 0.001) {
+        h.facing = turnToward(h.facing, Math.atan2(my, mx), 6 * dt);
+      }
     } else if (posted) {
       // 没目标：站定，朝自己看守的开口方向瞄准待命
       const p = world.posts[h.post];
@@ -222,6 +237,13 @@ export function updateHumans(world: World, dt: number): void {
       }
     }
 
+    // 玩家操控：覆盖掉 AI 的走位 / 归岗，直接按输入移动
+    if (h.manual) {
+      dx = h.moveX ?? 0;
+      dy = h.moveY ?? 0;
+      speedFactor = 1;
+    }
+
     // 被咬后原地不动
     if (h.turning > 0) {
       dx = 0;
@@ -265,8 +287,8 @@ export function updateHumans(world: World, dt: number): void {
      * 已经被旧存档 / 极端情况放进墙里时不做阻挡，让人能自己走出来（避免永久卡死）。
      */
     const stuck = world.solidAt(h.x, h.y, 0, 0);
-    let nx = clamp(h.x + h.vx * dt, bounds.x0, bounds.x1);
-    let ny = clamp(h.y + h.vy * dt, bounds.y0, bounds.y1);
+    let nx = clamp(h.x + h.vx * dt, moveBounds.x0, moveBounds.x1);
+    let ny = clamp(h.y + h.vy * dt, moveBounds.y0, moveBounds.y1);
     if (!stuck) {
       if (world.solidAt(nx, h.y, 0, HUMAN_BODY_DIAMETER)) {
         nx = h.x;
@@ -849,8 +871,10 @@ export function updateZombies(world: World, dt: number): void {
         if (dist2(z.x, z.y, h.x, h.y) <= reach * reach) {
           // 撕咬先扣真实血量，血量归零才进入异变倒计时；
           // 无敌单位在上一行已被跳过，完全免疫掉血与转化。
-          const applied = Math.min(z.damage, Math.max(0, h.hp));
-          h.hp = Math.max(0, h.hp - z.damage);
+          // 生存模式可单独调低承伤倍率（damageTakenMul），其余模式为 undefined → 1
+          const taken = z.damage * (h.damageTakenMul ?? 1);
+          const applied = Math.min(taken, Math.max(0, h.hp));
+          h.hp = Math.max(0, h.hp - taken);
           h.hurtTimer = 3;
           world.onHumanDamage?.(h, applied);
           if (h.hp <= 0) h.turning = s.human.turnTime;

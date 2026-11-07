@@ -7,6 +7,11 @@
       "readOnly": true
     },
     {
+      "id": "open-field",
+      "file": "open-field.json",
+      "readOnly": true
+    },
+    {
       "id": "test-yard",
       "file": "test-yard.json",
       "readOnly": true

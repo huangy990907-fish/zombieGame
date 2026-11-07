@@ -1,6 +1,6 @@
 # 音效授权台账（public/audio）
 
-本目录 18 个 mp3 均来自 **CC0 素材**（检索时用 `license:"Creative Commons 0"` 过滤，逐条核对 API 返回的 license 字段），或由这些 CC0 素材直接派生，不再包含程序化合成文件。`zombie-growl-fat.mp3` 是 0.4.2 新增的派生成品：从本目录已有的 CC0 `zombie-growl.mp3` 降调、降速得到；`weapon-tesla.mp3` 是 0.4.3 新增的派生成品：从本目录已有的 CC0 `zombie-growl-fat.mp3` 升调、高通、颤音处理得到，两者都不引入新的授权来源。
+本目录 18 个 mp3 均来自 **CC0 实录素材**（检索时用 `license:"Creative Commons 0"` 过滤，逐条核对 API 返回的 license 字段），不再包含程序化合成或自制派生文件。`zombie-growl-fat.mp3` 与 `weapon-tesla.mp3` 在 0.4.2 / 0.4.3 曾是派生成品，现已各自替换为独立的 CC0 实录；历史派生关系见 CHANGELOG 对应版本，不代表当前来源。
 
 - 许可证：**CC0 1.0（Creative Commons Zero）**，可复制、修改、商用，无需署名。
   官方文本：<https://creativecommons.org/publicdomain/zero/1.0/>
@@ -14,11 +14,11 @@
 | `weapon-flame.mp3` | 0.13s | 2.5 KB | 739469 | WD-40 quarter Full - Flame thrower 3 | Sadiquecat | CC0 1.0 | https://freesound.org/s/739469/ | 真实喷火/火炬声，截取 0.08–0.18s 稳定段，100ms 级 |
 | `weapon-shotgun.mp3` | 0.34s | 5.8 KB | 702672 | Remington 870 | areniporgen | CC0 1.0 | https://freesound.org/s/702672/ | 真实 12 号霰弹枪近距录音，保留 0.30s 冲击主体 |
 | `weapon-rocket.mp3` | 0.47s | 7.8 KB | 521377 | Rocket Launch | Jarusca | CC0 1.0 | https://freesound.org/s/521377/ | 游戏用火箭发射声，保留出膛 + 尾焰 0.44s |
-| `weapon-tesla.mp3` | 0.10s | 3.0 KB | —（派生） | Zombie Groan 3（派生） | OwNathan | CC0 1.0 | https://freesound.org/s/754441/ | 0.4.3 电击枪放电：从 `zombie-growl-fat.mp3` 取 8 倍升调 + 1.6kHz 高通 + 42Hz 颤音，压成 0.10s 电流滋滋声；无新增授权 |
+| `weapon-tesla.mp3` | 0.16s | 2.9 KB | 488664 | Shock_Three.wav | Nodgez | CC0 1.0 | https://freesound.org/s/488664/ | 截取源文件 0.60–0.72s 的单次放电（0.12s 内容），保留尖锐起音，首 2ms 淡入 / 末 20ms 淡出；响度对齐旧文件（mean -27.8dB / peak -8.9dB，实测 -28.2 / -9.2）；44.1kHz mono 128kbps。此前的 0.4.3 派生关系（曾由 `zombie-growl-fat.mp3` / 754441 升调得到）**已替换**，历史来源见 CHANGELOG 0.4.3 |
 | `weapon-explosion.mp3` | 0.57s | 9.4 KB | 67469 | Fragmentation Grenade Explosion Military M67 1.flac | qubodup | CC0 1.0 | https://freesound.org/s/67469/ | 真实 M67 破片手雷爆炸，完整 0.54s，无长尾 |
 | `weapon-reload.mp3` | 0.47s | 7.8 KB | 455921 | Pistol (magazine reload only) | bolkmar | CC0 1.0 | https://freesound.org/s/455921/ | 弹匣拔出/插入两声金属咔哒，截取 0.44s。**仍未被游戏代码调用** |
 | `zombie-growl.mp3` | 0.73s | 11.9 KB | 754441 | Zombie Groan 3 | OwNathan | CC0 1.0 | https://freesound.org/s/754441/ | 僵尸低吼，去掉 0.12s 静音头后的完整 0.73s（略低于清单 0.8s 下限） |
-| `zombie-growl-fat.mp3` | 0.99s | 17.2 KB | —（派生） | Zombie Groan 3（派生） | OwNathan | CC0 1.0 | https://freesound.org/s/754441/ | 0.4.2 胖子专属低吼：`asetrate=44100*0.7` 降调 + 拉长，音量 1.15，首尾淡入淡出；无新增授权 |
+| `zombie-growl-fat.mp3` | 1.15s | 18.4 KB | 643766 | Monster Moan Groan Growl.mp3 | SnowFightStudios | CC0 1.0 | https://freesound.org/s/643766/ | 截取源文件 0.20–1.30s 最连续的低吼段（1.10s 内容），**不做升调/降调/变速**；首 120ms 淡入、末 150ms 淡出；mean 对齐旧文件 -21.1dB（实测 -21.1dB），peak -9.0dB（低于旧 -2.1dB，因新素材动态较小，保持响度对齐不额外增益）；44.1kHz mono 128kbps。此前的 0.4.2 派生关系（曾由 `zombie-growl.mp3` / 754441 降调得到）**已替换**，历史来源见 CHANGELOG 0.4.2 |
 | `zombie-bite.mp3` | 0.26s | 4.5 KB | 682094 | Bite 1.wav | HenKonen | CC0 1.0 | https://freesound.org/s/682094/ | 脆咬声（咀嚼水果），0.22s，卡通化的“咔嚓”质感 |
 | `zombie-hit.mp3` | 0.10s | 2.1 KB | 877027 | Meat Slime Hit Layer 3 | qubodup | CC0 1.0 | https://freesound.org/s/877027/ | 肉感史莱姆受击层，取前 60ms 瞬态，极短去混响 |
 | `zombie-kill.mp3` | 0.50s | 8.2 KB | 555412 | Zombie Death 1.wav | tonsil5 | CC0 1.0 | https://freesound.org/s/555412/ | 僵尸死亡/倒地呻吟，0.02–0.47s，与中弹音色区分 |
@@ -33,11 +33,11 @@
 
 - 所有条目均为 **CC0 1.0**，API 返回的 `license` 字段均为 `http://creativecommons.org/publicdomain/zero/1.0/`；未使用 CC-BY、NC 或来源不明的素材。
 - 使用的是 freesound 官方 preview-hq-mp3 预览文件（由 CC0 原始素材转码），版权状态与原始素材一致。
-- 合计 **18 个文件、约 254 KB**；单文件最大 63.7 KB（`defeat.mp3`），均小于 100 KB，总量远低于 1.5 MB。
-- `zombie-growl-fat.mp3` 不是独立素材，而是 `zombie-growl.mp3` 的派生物；`weapon-tesla.mp3` 又是 `zombie-growl-fat.mp3` 的派生物，授权均随原文件（CC0）。
+- 合计 **18 个文件、约 255 KB（261,172 字节）**；单文件最大 63.7 KB（`defeat.mp3`），均小于 100 KB，总量远低于 1.5 MB。
+- `zombie-growl-fat.mp3` 与 `weapon-tesla.mp3` 现为独立 CC0 实录（freesound 643766 / 488664）；0.4.2 / 0.4.3 的旧派生关系已废弃，历史记录见 CHANGELOG 对应版本，不代表当前来源。
 
 ## 备注
 
 - `weapon-reload`、`human-hurt` 两个事件在 [events.ts](file:///Users/huangyu/agentSpace/trae/zombieGame/src/audio/events.ts) 已声明，但游戏代码仍无调用点；文件已备好，接线后即可发声（本次未改游戏逻辑）。
 - 所有文件按 `src/audio/events.ts` 的 `SFX_MAP` 命名，小写、连字符、`.mp3`，放入本目录即被预加载。
-- 本次没有“未替换”项：17 个文件全部来自 CC0 或其派生。
+- 本次没有“未替换”项：18 个文件全部来自 CC0 实录；两条历史派生物（`zombie-growl-fat`、`weapon-tesla`）已替换为独立来源。

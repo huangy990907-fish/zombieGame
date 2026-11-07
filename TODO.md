@@ -31,16 +31,10 @@
 #### 多关卡扩展
 
 - 状态：待办（0.6.0 已具备关卡 JSON、选关解锁与编辑器，内置仍只有教学关）
-- 说明：补充更多内置关卡与难度曲线，验证不同地图 / 波次组合；为「闯关模式」等新模式登记关卡引用，避免被删除。
+- 说明：补充更多内置关卡与难度曲线，验证不同地图 / 波次组合；为未来新模式登记关卡引用，避免被删除。
 - 涉及：`public/levels/`、`src/data/levels/`、`src/levels.ts`、`src/main.ts`、README/CHANGELOG。
 
 ### 中优先级
-
-#### 人为操控单位
-
-- 状态：待办
-- 说明：训练场支持手动操控单个单位（移动、手动开火），用于验证手感与 AI 行为。
-- 涉及：`src/training/`、`src/systems/ai.ts`、`combat.ts`、`src/core/world.ts`、`src/main.ts`、`render/renderer.ts`。
 
 #### 电击枪视觉优化
 
@@ -61,14 +55,6 @@
 - 状态：待办
 - 说明：同一事件支持音高 / 时长随机变化，避免重复音过于机械；仍受全局限频约束。
 - 涉及：`src/audio/events.ts`、`manager.ts`。
-
-### 待定
-
-#### 闯关模式
-
-- 状态：待办（主菜单占位入口已被 0.7.0 的「尸潮求生」替换，本项仍指多关卡闯关玩法）
-- 说明：在放置模式之外增加「闯关」玩法与多种胜负条件；关卡引用通过 `registerLevelReference()` 登记。
-- 涉及：`src/levels.ts`、`src/main.ts`、`src/core/game.ts`、`index.html`、`src/style.css`。
 
 ## 已完成
 

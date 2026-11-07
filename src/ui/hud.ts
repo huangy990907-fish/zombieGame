@@ -6,18 +6,13 @@
  *
  * 每 0.1 秒刷新一次文本，避免每帧操作 DOM。
  */
-import { settings } from "../data/settings/runtime";
-import { LOADOUT, WEAPON_LIST, getWeaponDef } from "../data/weapons";
+import { WEAPON_LIST } from "../data/weapons";
 import type { Game } from "../core/game";
 
 function el(id: string): HTMLElement {
   const node = document.getElementById(id);
   if (!node) throw new Error(`missing element #${id}`);
   return node;
-}
-
-function hexColor(c: number): string {
-  return `#${c.toString(16).padStart(6, "0")}`;
 }
 
 export class Hud {
@@ -32,18 +27,10 @@ export class Hud {
   private accum = 0;
 
   constructor(private game: Game) {
-    // 顶栏：25机枪 + 10喷火 + 10霰弹 + 5火箭 VS N 尸潮
-    let html = "";
-    for (let i = 0; i < LOADOUT.length; i++) {
-      const entry = LOADOUT[i];
-      const def = getWeaponDef(entry.id);
-      if (i > 0) html += '<span class="sep">+</span>';
-      html += `<span class="unit">${entry.count}<b style="color:${hexColor(
-        def.color,
-      )}">${def.name}</b></span>`;
-    }
-    html += '<span class="vs">VS</span><span class="total" id="waveTotal">0</span> 尸潮';
-    this.lineup.innerHTML = html;
+    // 顶栏：关卡名 VS 本波尸潮总数
+    this.lineup.innerHTML =
+      '<span class="unit">关卡 <b id="hudLevelName">—</b></span>' +
+      '<span class="vs">VS</span><span class="total" id="waveTotal">0</span> 尸潮';
 
     // 底栏兵种计数容器（按注册表生成，新增武器自动出现）
     let sub = "";
@@ -66,7 +53,12 @@ export class Hud {
 
     this.humanCount.textContent = String(humans);
     this.zombieCount.textContent = String(zombies);
-    this.waveLabel.textContent = `第 ${Math.max(1, g.wave)}/${settings().wave.count} 波`;
+    this.waveLabel.textContent =
+      g.phase === "prepare"
+        ? `准备阶段 · 共 ${g.waveCount} 波`
+        : `第 ${Math.max(1, g.wave)}/${g.waveCount} 波`;
+    const levelName = document.getElementById("hudLevelName");
+    if (levelName) levelName.textContent = g.levelName || "未选择关卡";
 
     for (const def of WEAPON_LIST) {
       const node = document.getElementById(`wk-${def.id}`);
@@ -77,12 +69,13 @@ export class Hud {
 
     let phase = "";
     if (g.paused) phase = "已暂停";
+    else if (g.phase === "prepare") phase = g.placedAny ? "点击开始迎战" : "点击人类区放置人类";
     else if (g.phase === "victory") phase = "人类胜利";
     else if (g.phase === "defeat") phase = "人类全灭";
     else if (g.phase === "intermission") phase = "准备下一波";
     this.phaseLabel.textContent = phase;
 
-    const hp = Math.min(100, (humans / settings().human.start) * 100);
+    const hp = Math.min(100, (humans / Math.max(1, g.placedTotal)) * 100);
     this.humanBar.style.width = `${hp}%`;
     const zp = Math.min(100, (zombies / Math.max(1, g.waveSize)) * 100);
     this.zombieBar.style.width = `${zp}%`;

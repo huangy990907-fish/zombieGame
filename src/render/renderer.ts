@@ -93,6 +93,9 @@ export class Renderer {
   /** 地板网格复用同一张 Graphics，换图时 clear 后重画，避免旧图残留 */
   private floorG!: Graphics;
   private trainingLayer = new Graphics();
+  /** 准备阶段的出生区标记（人类区绿色 / 僵尸区红色），战斗中隐藏 */
+  private placementLayer = new Container();
+  private placementKey = "";
   /** 倒地定格画在活单位下面 */
   private deathLayer = new Container();
   private unitLayer = new Container();
@@ -142,6 +145,7 @@ export class Renderer {
     // 门窗在特效之上：火焰飞过门口会被盖住；墙体最后画，遮住飞出去的特效
     this.app.stage.addChild(
       this.floorLayer,
+      this.placementLayer,
       this.trainingLayer,
       this.deathLayer,
       this.unitLayer,
@@ -154,6 +158,58 @@ export class Renderer {
       this.textLayer,
     );
     this.trainingLayer.visible = false;
+    this.placementLayer.visible = false;
+  }
+
+  /**
+   * 准备阶段的出生区标记：人类区绿色、僵尸区红色，半透明 + 文字标签。
+   * 只在准备阶段显示；同地图重复调用只切换可见性，不重画。
+   */
+  setPlacementZones(visible: boolean): void {
+    this.placementLayer.visible = visible;
+    if (!visible) {
+      this.placementKey = "";
+      return;
+    }
+    if (this.placementKey === this.map.id) return;
+    this.placementKey = this.map.id;
+    this.placementLayer.removeChildren().forEach((child) => child.destroy());
+
+    const g = new Graphics();
+    const humanZones = this.map.humanZones.length > 0 ? this.map.humanZones : [this.map.humanBounds];
+    const spawnZones = this.map.spawn;
+    for (const z of humanZones) {
+      g.rect(z.x0, z.y0, z.x1 - z.x0, z.y1 - z.y0)
+        .fill({ color: 0x22c55e, alpha: 0.14 })
+        .stroke({ width: 1.5, color: 0x4ade80, alpha: 0.55 });
+    }
+    for (const z of spawnZones) {
+      g.rect(z.x0, z.y0, z.x1 - z.x0, z.y1 - z.y0)
+        .fill({ color: 0xf87171, alpha: 0.14 })
+        .stroke({ width: 1.5, color: 0xf87171, alpha: 0.55 });
+    }
+    this.placementLayer.addChild(g);
+
+    const label = (text: string, zones: typeof humanZones, color: number): void => {
+      if (zones.length === 0) return;
+      const z = zones.reduce((a, b) =>
+        (b.x1 - b.x0) * (b.y1 - b.y0) >= (a.x1 - a.x0) * (a.y1 - a.y0) ? b : a,
+      );
+      const t = new Text({
+        text,
+        style: {
+          fontFamily: "monospace",
+          fontSize: 14,
+          fill: color,
+          stroke: { color: 0x000000, width: 3 },
+        },
+      });
+      t.anchor.set(0.5);
+      t.position.set((z.x0 + z.x1) * 0.5, (z.y0 + z.y1) * 0.5);
+      this.placementLayer.addChild(t);
+    };
+    label("人类区", humanZones, 0x86efac);
+    label("僵尸区", spawnZones, 0xfca5a5);
   }
 
   /**
@@ -198,6 +254,9 @@ export class Renderer {
     this.buildStatic();
     this.buildTrainingVisual();
     this.openingLayer.clear();
+    this.placementKey = "";
+    this.placementLayer.removeChildren().forEach((child) => child.destroy());
+    this.placementLayer.visible = false;
   }
 
   /** 用几层同心圆画一张“外圈发光、中心实心”的圆点贴图 */

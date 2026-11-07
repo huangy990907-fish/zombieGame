@@ -37,6 +37,7 @@ body {
   display: flex;
   flex-direction: column;
   padding: 10px 0 6px;
+  position: relative;
 }
 
 /* 顶栏：左边兵种配比，右边操作按钮 */
@@ -2075,4 +2076,153 @@ body.training .screen canvas {
   .ws-body {
     grid-template-columns: 210px minmax(0, 1fr) 270px;
   }
+}
+
+/* ============================================================
+   放置模式库存面板（0.6.0）
+   ============================================================ */
+
+.inv-panel {
+  position: absolute;
+  left: 50%;
+  bottom: 84px;
+  transform: translateX(-50%);
+  width: min(760px, 94%);
+  padding: 10px 14px 12px;
+  background: rgba(8, 9, 17, 0.94);
+  border: 1px solid #2a3350;
+  border-radius: 12px;
+  box-shadow: 0 10px 32px rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(6px);
+  z-index: 6;
+}
+
+.inv-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 9px;
+}
+
+.inv-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: #c7d2fe;
+  letter-spacing: 1px;
+}
+
+.inv-hint {
+  flex: 1;
+  min-width: 0;
+  font-size: 11px;
+  color: #8b95a8;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.inv-start {
+  flex: none;
+  padding: 7px 20px;
+  border: 1px solid #7c3aed;
+  border-radius: 6px;
+  background: linear-gradient(180deg, #6b46c1, #4c2d91);
+  color: #fff;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.inv-start:hover {
+  border-color: #a78bfa;
+  box-shadow: 0 0 18px rgba(139, 92, 246, 0.45);
+}
+
+.inv-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(112px, 1fr));
+  gap: 8px;
+}
+
+.inv-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 9px 11px 10px;
+  background: #0c0e1b;
+  border: 1px solid #232b46;
+  border-radius: 8px;
+  color: #9aa6b8;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s, transform 0.1s;
+}
+
+.inv-card:hover {
+  border-color: #3b82f6;
+  transform: translateY(-1px);
+}
+
+.inv-card.selected {
+  border-color: #a78bfa;
+  background: #151130;
+  box-shadow: 0 0 16px rgba(124, 58, 237, 0.35);
+}
+
+.inv-card.empty {
+  opacity: 0.5;
+}
+
+.inv-key {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  font-size: 10px;
+  color: #64748b;
+}
+
+.inv-icon {
+  font-size: 19px;
+  line-height: 1;
+}
+
+.inv-name {
+  font-size: 12px;
+  font-weight: 700;
+  color: #e2e8f0;
+}
+
+.inv-stock {
+  font-size: 17px;
+  font-weight: 700;
+  color: #93c5fd;
+}
+
+.inv-stock em {
+  font-style: normal;
+  font-size: 11px;
+  color: #64748b;
+}
+
+.inv-card.empty .inv-stock {
+  color: #64748b;
+}
+
+.inv-progress {
+  display: block;
+  height: 3px;
+  margin-top: 2px;
+  background: #1a2136;
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.inv-progress i {
+  display: block;
+  height: 100%;
+  background: #7c3aed;
+  transition: width 0.2s linear;
 }

@@ -477,9 +477,9 @@ export class World {
     return false;
   }
 
-  spawnHuman(x: number, y: number, weapon: string): Human {
+  spawnHuman(x: number, y: number, weapon: string, hpOverride?: number): Human {
     const def = effectiveWeapon(weapon);
-    const hp = effectiveHuman().hp;
+    const hp = hpOverride ?? effectiveHuman().hp;
     const human: Human = {
       id: this.nextId++,
       x,

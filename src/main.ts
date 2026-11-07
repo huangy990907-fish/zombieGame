@@ -39,6 +39,7 @@ import {
 import { Game } from "./core/game";
 import { checkDevPassword, isDevModeEnabled, setDevModeEnabled } from "./core/devMode";
 import { Hud } from "./ui/hud";
+import { InventoryPanel } from "./ui/inventory";
 import { Renderer } from "./render/renderer";
 import { TrainingSession } from "./training/session";
 import { TrainingPanel } from "./training/panel";
@@ -98,6 +99,13 @@ async function boot(): Promise<void> {
   await renderer.init(host);
   const hud = new Hud(game);
 
+  // ====== 放置模式库存面板：点「开始」放第一波 ======
+  const inventoryPanel = new InventoryPanel(game, () => {
+    if (!game.beginBattle()) {
+      showMapNotice("至少放置一名人类后再开始");
+    }
+  });
+
   // ====== 训练场：一个和正常对局完全独立的沙盒 World ======
   // 面板常驻 DOM，只在 #/training 路由滑出；退出时整个会话被丢弃，不残留任何修改。
   // 换图由面板下拉触发：重建 World + 静态层；reset 同时清空单位与读数，避免跨图混算。
@@ -109,6 +117,19 @@ async function boot(): Promise<void> {
   };
   const trainingPanel = new TrainingPanel(training, () => router.go("menu"), switchTrainingMap);
   trainingPanel.attachCanvas(renderer.app.canvas as HTMLCanvasElement);
+
+  // ====== 放置：play 路由下点击人类区空地放下当前选中的人类 ======
+  (renderer.app.canvas as HTMLCanvasElement).addEventListener("pointerdown", (e) => {
+    if (router.get() !== "play") return;
+    if (game.phase === "victory" || game.phase === "defeat") return;
+    const rect = (renderer.app.canvas as HTMLCanvasElement).getBoundingClientRect();
+    const x = ((e.clientX - rect.left) / rect.width) * game.map.width;
+    const y = ((e.clientY - rect.top) / rect.height) * game.map.height;
+    const result = game.placeHuman(x, y);
+    if (result === "zone") showMapNotice("只能放在人类区（绿色区域）内");
+    else if (result === "blocked") showMapNotice("这里被墙体或门挡住了，换一块空地");
+    else if (result === "empty") showMapNotice("该人类库存已用完，等待恢复");
+  });
 
   // ====== 工坊编辑器：整页 DOM overlay，仅 #/workshop 路由显示 ======
   const workshop = new WorkshopPage(
@@ -462,6 +483,8 @@ async function boot(): Promise<void> {
     // 先统一收起训练场的 UI / 专属地面装饰；training 分支再重新打开
     trainingPanel.deactivate();
     renderer.setTrainingVisual(false);
+    renderer.setPlacementZones(false);
+    inventoryPanel.hide();
     document.body.classList.remove("training");
     workshop.deactivate();
 
@@ -509,6 +532,8 @@ async function boot(): Promise<void> {
         }
         reportMapFallback(game.mapFallback, game.requestedMapId, game.map.name);
         renderer.setMap(game.map);
+        renderer.setPlacementZones(game.phase === "prepare");
+        inventoryPanel.show();
         refreshButtons();
         refreshPanelValues();
         sound.resumeAudio(); // 进入战斗场景恢复声音（AudioContext resume 在这里发生）
@@ -585,8 +610,10 @@ async function boot(): Promise<void> {
     const route = router.get();
 
     if (route === "play") {
-      // 只有 play 路由推进战斗逻辑
-      const running = !game.paused && (game.phase === "wave" || game.phase === "intermission");
+      // play 路由推进战斗逻辑；准备阶段也 tick，用于库存恢复与已放人类的待机
+      const running =
+        !game.paused &&
+        (game.phase === "prepare" || game.phase === "wave" || game.phase === "intermission");
       if (running) {
         acc += real * game.speed;
         let steps = 0;
@@ -599,6 +626,9 @@ async function boot(): Promise<void> {
       } else {
         acc = 0;
       }
+      // 准备阶段显示出生区标记，点开始后自动隐藏
+      renderer.setPlacementZones(game.phase === "prepare");
+      inventoryPanel.update(real);
       // 检测胜利/失败
       checkResultPhase();
       renderer.render(game.world, real);
@@ -861,15 +891,11 @@ async function boot(): Promise<void> {
       if (e.code === "Space") {
         e.preventDefault();
         pauseBtn.click();
-      } else if (e.key === "1") {
-        game.speed = 1;
-        refreshButtons();
-      } else if (e.key === "2") {
-        game.speed = 2;
-        refreshButtons();
-      } else if (e.key === "3") {
-        game.speed = 4;
-        refreshButtons();
+      } else if (/^[1-5]$/.test(e.key)) {
+        // 数字键选择人类种类（与库存卡片右上角一致）
+        const index = Number(e.key) - 1;
+        const slot = game.inventory[index];
+        if (slot) game.selectWeapon(slot.id);
       } else if (e.key === "r" || e.key === "R") {
         restartBtn.click();
       }

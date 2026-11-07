@@ -35,7 +35,7 @@
           <button id="btnRestart">重开</button>
           <button id="btnBackMenu">🏠 主菜单</button>
           <button id="btnSettings" class="btn-settings">⚙ 设置</button>
-          <span class="hint">空格 暂停 · 1 / 2 / 3 切换速度 · R 重开</span>
+          <span class="hint">空格 暂停 · 1–5 选择人类 · R 重开</span>
         </div>
       </div>
 
@@ -63,6 +63,16 @@
             <span class="cap zombie">僵尸</span>
           </div>
         </div>
+      </div>
+
+      <!-- ===== 放置模式：人类库存面板（准备阶段 + 战斗中都可放置） ===== -->
+      <div class="inv-panel hidden" id="inventoryPanel">
+        <div class="inv-head">
+          <span class="inv-title" id="invTitle">人类库存</span>
+          <span class="inv-hint" id="invHint">点击人类区空地放置人类</span>
+          <button class="inv-start" id="btnPlacementStart">▶ 开始</button>
+        </div>
+        <div class="inv-cards" id="invCards"></div>
       </div>
 
     </div>

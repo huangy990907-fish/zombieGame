@@ -143,7 +143,22 @@ function findTeslaNext(
   return best;
 }
 
-/** 生成一段折线闪电：起点到终点，中间点随机抖动，持续 0.12 秒 */
+/**
+ * 电弧视觉强度：跟随链式伤害的每跳衰减（0.75^n）逐跳变细、变暗。
+ * 只用于渲染，不参与伤害计算。
+ */
+function arcStrength(chainFalloff: number, jump: number): number {
+  return Math.pow(chainFalloff, jump);
+}
+
+/**
+ * 生成一段电弧：沿主轴拆成 8–12 个细分段，逐点加入高频、低振幅的法线抖动，
+ * 形成自然抖动的不规则曲线（不再是几段大折角）。
+ *
+ * - 抖动幅度随 strength 递减，靠后的跳跃更弱；
+ * - 两端用 sin 窗口收束，枪口 / 目标端点保持精确，不做位移；
+ * - strength 同时供渲染层缩放线宽与亮度。持续 0.12 秒，瞬时特效。
+ */
 function addTeslaArc(
   world: World,
   fx: number,
@@ -151,18 +166,23 @@ function addTeslaArc(
   tx: number,
   ty: number,
   color: number,
+  strength: number,
 ): void {
   const dx = tx - fx;
   const dy = ty - fy;
   const len = Math.hypot(dx, dy) || 1;
   const nx = -dy / len;
   const ny = dx / len;
-  const amp = Math.min(9, 4 + len * 0.04);
+  // 8–12 段：短跳也够密，长跳再加密，避免出现折尺感
+  const segments = Math.max(8, Math.min(12, Math.round(len / 12)));
+  // 低振幅抖动：首跳约 4px，末跳约 1.5px
+  const amp = (2.2 + Math.min(2.2, len * 0.015)) * (0.35 + 0.65 * strength);
   const points: Array<{ x: number; y: number }> = [{ x: fx, y: fy }];
-  for (let i = 1; i < 5; i++) {
-    const t = i / 5;
-    const off = (Math.random() - 0.5) * 2 * amp;
-    // 中间点沿法线抖动，形成不规则折线而不是直棍
+  for (let i = 1; i < segments; i++) {
+    const t = i / segments;
+    // 两端收敛：越靠近端点抖动越小，保证端点精确落在枪口 / 目标上
+    const window = Math.sin(Math.PI * t);
+    const off = (Math.random() - 0.5) * 2 * amp * window;
     points.push({
       x: fx + dx * t + nx * off,
       y: fy + dy * t + ny * off,
@@ -179,7 +199,50 @@ function addTeslaArc(
     age: 0,
     life: 0.12,
     points,
+    strength,
   });
+}
+
+/** 单体强化的闪白时长（秒）：常规受击是 0.08 秒，拉长后渲染层做强白 + 轻微尺寸脉冲 */
+const TESLA_SOLO_FLASH = 0.16;
+
+/**
+ * 电击命中反馈：目标处一圈扩散光环；单体加成（附近没有其他僵尸）时，
+ * 额外只作用在这只被击中的僵尸身上——更强的白闪、一圈短促电火花与极轻微的尺寸脉冲。
+ * 全部是纯视觉特效，不影响伤害、击退或硬直。
+ */
+function addTeslaHitFeedback(world: World, z: Zombie, empowered: boolean): void {
+  world.effects.push({
+    kind: "ring",
+    x: z.x,
+    y: z.y,
+    angle: 0,
+    radius: z.radius + 2,
+    color: empowered ? 0xdff6ff : 0xffeaa0,
+    age: 0,
+    life: empowered ? 0.26 : 0.18,
+  });
+  if (!empowered) return;
+
+  z.flash = Math.max(z.flash, TESLA_SOLO_FLASH);
+  // 一圈电火花：短命 ember 粒子沿圆周向外迸射，幅度克制
+  const sparks = 10;
+  for (let i = 0; i < sparks; i++) {
+    const a = (i / sparks) * Math.PI * 2 + Math.random() * 0.18;
+    const speed = 60 + Math.random() * 70;
+    world.effects.push({
+      kind: "ember",
+      x: z.x + Math.cos(a) * (z.radius + 2),
+      y: z.y + Math.sin(a) * (z.radius + 2),
+      angle: a,
+      radius: 1.6 + Math.random() * 1.2,
+      color: 0xeafcff,
+      vx: Math.cos(a) * speed,
+      vy: Math.sin(a) * speed,
+      age: 0,
+      life: 0.18 + Math.random() * 0.1,
+    });
+  }
 }
 
 /**
@@ -207,8 +270,9 @@ function fireTesla(world: World, h: Human, angle: number, def: WeaponDef, dmgMul
   const solo = !hasOtherNear;
   const firstDamage = def.damage * dmgMul * (solo ? cfg.singleBonus : 1);
   const source: DamageSource = { weapon: h.weapon, humanId: h.id };
-  addTeslaArc(world, muzzle.x, muzzle.y, first.x, first.y, 0xffe14d);
+  addTeslaArc(world, muzzle.x, muzzle.y, first.x, first.y, 0xffe14d, 1);
   damageZombie(world, first, firstDamage, source);
+  addTeslaHitFeedback(world, first, solo);
 
   const visited = new Set<number>([first.id]);
   let current = first;
@@ -218,8 +282,17 @@ function fireTesla(world: World, h: Human, angle: number, def: WeaponDef, dmgMul
     const next = findTeslaNext(world, current, cfg.chainRadius, visited);
     if (!next) break;
     damage *= cfg.chainFalloff;
-    addTeslaArc(world, current.x, current.y, next.x, next.y, 0xffe14d);
+    addTeslaArc(
+      world,
+      current.x,
+      current.y,
+      next.x,
+      next.y,
+      0xffe14d,
+      arcStrength(cfg.chainFalloff, jump),
+    );
     damageZombie(world, next, damage, source);
+    addTeslaHitFeedback(world, next, false);
     visited.add(next.id);
     current = next;
     hits++;

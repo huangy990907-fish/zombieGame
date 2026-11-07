@@ -46,6 +46,11 @@ const WALK_STEP_DIST = 9;
 const MOVE_SPEED = 12;
 /** 开火帧停留时长（秒），略长于机枪 0.1s 冷却 */
 const FIRE_HOLD = 0.12;
+/** 常规受击闪白时长（秒）；电击枪单体强化会把计时拉长到 0.16s，用超出的部分做轻微尺寸脉冲 */
+const HIT_FLASH = 0.08;
+const EMPOWERED_FLASH = 0.16;
+/** 单体强化尺寸脉冲的最大放大比例（极其克制，不做击退 / 硬直） */
+const EMPOWERED_PULSE_SCALE = 0.05;
 /** 倒地序列的帧名（zombie-death 精灵内），按时间顺序播放 */
 const DEATH_FRAMES = ["death-1", "death-2", "death-3"] as const;
 /** 倒地单帧时长（秒）：3 帧共 0.6s，播完停在末帧 */
@@ -414,29 +419,53 @@ export class Renderer {
   }
 
   /**
-   * 电击枪闪电：每段跳跃是一条独立折线，外层暖黄辉光 + 内层黄色芯线，
-   * 末端画一个小亮点。整段按 age/life 线性淡出（约 0.12 秒）。
+   * 电击枪特效用 arcLayer：
+   * - arc 是抖动电弧，外层暖黄辉光 + 内层黄色芯线，起止点各一个短促闪点；
+   *   线宽 / 亮度按每跳视觉强度递减（首跳最亮最粗，末跳细而暗）；
+   * - ring 是命中目标处向外扩散的短促光环。
+   * 整段按 age/life 线性淡出（arc 约 0.12 秒，ring 约 0.18–0.26 秒）。
    */
   private renderArcs(effects: Effect[]): void {
     const g = this.arcLayer;
     g.clear();
     for (let i = 0; i < effects.length; i++) {
       const e = effects[i];
-      if (e.kind !== "arc" || !e.points || e.points.length < 2) continue;
+      if (e.kind !== "arc" && e.kind !== "ring") continue;
       const fade = 1 - Math.min(1, e.age / e.life);
       if (fade <= 0) continue;
+      if (e.kind === "ring") {
+        // 命中光环：从目标外缘向外扩散，边扩边淡
+        const p = Math.min(1, e.age / e.life);
+        g.circle(e.x, e.y, e.radius + p * 12).stroke({
+          width: 1.8,
+          color: e.color,
+          alpha: fade * 0.72,
+        });
+        continue;
+      }
+      if (!e.points || e.points.length < 2) continue;
       const pts = e.points;
+      const strength = e.strength ?? 1;
       const trace = (): void => {
         g.moveTo(pts[0].x, pts[0].y);
         for (let k = 1; k < pts.length; k++) g.lineTo(pts[k].x, pts[k].y);
       };
       // 先用宽一点的暖黄半透明线打底，做出辉光感，再叠一条细黄芯线
       trace();
-      g.stroke({ width: 6, color: 0xffc93c, alpha: fade * 0.26 });
+      g.stroke({ width: 6 * (0.5 + 0.5 * strength), color: 0xffc93c, alpha: fade * 0.26 * (0.45 + 0.55 * strength) });
       trace();
-      g.stroke({ width: 2.6, color: e.color, alpha: fade * 0.95 });
+      g.stroke({ width: 2.6 * (0.5 + 0.5 * strength), color: e.color, alpha: fade * 0.95 * (0.5 + 0.5 * strength) });
+      // 起止点短促闪点：起点略小，落点更亮，强调命中位置
+      const start = pts[0];
+      g.circle(start.x, start.y, 2.1 * (0.7 + 0.3 * strength)).fill({
+        color: 0xfff8d0,
+        alpha: fade * 0.75 * (0.5 + 0.5 * strength),
+      });
       const end = pts[pts.length - 1];
-      g.circle(end.x, end.y, 2.6).fill({ color: 0xfff8d0, alpha: fade * 0.85 });
+      g.circle(end.x, end.y, 2.6 * (0.65 + 0.35 * strength)).fill({
+        color: 0xfff8d0,
+        alpha: fade * 0.9 * (0.55 + 0.45 * strength),
+      });
     }
   }
 
@@ -596,11 +625,15 @@ export class Renderer {
       s.position.set(z.x, z.y);
       s.rotation = spriteRotation(st.angle);
       // 渲染直径 = 身体直径(2r) * 视觉放大（普通 11→16.5，胖子 22→33）
-      s.scale.set(spriteScale(z.bodyDiameter * VISUAL_SCALE));
+      // 电击单体强化会把闪白计时拉长到 0.16s，用超出的部分叠一个极轻微的尺寸脉冲
+      const strongFlash = z.flash > HIT_FLASH;
+      const pulse = strongFlash ? (z.flash - HIT_FLASH) / (EMPOWERED_FLASH - HIT_FLASH) : 0;
+      const baseScale = spriteScale(z.bodyDiameter * VISUAL_SCALE);
+      s.scale.set(baseScale * (1 + pulse * EMPOWERED_PULSE_SCALE));
       // 受击反馈：短促加法混合提亮（闪白），比新建滤镜/叠加精灵成本低
       s.blendMode = z.flash > 0 ? "add" : "normal";
       s.tint = 0xffffff;
-      s.alpha = z.flash > 0 ? 0.9 : 1;
+      s.alpha = z.flash > 0 ? (strongFlash ? 1 : 0.9) : 1;
       this.applyFrame(s, st, def, frame);
     }
 
@@ -696,14 +729,17 @@ export class Renderer {
     }
 
     const effects = w.effects;
-    // 闪电是折线，单独画在 arcLayer；圆点精灵池只分给 ember / blast
+    // 电弧与命中光环单独画在 arcLayer；圆点精灵池只分给 ember / blast
     let fxCount = 0;
-    for (let i = 0; i < effects.length; i++) if (effects[i].kind !== "arc") fxCount++;
+    for (let i = 0; i < effects.length; i++) {
+      const k = effects[i].kind;
+      if (k !== "arc" && k !== "ring") fxCount++;
+    }
     this.sync(this.fxSprites, fxCount, this.fxLayer);
     let fxIndex = 0;
     for (let i = 0; i < effects.length; i++) {
       const e = effects[i];
-      if (e.kind === "arc") continue;
+      if (e.kind === "arc" || e.kind === "ring") continue;
       const s = this.fxSprites[fxIndex++];
       const p = e.age / e.life;
       s.position.set(e.x, e.y);

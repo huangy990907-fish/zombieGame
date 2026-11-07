@@ -6,14 +6,14 @@
 
 浏览器 2D 关卡制自动对抗小游戏：玩家在关卡里的人类区放置不同武器的人类（各自有库存与恢复），抵御从门/窗涌入的丧尸；开发者可在选关页新建 / 编辑关卡。玩家不直接操控单位，通过放置、切行为模式与速度观察战局；另有独立训练场做单位与武器回归。技术栈 **PixiJS 8 + TypeScript 5.7 + Vite 6**，像素美术与音效全部内置于仓库，无外部 CDN / 在线美术依赖。
 
-当前版本 **0.6.0**。路由只有 5 个：`#/menu`（主菜单）、`#/levels`（选关与关卡编辑入口，`?level=<id>` 进关）、`#/play`（对局）、`#/training`（训练场）、`#/workshop`（工坊编辑器，仅开发者模式可见，玩家模式直达会被挡回主菜单）。
+当前版本 **0.6.0**。路由只有 5 个：`#/menu`（主菜单）、`#/levels`（选关与关卡编辑入口，`?level=<id>` 进关；`#/levels/edit?id=<id>` 是编辑器直达别名，映射到本路由且仅开发者模式可打开）、`#/play`（对局）、`#/training`（训练场）、`#/workshop`（工坊编辑器，仅开发者模式可见，玩家模式直达会被挡回主菜单）。
 
 ## 顶层目录职责
 
 | 目录 | 职责 | 关键约束 |
 |---|---|---|
 | `src/data/` | **唯一数值来源**：实体定义、地图、关卡、默认设置、滑块元数据 | 调平衡只改这里；玩家改动只存覆盖值，读取时合并 |
-| `public/maps/` | **地图运行时来源**：`manifest.json` + `<id>.json` 瓦片地图（内置 `arena` / `test-yard` / `test-multi`） | 内置只读；加载失败回退 `src/data/maps/arena.ts` |
+| `public/maps/` | **地图运行时来源**：`manifest.json` + `<id>.json` 瓦片地图（内置只读 `arena` / `test-yard` / `test-multi`，另有 dev 期保存的工坊图如 `my-map`） | 内置只读；加载失败回退 `src/data/maps/arena.ts` |
 | `public/levels/` | **关卡运行时来源**：`manifest.json` + `<id>.json`（内置 `level-1` 只读） | 关卡只引用 `mapId`，不复制地图数据；加载失败回退 `src/data/levels/level-1.ts` |
 | `src/core/` | 运行时状态与流程：`world.ts` 实体/空间索引/开口，`game.ts` 准备/放置/库存/波次/胜负，`storage.ts` 存档与逐关解锁，`devMode.ts` 开发者模式开关与密码校验 | `world` 只存状态和查询；行为不放这里；`devMode` 只是界面显隐，不是权限系统 |
 | `src/systems/` | 行为与规则：`ai.ts` 人类/丧尸/感染/受击减速推进与追击模式分发，`collision.ts` 人类/丧尸/生成落点共用的阻挡判定，`combat.ts` 开火、命中与减速结算，`flowField.ts` BFS 寻路（支持显式多源），`regions.ts` 按体型的连通区域图与区域邻接边 | 新玩法规则优先落在这里 |
@@ -51,7 +51,7 @@
 | 改选关 / 解锁 | `src/main.ts`（`refreshLevelsPage` / `isLevelUnlocked` / `#/play?level=`）、`src/core/storage.ts`（`recordBeaten` / `loadProgress`） | `src/data/levels/index.ts`（顺序与只读集合）、`src/router.ts`（查询串）、`index.html` + `src/style.css`（列表与锁定态） |
 | 改放置 / 库存 / 胜负 | `src/core/game.ts`（`PlacementResult` / `placeHuman` / `beginBattle` / `regenInventory` / 胜负判定）、`src/ui/inventory.ts`、`src/render/renderer.ts`（`setPlacementZones`） | `src/core/world.ts`（`spawnHuman` 血量覆盖、`solidAt` / `findFreeSpot`）、`index.html` + `src/style.css`（库存面板）、`src/ui/hud.ts`（波次 / 人数读数） |
 | 改关卡编辑器 | `src/levelEditor/page.ts`（表单 / 波次 / 校验 / 保存删除流程）、`scripts/workshop-save-plugin.ts`（`/__levels/save` / `/__levels/delete` 与 `/levels/*.json` 静态服务） | `src/levelEditor/devSave.ts` / `devDelete.ts`（请求封装）、`src/data/levels/schema.ts`（`LevelValidationContext`）、`src/levels.ts`（`getLevelReferences`）、`src/main.ts`（列表按钮与热刷新）、`src/style.css`（`.le-*`）、`vite.config.ts`（build 清理 `.bak`） |
-| 改主菜单 / 路由 | `index.html`、`src/main.ts`、`src/style.css` | `src/router.ts`、`src/levels.ts`、`src/core/devMode.ts`（工坊入口显隐与 `#/workshop` 守卫） |
+| 改主菜单 / 路由 | `index.html`、`src/main.ts`、`src/style.css` | `src/router.ts`（含 `#/levels/edit` 别名映射）、`src/levels.ts`、`src/core/devMode.ts`（工坊入口显隐、`#/workshop` 与 `#/levels/edit` 的开发者模式守卫） |
 
 ## 新增实体「三件套」流程（缺一项视为未完成）
 
@@ -83,28 +83,28 @@ npx tsc --noEmit  # 单项类型检查
 ```
 
 - **必须走 HTTP 服务**：不能双击 `index.html`，`file://` 下模块与资源会加载失败。
-- 启动后控制台应出现 `[audio] 预加载完成`；若某 mp3 缺失会静默降级，不抛错。地图正常路径应出现 `[maps] 已加载「arena」1184×720` 与 `[maps] 内置地图就绪 1/1`；关卡正常路径应出现 `[levels] 关卡就绪 N 个（清单 N 项）`。出现 `[maps] ... 回退 TS 定义` 或 `[levels] ... 使用 TS 兜底关卡` 说明 JSON / 校验失败，选关页顶部会有 `.map-notice` 提示。
+- 启动后控制台应出现 `[audio] 预加载完成`；若某 mp3 缺失会静默降级，不抛错。地图正常路径应出现 `[maps] 已加载「arena」1184×720` 与 `[maps] 内置地图就绪 N/N（默认「arena」）`（N 为 manifest 条目数，就绪数与 manifest 一致）；关卡正常路径应出现 `[levels] 关卡就绪 N 个（清单 N 项）`。出现 `[maps] ... 回退 TS 定义` 或 `[levels] ... 使用 TS 兜底关卡` 说明 JSON / 校验失败，选关页顶部会有 `.map-notice` 提示。
 - **训练场是主要回归入口**：可自由生成僵尸/人类、破门窗、调速度、逐帧单步，验证 AI、命中、感染、倒地与窗洞通行。
 - `#/play` 冒烟：主菜单「放置抵抗」→ `#/levels` → 点已解锁关 → 准备阶段可见人类区 / 僵尸区与库存面板 → 放置人类 → 开始 → 波次推进 → 无 console error。未放置人类点「开始」应只提示、不判负。
-- 开发者模式验收：玩家模式 `#/menu` 无「地图工坊」按钮；设置里输入 `VITE_DEV_PASSWORD`（默认 `zb9993`）后入口出现并可进 `#/workshop`；退出后入口消失、直达 `#/workshop` 被挡回主菜单。开发者模式下 `#/levels` 全解锁并出现「新建 / 编辑 / 复制 / 删除」，内置教学关只能「复制」。密码放 `.env.local`，不要提交。
+- 开发者模式验收：玩家模式 `#/menu` 无「地图工坊」按钮；设置里输入 `VITE_DEV_PASSWORD`（默认 `zb9993`）后入口出现并可进 `#/workshop`；退出后入口消失，直达 `#/workshop` 被挡回主菜单、直达 `#/levels/edit?id=<id>` 被挡回 `#/levels` 并提示。开发者模式下 `#/levels` 全解锁并出现「新建 / 编辑 / 复制 / 删除」，内置教学关只能「复制」，`#/levels/edit?id=<id>` 可直接打开编辑器。密码放 `.env.local`，不要提交。
 - 关卡编辑器验收：新建关 → 填名称 → 保存 → 列表热刷新出现新关；重名被拦截；删除后 manifest 与列表恢复；`npm run build` 后 `dist` 搜不到 `__levels/save` / `__levels/delete` / `保存到项目（dev）` / `删除关卡`，`npm run preview` 下接口 404。
 - 像素外观改动先看 `sprites.html`；单位尺寸由 `src/render/pixel.ts` 的 `VISUAL_SCALE = 1.5` 与 `Zombie.bodyDiameter`（= 2 × 碰撞半径）决定。
 - 0.4.2 规则：**开口净宽 < 单位身体直径即不可通行**（门 80、窗 16；普通 11 / 狂奔 9 / 胖子 22）。通行判定口径 = 可见体宽 = 2 × 碰撞半径；渲染盒宽 = 2r × `VISUAL_SCALE`（普通 16.5 / 狂奔 13.5 / 胖子 33），1.5 只补精灵透明留白，不要叠加到半径上。胖子只能走门，流场与移动碰撞都按该通用规则过滤，不是写死特例。
 - 0.4.3 规则：**人类血量是真实生命值**（`HUMAN_DEF.hp = 100`，可被设置/训练场覆盖），丧尸每次撕咬按 `Zombie.damage` 扣血，`hp <= 0` 才设置 `turning`；turning 期间 `alive` 仍为 true（`livingHumans` 口径不变）。训练场 `invincible` 完全免疫掉血与异变。
 - 0.4.3 规则：**受击减速**由 `combat.ts` 的 `applyHitSlow` 写入 `slowMul/slowTimer`，`ai.ts` 每帧线性恢复并乘到 hunt/wander 移速；每点伤害 4%、最低 40%，0.6 秒恢复，不叠加只取最强并刷新计时；大体型（`bodyDiameter >= 20`）幅度减半、最低 70%；喷火每秒最多结算一次。受击反馈是 `flash > 0` 时渲染层加法混合提亮 0.08 秒。
 - 0.4.3 规则：**电击枪** `tesla` 是独立 hitscan（射线投影 + 目标半径 + 墙体/完好门窗视线），不复用 Bullet 扫掠；首个目标 96px 内无其他僵尸时 ×2.2，否则向最近可见僵尸逐只跳跃，最多 5 只（含首个），每跳衰减到 75%。参数集中在 `src/data/weapons/tesla.ts` 的 `tesla` 字段。闪电是 `EffectKind = "arc"` 的折线（`Effect.points`），每跳一段，渲染在 `renderer.ts` 的 `renderArcs()`；训练场链式读数走 `World.onTeslaVolley` 钩子，独立于 DPS 表。
-- 0.5.0 规则（阶段 0）：地图运行时来源是 `public/maps/manifest.json` + `<id>.json`；`main.ts` 先 `await loadBuiltinMaps()` 再构造任何依赖地图的实例。瓦片固定 `74×45` / `16px`，加载时 `compileTilesToMapDef()` 编译回 `walls[] + openings[]`，World / 流场 / 渲染结构不变。每扇门窗有独立 `id`，玩家覆盖仍按门 / 窗种类生效。加载失败或校验不通过时回退 `src/data/maps/arena.ts`（0.4.3 的 `1180 × 720` / 窗宽 18），正常路径为 `1184 × 720` / 窗宽 16。
-- 0.5.0 规则（阶段 1B）：`assignPosts()` 不依赖开口下标与方位，门岗按门洞长度分名额、窗岗按窗净宽推导、预备队按开局人数 20%，坐标由开口中心与房间几何推导；出怪只从多块 `spawn` / 可选 `windowSpawn.top/bottom` 按面积加权。`World` 按每扇门窗自身 JSON 的 `maxHp/passSpeed` 初始化，`setActiveMap()` 让 `settings()` / `openingTuning()` 跟随当前地图；玩家覆盖仍按门 / 窗种类优先。内置新增 `test-multi`（2 门 3 窗）。
+- 0.5.0 规则（阶段 0）：地图运行时来源是 `public/maps/manifest.json` + `<id>.json`；`main.ts` 先 `await loadBuiltinMaps()` 再构造任何依赖地图的实例。瓦片固定 `74×45` / `16px`，加载时 `compileTilesToMapDef()` 编译回 `walls[] + openings[]`，World / 流场 / 渲染结构不变。每扇门窗有独立 `id`，玩家覆盖仍按门 / 窗种类生效。加载失败或校验不通过时回退 `src/data/maps/arena.ts` 的 TS 定义。
+- 0.5.0 规则（阶段 1B）：出怪只从多块 `spawn` / 可选 `windowSpawn.top/bottom` 按面积加权。`World` 按每扇门窗自身 JSON 的 `maxHp/passSpeed` 初始化，`setActiveMap()` 让 `settings()` / `openingTuning()` 跟随当前地图；玩家覆盖仍按门 / 窗种类优先。内置新增 `test-multi`（2 门 3 窗）。
 - 0.5.0 规则（阶段 1A）：`Game` / `TrainingSession` 构造与 `TrainingSession.reset()` 接受 `MapDef | id`，`Game.start()` 优先级为「显式选择 > `LevelDef.mapId` > 当前地图」；`resolveMap()` 对不存在的 id 输出 warning 并回退 `DEFAULT_MAP`，`main.ts` 用 `.map-notice` 做可见提示。换图时 `createWorld(map)` 重建 World / 流场 / 空间索引，`Renderer.setMap()` 清空并重画地板、墙体、训练场装饰与门窗层。临时选图入口为 `?map=<id>`；内置只读地图为 `arena`、`test-yard` 与 `test-multi`。
-- 0.5.0 规则（阶段 2）：工坊编辑器只在 `#/workshop` 打开，整页 DOM 覆盖层；入口由阶段 4 的开发者模式控制（玩家模式不显示）。文档用 `Uint8Array` 存瓦片，历史快照是 `serializeDoc()` 的 JSON 字符串；门窗拖拽宽度按格（16px 整数倍），默认值可逐扇改。校验共用 `validateMapJson()`，新增「门窗两侧可通行」规则；带坐标错误可点击跳格。草稿存 localStorage（`zombieGame.workshop.draft.v1`），导出 JSON 可直接进 `public/maps`；内置图只读，必须「另存为副本」。试玩把草稿存 `zombieGame.workshop.preview.v1`，`main.ts` 在 `loadBuiltinMaps()` 后用 `compileTilesToMapDef()` 编译并 `registerRuntimeMap()` 注册为 `workshop-draft`，再进 `?map=workshop-draft#/training`，不落盘。
+- 0.5.0 规则（阶段 2）：工坊编辑器只在 `#/workshop` 打开，整页 DOM 覆盖层；入口由阶段 4 的开发者模式控制（玩家模式不显示）。文档用 `Uint8Array` 存瓦片，历史快照是 `serializeDoc()` 的 JSON 字符串；门窗拖拽宽度按格（16px 整数倍），默认值可逐扇改。校验共用 `validateMapJson()`，新增「门窗两侧可通行」规则；带坐标错误可点击跳格。草稿存 localStorage（`zombieGame.workshop.draft.v1`），导出 JSON 可直接进 `public/maps`；内置图只读，必须用「复制当前地图」得到副本再编辑。试玩把草稿存 `zombieGame.workshop.preview.v1`，`main.ts` 在 `loadBuiltinMaps()` 后用 `compileTilesToMapDef()` 编译并 `registerRuntimeMap()` 注册为 `workshop-draft`，再进 `?map=workshop-draft#/training`，不落盘。
 - 0.5.0 规则（阶段 3）：训练场面板顶部「地图」下拉是唯一玩家可见的选图入口，选项由 `MAP_LIST` + `BUILTIN_MAP_IDS` 分为「内置地图」与「工坊地图」两组（当前图未注册时补一组，显示名与 id 转义）。`TrainingPanel` 新增第三参 `onMapChange`，`main.ts` 的 `switchTrainingMap()` 负责 `training.reset(id)` + `reportMapFallback()` + `renderer.setMap()`；`reset()` 会重建 World / 流场 / 空间索引并清空单位、选中、armed、tool、计时与全部读数，**换图不共用会话**（房间与人类区几何按图不同，跨图保留单位可能落墙里，读数也会混算）。`#/play` 不使用该下拉，仍按 `Game.start()` 优先级（显式选择 > `LevelDef.mapId` > 当前地图）绑定；`level-1` 的 `mapId` 仍是 `arena`，选关节点 / 详情 / 开始按钮显示地图名。
 - 0.5.0 规则（阶段 4）：开发者模式是**纯界面开关，不是安全边界**。`src/core/devMode.ts` 用 localStorage key `zombieGame.devMode.v1` 持久化；密码优先读 `.env.local` 的 `VITE_DEV_PASSWORD`（该文件被 git 忽略），缺失/为空时回退 `zb9993`，明文比较。主菜单 `#btnWorkshop` 默认 `hidden`，只由 `main.ts` 的 `syncDevModeUI()` 按状态切换；`applyRoute("workshop")` 在未开启开发者模式时用 `.map-notice` 提示并 `router.go("menu")`，退出开发者模式时若仍在工坊页也会自动回主菜单。玩家模式完全看不到工坊入口，但玩家改 localStorage 或直接构造 URL 仍可绕过。
 - 0.5.1 规则：工坊「保存到项目」**只在开发态**。`vite.config.ts` 注册 `scripts/workshop-save-plugin.ts`（`apply: "serve"`），只在 `configureServer` 挂 `POST /__workshop/save`；默认只接受 loopback（`127.0.0.1` / `::1` / `::ffff:127.0.0.1`），非本机 403，远程开发需显式设 `VITE_WORKSHOP_ALLOW_REMOTE=1`。
 - 0.5.1 规则：服务端二次校验顺序 = JSON body → id 白名单（`^[a-z0-9][a-z0-9_-]{0,31}$`、保留 id `workshop-draft`）→ `map.id` 与请求 id 一致 → `validateMapJson()` + `schemaVersion === MAP_SCHEMA_VERSION` → manifest 读取与结构 → **名称全局唯一（trim、区分大小写，遍历 manifest 下所有地图 JSON 的 `name`，排除自身 id；冲突 409 `name_taken`）** → 内置只读图 403（`entry.readOnly !== false`）→ 重名未确认 409 → 备份 → 原子写入 → manifest 登记。覆盖前备份到 `public/maps/.bak/<id>-<时间戳>.json`，每个 id 只留最近 5 份；`.bak/` 与 `*.tmp` 已进 `.gitignore`。写入失败用备份回滚（无备份则删新文件），进程内串行队列避免并发互相覆盖；manifest 已有条目只更新 `file` / `readOnly:false`，不追加重复项。
 - 0.5.1 规则：工坊编辑器按钮是**空占位 HTML** `<button id="wsSaveProject" hidden disabled>` / `<button id="wsDeleteMap" hidden disabled>`，只在 `import.meta.env.DEV` 下动态 `import("./devSave")` / `import("./devDelete")` 后设置文案 / 显示 / 绑定；生产构建不加载这两个模块，`dist` 里不应出现 `__workshop/save`、`__workshop/delete`、「保存到项目」与「删除当前地图」。
-- 0.5.1 规则：保存成功后 `resetWorkshopCatalog()` 清 manifest / 地图 JSON 缓存 → 工坊内置图下拉重载 → `main.ts` 回调 `await loadBuiltinMaps()` 后 `trainingPanel.reloadMaps(savedId)`；不整页 reload。若 `savedId` 正是当前训练图，面板提示「切到其它地图再切回」（World 不会因保存自动重建）。
-- 0.5.1 规则：工坊地图删除只在开发态。`scripts/workshop-save-plugin.ts` 额外挂 `POST /__workshop/delete`（同样 loopback 限制、同一串行队列）：id 白名单 → 未知 id 404 → `entry.readOnly !== false` 403 → `getMapReferences()` 命中 409（当前 `level-1` → `arena`，未来放置 / 闯关模式通过 `registerMapReference()` 登记）→ 备份到 `.bak/`（与保存共用每 id 最近 5 份）→ 移除 manifest 条目（2 空格缩进 + 末尾换行）→ 删除文件；写 manifest 失败会回滚。`src/workshop/devDelete.ts` 只在 DEV 动态加载，按钮在 `#wsBuiltinSelect` 旁；客户端也会用同一 `getMapReferences()` 禁用删除并显示原因。
-- 0.5.1 规则：删除成功后 `resetWorkshopCatalog()` + `loadBuiltinCatalog()` 重载工坊下拉，`main.ts` 的 `onDeleted` 重新 `await loadBuiltinMaps()`（会把已删 id 从 `MAPS` / `BUILTIN_MAP_IDS` / `READONLY_MAP_IDS` 移除）并刷新训练场下拉；若删的是当前训练图，立即 `switchTrainingMap("arena")` 重建 World / 流场 / 静态层，不整页 reload。
+- 0.5.1 规则：保存成功后 `resetWorkshopCatalog()` 清 manifest / 地图 JSON 缓存 → 工坊左侧地图列表重载 → `main.ts` 回调 `await loadBuiltinMaps()` 后 `trainingPanel.reloadMaps(savedId)`；不整页 reload。若 `savedId` 正是当前训练图，面板提示「切到其它地图再切回」（World 不会因保存自动重建）。
+- 0.5.1 规则：工坊地图删除只在开发态。`scripts/workshop-save-plugin.ts` 额外挂 `POST /__workshop/delete`（同样 loopback 限制、同一串行队列）：id 白名单 → 未知 id 404 → `entry.readOnly !== false` 403 → `getMapReferences()` 命中 409（当前 `level-1` → `arena`，未来放置 / 闯关模式通过 `registerMapReference()` 登记）→ 备份到 `.bak/`（与保存共用每 id 最近 5 份）→ 移除 manifest 条目（2 空格缩进 + 末尾换行）→ 删除文件；写 manifest 失败会回滚。`src/workshop/devDelete.ts` 只在 DEV 动态加载，删除按钮在右侧面板（`#wsDeleteMap`，位于地图列表 / 画笔左栏之外）；客户端也会用同一 `getMapReferences()` 禁用删除并显示原因。
+- 0.5.1 规则：删除成功后 `resetWorkshopCatalog()` + `loadBuiltinCatalog()` 重载工坊左侧地图列表，`main.ts` 的 `onDeleted` 重新 `await loadBuiltinMaps()`（会把已删 id 从 `MAPS` / `BUILTIN_MAP_IDS` / `READONLY_MAP_IDS` 移除）并刷新训练场下拉；若删的是当前训练图，立即 `switchTrainingMap("arena")` 重建 World / 流场 / 静态层，不整页 reload。
 - 0.5.1 规则：地图**名称**（`name`）去首尾空格后 1–24 字，全局唯一且区分大小写；id 由系统生成（`ws-<时间戳>-<4位随机十六进制>`），冲突自动换一个，用户不填写。客户端用已加载目录预校验（`validationErrors()`），服务端再读 manifest 下所有 JSON 二次校验；删除后名称释放可复用。旧 JSON 没有 `name` 时显示 id，不阻断加载。
 - 0.5.1 规则：人类活动区 `humanZone` 与僵尸区 `spawn` 都支持**多块矩形**（JSON 数组；读取兼容旧版单个对象，保存统一写数组，`schemaVersion` 仍为 1）。语义按并集：僵尸区沿用面积加权出怪；人类活动区只决定出生点（按面积加权落在并集内），不限制后续活动范围，移动夹取仍用 `humanBounds`（由 `room` 内缩推导）。工坊用人类 / 僵尸画笔新增矩形，点选已有矩形后拖动可调整位置，选中后 `Delete` / `Backspace` 删除；画布与区域列表选中联动。
 - 0.5.1 规则（dev 静态服务缺口）：Vite 只在启动时把已有 public 文件收进 `publicFiles`，之后新建的 `public/maps/*.json` 会被内部静态中间件跳过并落到 SPA fallback（返回 index.html）。插件在 `configureServer` 里**前置**一个只读中间件，直接从磁盘返回 `/maps/*.json`（`Content-Type: application/json; charset=utf-8`、`Cache-Control: no-cache`），这是「保存后立刻可读 / 热刷新」的前提；该中间件同样只在 dev 存在。
@@ -139,7 +139,7 @@ npx tsc --noEmit  # 单项类型检查
 - breach 追击的区域层级只看“门窗通不通”，破拆耗时按 `maxHp / buildBiteDamage * bite` 估算，未计入多只僵尸同时啃食加速；同区追击用流场绕墙，不处理“同区但被内部墙隔开需要绕远”的额外代价。`direct` 模式仍是旧的全局最近人类直扑。
 - 无 BGM；只有一次性音效，且同一事件全局限频，**没有随机音效变体**（音高/时长变化）。
 - `weapon-reload`、`human-hurt` 两个事件已声明、文件已备好，但当前没有调用点。
-- 内置只有 1 个关卡（`level-1`「初次尸潮」，8 波共 1186 只）与 3 张只读地图（`arena` / `test-yard` / `test-multi`）；玩家模式选关页只显示已解锁关卡，开发者模式全关解锁并在列表提供「新建 / 编辑 / 复制 / 删除」，内置教学关只能复制。新保存的关卡会直接进入选关列表，但不会自动产生新的游玩模式入口。地图 JSON 支持固定 `74×45` / `16px` 画布、任意数量门窗（至少 1 扇门）与多块人类区 / 僵尸区。工坊与关卡编辑器入口都只在开发者模式下显示；玩家模式直达 `#/workshop` 会被挡回主菜单，`#/levels` 只显示已解锁关卡。这些只是界面显隐，不是安全边界。训练场已可选图，`#/play` 仍只跑关卡绑定地图、没有对局内选图 UI，调试仍可用 `?map=<id>`。
+- 内置教学关 1 关（`level-1`「初次尸潮」，8 波共 1186 只，只读）与 3 张只读地图（`arena` / `test-yard` / `test-multi`），另有 dev 期保存的工坊图（如 `my-map`）。开发者可在 dev 下新增关卡 / 地图，保存后直接进入对应列表，但不会自动产生新的游玩模式入口。玩家模式选关页只显示已解锁关卡，开发者模式全关解锁并在列表提供「新建 / 编辑 / 复制 / 删除」，内置教学关只能复制。地图 JSON 支持固定 `74×45` / `16px` 画布、任意数量门窗（至少 1 扇门）与多块人类区 / 僵尸区。工坊与关卡编辑器入口都只在开发者模式下显示；玩家模式直达 `#/workshop` 会被挡回主菜单、直达 `#/levels/edit?id=<id>` 会被挡回 `#/levels` 并提示，`#/levels` 只显示已解锁关卡。这些只是界面显隐，不是安全边界。训练场已可选图，`#/play` 仍只跑关卡绑定地图、没有对局内选图 UI，调试仍可用 `?map=<id>`。
 - 正式对局的人类补充完全依赖库存恢复，不再有「每波补 1 人」；库存恢复在准备阶段也走表，暂停时不恢复。
 - 胜负目前各只有一种：胜利 = 打完全部配置波次，失败 = 已放置过人类后场上无人类；「闯关模式」及其它胜负条件只预留了引用 / 进度 key，尚未实现。
 - 关卡人类种类严格等于武器种类，不能自定义新职业或给同一武器多档血量；编辑器不能改关卡 id，也不能编辑教学关的 `settings` 兼容块（需手改 JSON）。

@@ -124,9 +124,15 @@ npx tsc --noEmit  # 单项类型检查
 - 0.6.0 规则（关卡编辑器）：`src/levelEditor/page.ts` 是整页弹层，`main.ts` 只在 `import.meta.env.DEV` 动态导入并实例化（生产构建不包含编辑器代码 / 接口路径 / 保存删除文案）。列表按钮 → `levelEditor.open("new"|"edit"|"copy", id)`；只读关只给「复制」。保存 / 删除后 `resetLevelCatalog() → loadLevels() → refreshLevelDefs() → refreshLevelsPage()` 热刷新，不整页 reload。
 - 0.6.0 规则（关卡 dev 接口）：`scripts/workshop-save-plugin.ts` 在 dev 注册 `/__levels/save` 与 `/__levels/delete`，与工坊共用 loopback 限制、串行队列、原子写入与 `.bak`（每 id 最近 5 份）；服务端校验顺序 = JSON → id 白名单 → `level.id` 一致 → `validateLevelJson`（地图 id 来自地图 manifest）→ 名称全局唯一（trim、区分大小写，冲突 409 `name_taken`）→ 只读保护 → 重名确认 → 备份 → 写入 → manifest 登记。删除额外查 `getLevelReferences()`。`.bak` 与 `*.tmp` 已进 `.gitignore`，`vite.config.ts` 的 build-only 插件会从 `dist` 删除 `.bak`。
 - 0.6.0 规则（名称）：关卡 `name` 去首尾空格后 1–24 字、全局唯一且区分大小写；id 由系统生成（`lv-<时间戳>-<4位随机十六进制>`），用户不填写；删除后名称释放。
+- 0.6.0 规则（局内布局）：play 路由给 `body` 加 `placement`；`.frame` 改为两列 grid（画布 `1fr` + 库存 252px），`.inv-panel` 用 `grid-area: inv`，画布按剩余宽度等比缩放，不再覆盖；`max-width: 900px` 时 `.frame` 改 flex 纵向、面板 `align-self: stretch` 底部横排。`InventoryPanel.syncStartButton()` 在非准备阶段直接 `remove()`「开始」按钮，重开回到 prepare 时重建，不靠禁用或 `hidden` 类。
+- 0.6.0 规则（模式差异）：开发者专属按钮一律按 `isDevModeEnabled()` 条件渲染，玩家模式整组不渲染（不是禁用变灰）。`#/levels/edit?id=<id>` 由 router 映射到 `levels` 路由：未开开发者模式 `showMapNotice` 后 `router.go("levels")`，已开启则编辑（只读关转复制 / 未知 id 转新建）。`applyRoute` 离开 `levels` 时自动 `levelEditor.close()`，`syncDevModeUI` 关闭开发者模式时也会关闭编辑器。
+- 0.6.0 规则（工坊地图列表）：左栏 `#wsMapGroups` 常驻列表，分「内置地图（只读）」与「我的地图」，项只显示名称（内置图带只读标记）。`loadMapFromCatalog()` 切图前走 `confirmDiscard()`：`dirty` 在 `handleDocChange`、名称输入与门窗参数编辑时置位，切图 / 新建 / 复制 / 显式保存后清零。新建用 `createBlankDoc()`，复制用 `cloneDoc()`（内置图也可复制），副本名 `uniqueName(原名 + " 副本")` 且参与全局唯一校验；切图同时 `resetEditorState()` 清选中项与工具。原「载入内置图」下拉已合并并移除，不要重新加回。
 
 ## 已知限制（0.6.0 现状）
 
+- 局内布局在窗口宽度 ≤ 900px 时库存面板改为底部横排；880×720 这类更小的窗口需要纵向滚动才能看到完整面板。
+- 开发者 / 玩家模式差异只是界面显隐（`isDevModeEnabled()` 读 localStorage），玩家改 localStorage 仍可绕过；生产构建另外通过动态导入剥离编辑器代码与 dev 接口。
+- 工坊「未保存改动」以 `dirty` 标记为准（自上次载入 / 显式保存后是否有编辑），自动写入 localStorage 的草稿不算“已保存”；切图确认后草稿会被新图覆盖。
 - 人类会真实掉血，但血量归零不会立刻死亡，而是进入原有的 2.8 秒转化倒计时；训练场可调人类血量与僵尸攻击力来观察。
 - 电击枪链式最多 5 只（含首个），每跳都要求视线可见：未破的门窗会挡住后续跳跃；链式半径 / 上限 / 衰减 / 单体加成只有 `src/data/weapons/tesla.ts` 一处参数，没有全局滑块。首个目标的单体加成按“96px 内是否有其他存活僵尸”判断，不检查它们是否被墙挡住。
 - 僵尸攻击力目前只有训练场按单位调整，全局滑块表未登记 `damage`；默认值在 `src/data/zombies/*.ts`。

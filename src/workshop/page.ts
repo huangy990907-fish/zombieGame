@@ -82,7 +82,7 @@ export class WorkshopPage {
   private readonly openingsEl: HTMLElement;
   private readonly zonesEl: HTMLElement;
   private readonly saveStatusEl: HTMLElement;
-  private readonly builtinSelect: HTMLSelectElement;
+  private readonly mapGroupsEl: HTMLElement;
   private readonly toastEl: HTMLElement;
   private readonly playBtn: HTMLButtonElement;
   private readonly exportBtn: HTMLButtonElement;
@@ -95,6 +95,8 @@ export class WorkshopPage {
   private openingDefaults: OpeningDefaults = { ...OPENING_DEFAULTS };
   private builtinCatalog: BuiltinMapEntry[] = [];
   private catalogLoaded = false;
+  /** 是否相对上一次载入 / 显式保存有改动（切换地图前用来弹确认） */
+  private dirty = false;
   private hasActivated = false;
   private saveTimer = 0;
   private toastTimer = 0;
@@ -133,6 +135,13 @@ export class WorkshopPage {
 
         <div class="ws-body">
           <aside class="ws-tools">
+            <h3>地图列表</h3>
+            <div class="ws-map-groups" id="wsMapGroups"></div>
+            <div class="ws-map-actions">
+              <button id="wsNewMap">＋ 新建地图</button>
+              <button id="wsCopyMap">⧉ 复制当前地图</button>
+            </div>
+
             <h3>画笔</h3>
             <div class="ws-palette" id="wsPalette"></div>
             <p class="ws-hint" id="wsToolHint"></p>
@@ -195,18 +204,12 @@ export class WorkshopPage {
               <h3>草稿 / 地图文件</h3>
               <div class="ws-save-status" id="wsSaveStatus">草稿未保存</div>
               <div class="ws-btn-grid">
-                <button id="wsNew">＋ 新建空白</button>
                 <button id="wsSaveNow">💾 保存草稿</button>
-                <button id="wsCopy">另存为副本</button>
                 <button id="wsExport">⬇ 导出 JSON</button>
                 <button id="wsImportBtn">⬆ 导入 JSON</button>
                 <input type="file" id="wsImportFile" accept="application/json,.json" hidden />
                 <button id="wsPlay" class="primary" disabled title="校验通过后可试玩">▶ 用当前图试玩</button>
                 <button id="wsSaveProject" class="ws-dev-save" hidden disabled></button>
-              </div>
-              <div class="ws-builtin">
-                <select id="wsBuiltinSelect"><option value="">载入内置图…</option></select>
-                <button id="wsLoadBuiltin">载入</button>
               </div>
               <button id="wsDeleteMap" class="ws-dev-delete" hidden disabled></button>
               <p class="ws-hint">
@@ -236,7 +239,7 @@ export class WorkshopPage {
     this.openingsEl = this.query<HTMLElement>("#wsOpenings");
     this.zonesEl = this.query<HTMLElement>("#wsZones");
     this.saveStatusEl = this.query<HTMLElement>("#wsSaveStatus");
-    this.builtinSelect = this.query<HTMLSelectElement>("#wsBuiltinSelect");
+    this.mapGroupsEl = this.query<HTMLElement>("#wsMapGroups");
     this.toastEl = this.query<HTMLElement>("#wsToast");
     this.playBtn = this.query<HTMLButtonElement>("#wsPlay");
     this.exportBtn = this.query<HTMLButtonElement>("#wsExport");
@@ -303,6 +306,7 @@ export class WorkshopPage {
       const draft = loadWorkshopDraft();
       if (draft) {
         this.editor.replaceDoc(draft.doc, true);
+        this.dirty = false;
         this.syncMeta();
         this.refreshValidation();
         this.refreshOpenings();
@@ -353,6 +357,7 @@ export class WorkshopPage {
   private bindHeader(): void {
     this.nameInput.addEventListener("input", () => {
       this.editor.getDoc().name = this.nameInput.value;
+      this.dirty = true;
       this.refreshValidation();
       this.scheduleSave();
     });
@@ -419,10 +424,10 @@ export class WorkshopPage {
   private syncReadonlyState(): void {
     const doc = this.editor.getDoc();
     this.readonlyBadge.classList.toggle("hidden", doc.builtinId === null);
-    this.readonlyBadge.textContent = doc.builtinId ? "内置只读 · 请另存为副本" : "";
+    this.readonlyBadge.textContent = doc.builtinId ? "内置只读 · 复制后可编辑" : "";
     const readonly = isReadOnlyMap(doc.id);
     this.exportBtn.disabled = readonly;
-    this.exportBtn.title = readonly ? "内置图不能覆盖，请先另存为副本" : "导出为 public/maps 可用的 JSON";
+    this.exportBtn.title = readonly ? "内置图不能覆盖，请先复制为我的地图" : "导出为 public/maps 可用的 JSON";
     this.syncDevDeleteState();
   }
 
@@ -473,6 +478,7 @@ export class WorkshopPage {
   // ============================================================
 
   private handleDocChange(syncInputs = false): void {
+    this.dirty = true;
     if (syncInputs) this.syncMeta();
     this.updateHistoryButtons();
     this.refreshValidation();
@@ -643,6 +649,7 @@ export class WorkshopPage {
         const value = Math.max(1, Math.round(Number(hp.value) || 1));
         opening.maxHp = value;
         hp.value = String(value);
+        this.dirty = true;
         this.refreshValidation();
         this.scheduleSave();
       });
@@ -660,6 +667,7 @@ export class WorkshopPage {
         value = Math.max(0.05, Math.min(1, value));
         opening.passSpeed = Number(value.toFixed(2));
         pass.value = String(opening.passSpeed);
+        this.dirty = true;
         this.refreshValidation();
         this.scheduleSave();
       });
@@ -751,28 +759,15 @@ export class WorkshopPage {
   // ============================================================
 
   private bindIo(): void {
-    this.query<HTMLButtonElement>("#wsNew").onclick = () => {
-      if (!confirm("新建一张空白地图？当前内容会先保存进草稿，可用撤销或重新载入找回部分内容。")) {
-        return;
-      }
-      const doc = createBlankDoc();
-      doc.id = this.nextWorkshopId();
-      doc.name = this.uniqueName(doc.name);
-      this.editor.replaceDoc(doc, true);
-      this.syncMeta();
-      this.refreshValidation();
-      this.refreshOpenings();
-      this.refreshZones();
-      this.saveDraftNow();
-      this.showToast("已新建空白地图");
-    };
+    this.query<HTMLButtonElement>("#wsNewMap").onclick = () => this.newBlankMap();
 
     this.query<HTMLButtonElement>("#wsSaveNow").onclick = () => {
       this.saveDraftNow();
+      this.dirty = false;
       this.showToast("草稿已保存到 localStorage");
     };
 
-    this.query<HTMLButtonElement>("#wsCopy").onclick = () => this.saveAsCopy();
+    this.query<HTMLButtonElement>("#wsCopyMap").onclick = () => this.saveAsCopy();
 
     this.exportBtn.onclick = () => this.exportJson();
 
@@ -783,10 +778,6 @@ export class WorkshopPage {
       const file = importFile.files?.[0];
       importFile.value = "";
       if (file) void this.importJsonFile(file);
-    };
-
-    this.query<HTMLButtonElement>("#wsLoadBuiltin").onclick = () => {
-      void this.loadSelectedBuiltin();
     };
 
     this.playBtn.onclick = () => this.playCurrentMap();
@@ -813,38 +804,147 @@ export class WorkshopPage {
     return `已自动保存 ${hh}:${mm}:${ss}`;
   }
 
+  /** 复制当前地图（内置图也可复制）：名称自动生成并参与全局唯一校验，之后可改 */
   private saveAsCopy(): void {
     const doc = this.editor.getDoc();
-    const suggested = this.uniqueName(`${doc.name} 副本`);
-    const input = prompt(
-      "另存为副本：输入地图名称（去首尾空格后 1–24 字，名称全局唯一）\nid 由系统自动生成",
-      suggested,
-    );
-    if (input === null) return;
-    const name = input.trim();
-    if (!name) {
-      this.showToast("名称不能为空", "bad");
-      return;
-    }
-    if (name.length > 24) {
-      this.showToast(`名称最多 24 字（当前 ${name.length} 字）`, "bad");
-      return;
-    }
-    if (this.nameTaken(name)) {
-      this.showToast(`名称「${name}」已被其它地图使用，请换一个`, "bad");
-      return;
-    }
+    const base = doc.name.trim() || "未命名地图";
+    const name = this.uniqueName(`${base} 副本`);
     const copy = cloneDoc(doc);
     copy.id = this.nextWorkshopId();
     copy.name = name;
     copy.builtinId = null;
     this.editor.replaceDoc(copy, false);
+    this.dirty = false;
     this.syncMeta();
     this.refreshValidation();
     this.refreshOpenings();
     this.refreshZones();
     this.saveDraftNow();
-    this.showToast(`已另存为副本「${name}」（id ${copy.id}）`);
+    this.renderMapList();
+    this.showToast(`已复制为「${name}」，可直接改名后保存`);
+  }
+
+  /** 新建空白地图（固定 74×45 / 16px），替换当前画布 */
+  private newBlankMap(): void {
+    if (!this.confirmDiscard()) return;
+    const doc = createBlankDoc();
+    doc.id = this.nextWorkshopId();
+    doc.name = this.uniqueName(doc.name);
+    this.editor.replaceDoc(doc, true);
+    this.dirty = false;
+    this.resetEditorState();
+    this.syncMeta();
+    this.refreshValidation();
+    this.refreshOpenings();
+    this.refreshZones();
+    this.saveDraftNow();
+    this.renderMapList();
+    this.showToast(`已新建空白地图「${doc.name}」`);
+  }
+
+  /** 列表项点击：切换到对应地图（内置只读 / 我的地图都走这里） */
+  private async loadMapFromCatalog(id: string): Promise<void> {
+    const doc = this.editor.getDoc();
+    if (doc.id === id && this.builtinCatalog.some((e) => e.id === id)) {
+      // 已经是这张图且没有改动：点击只刷新列表选中态；有改动则允许重新载入
+      if (!this.dirty) {
+        this.renderMapList();
+        return;
+      }
+    }
+    if (!this.confirmDiscard()) return;
+    try {
+      const json = await loadBuiltinMapJson(id);
+      const entry = this.builtinCatalog.find((item) => item.id === id);
+      const docNext = fromMapJson(json);
+      docNext.builtinId = entry?.readOnly ? id : null;
+      this.editor.replaceDoc(docNext, true);
+      this.dirty = false;
+      this.resetEditorState();
+      this.syncMeta();
+      this.refreshValidation();
+      this.refreshOpenings();
+      this.refreshZones();
+      this.saveDraftNow();
+      this.renderMapList();
+      if (entry?.readOnly) {
+        this.showToast(`已载入内置图「${docNext.name}」；只读，导出前请先复制`);
+      } else {
+        this.showToast(`已切换到「${docNext.name}」`);
+      }
+    } catch (err) {
+      this.showToast(
+        `载入失败：${err instanceof Error ? err.message : String(err)}`,
+        "bad",
+      );
+    }
+  }
+
+  /** 切换地图前：有未保存改动时二次确认 */
+  private confirmDiscard(): boolean {
+    if (!this.dirty) return true;
+    return confirm("当前地图有未保存的改动，切换后将丢弃。确定继续？");
+  }
+
+  /** 切图后重置选中项与工具状态 */
+  private resetEditorState(): void {
+    this.selectedOpeningId = null;
+    this.selectedZone = null;
+    this.editor.setSelectedOpening(null);
+    this.editor.setSelectedZone(null);
+    this.selectTool("wall");
+  }
+
+  /** 左侧常驻地图列表：内置（只读）与我的地图分组，只显示名称 */
+  private renderMapList(): void {
+    if (!this.catalogLoaded) {
+      this.mapGroupsEl.innerHTML = '<p class="ws-hint">地图目录加载中…</p>';
+      return;
+    }
+    const currentId = this.editor.getDoc().id;
+    const groups: Array<{ title: string; entries: BuiltinMapEntry[] }> = [
+      {
+        title: "内置地图（只读）",
+        entries: this.builtinCatalog.filter((entry) => entry.readOnly),
+      },
+      {
+        title: "我的地图",
+        entries: this.builtinCatalog.filter((entry) => !entry.readOnly),
+      },
+    ];
+
+    this.mapGroupsEl.innerHTML = "";
+    for (const group of groups) {
+      const groupEl = document.createElement("div");
+      groupEl.className = "ws-map-group";
+      const title = document.createElement("div");
+      title.className = "ws-map-group-title";
+      title.textContent = group.title;
+      groupEl.appendChild(title);
+
+      if (group.entries.length === 0) {
+        const empty = document.createElement("p");
+        empty.className = "ws-hint";
+        empty.textContent = "暂无";
+        groupEl.appendChild(empty);
+      }
+
+      for (const entry of group.entries) {
+        const btn = document.createElement("button");
+        btn.className = "ws-map-item";
+        btn.dataset.id = entry.id;
+        btn.classList.toggle("selected", entry.id === currentId);
+        btn.innerHTML = `<span class="ws-map-name">${escapeHtml(
+          entry.hasName ? entry.name : "未命名地图",
+        )}</span>${entry.readOnly ? '<span class="ws-map-tag">只读</span>' : ""}`;
+        btn.onclick = () => {
+          void this.loadMapFromCatalog(entry.id);
+        };
+        groupEl.appendChild(btn);
+      }
+
+      this.mapGroupsEl.appendChild(groupEl);
+    }
   }
 
   /** 名称是否已被目录里另一张图占用（区分大小写，忽略首尾空格） */
@@ -875,7 +975,7 @@ export class WorkshopPage {
   private exportJson(): void {
     const doc = this.editor.getDoc();
     if (isReadOnlyMap(doc.id)) {
-      this.showToast(`「${doc.id}」是内置只读地图，请先另存为副本再导出`, "bad");
+      this.showToast(`「${doc.id}」是内置只读地图，请先复制为我的地图再导出`, "bad");
       return;
     }
     const errors = this.validationErrors(doc);
@@ -919,6 +1019,7 @@ export class WorkshopPage {
             refresh: () => this.refreshValidation(),
             afterSave: async (id) => {
               this.saveDraftNow();
+              this.dirty = false;
               resetWorkshopCatalog();
               await this.reloadBuiltinCatalog();
               await this.onSaved?.(id);
@@ -972,12 +1073,11 @@ export class WorkshopPage {
     btn.remove();
   }
 
-  /** 保存后重读 manifest，让新图立刻出现在「载入内置图」下拉里 */
+  /** 保存后重读 manifest，让新图立刻出现在左侧地图列表里 */
   private async reloadBuiltinCatalog(): Promise<void> {
     this.builtinCatalog = [];
     this.catalogLoaded = false;
-    this.builtinSelect.innerHTML = '<option value="">载入内置图…</option>';
-    this.builtinSelect.disabled = false;
+    this.mapGroupsEl.innerHTML = '<p class="ws-hint">地图目录加载中…</p>';
     await this.loadCatalog();
   }
 
@@ -993,11 +1093,14 @@ export class WorkshopPage {
       const doc = fromMapJson(parsed as MapJson);
       doc.builtinId = null;
       this.editor.replaceDoc(doc, true);
+      this.dirty = false;
+      this.resetEditorState();
       this.syncMeta();
       this.refreshValidation();
       this.refreshOpenings();
       this.refreshZones();
       this.saveDraftNow();
+      this.renderMapList();
       if (errors.length > 0) {
         this.showToast(`已导入「${doc.name}」，但有 ${errors.length} 条校验错误`, "bad");
       } else {
@@ -1012,52 +1115,15 @@ export class WorkshopPage {
     try {
       this.builtinCatalog = await loadBuiltinCatalog();
       this.catalogLoaded = true;
-      for (const entry of this.builtinCatalog) {
-        const option = document.createElement("option");
-        option.value = entry.id;
-        option.textContent = entry.hasName ? `${entry.name}（${entry.id}）` : entry.id;
-        this.builtinSelect.appendChild(option);
-      }
-      if (this.builtinCatalog.length === 0) {
-        this.builtinSelect.disabled = true;
-      }
+      this.renderMapList();
       // 目录加载后名称冲突校验才有意义，立刻重算一次
       this.refreshValidation();
       this.syncDevDeleteState();
     } catch (err) {
       console.warn("[workshop] 内置地图目录加载失败", err);
-      this.showToast("内置地图目录加载失败，只能导入 / 新建", "bad");
-    }
-  }
-
-  private async loadSelectedBuiltin(): Promise<void> {
-    const id = this.builtinSelect.value;
-    if (!id) {
-      this.showToast("请先选择一张内置图", "bad");
-      return;
-    }
-    try {
-      const json = await loadBuiltinMapJson(id);
-      const doc = fromMapJson(json);
-      const entry = this.builtinCatalog.find((item) => item.id === id);
-      const readonly = entry ? entry.readOnly : true;
-      doc.builtinId = readonly ? id : null;
-      this.editor.replaceDoc(doc, true);
-      this.syncMeta();
-      this.refreshValidation();
-      this.refreshOpenings();
-      this.refreshZones();
-      this.saveDraftNow();
-      if (readonly) {
-        this.showToast(`已载入内置图「${doc.name}」；它是只读的，导出前请另存为副本`);
-      } else {
-        this.showToast(`已载入工坊图「${doc.name}」（${doc.id}），可直接保存覆盖`);
-      }
-    } catch (err) {
-      this.showToast(
-        `载入失败：${err instanceof Error ? err.message : String(err)}`,
-        "bad",
-      );
+      this.catalogLoaded = true;
+      this.renderMapList();
+      this.showToast("地图目录加载失败，只能导入 / 新建", "bad");
     }
   }
 

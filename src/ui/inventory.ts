@@ -25,14 +25,15 @@ function el(id: string): HTMLElement {
 
 export class InventoryPanel {
   private root = el("inventoryPanel");
+  private headEl = this.root.querySelector<HTMLElement>(".inv-head")!;
   private cardsEl = el("invCards");
   private hintEl = el("invHint");
-  private startBtn = el("btnPlacementStart") as HTMLButtonElement;
+  private startBtn: HTMLButtonElement | null = el("btnPlacementStart") as HTMLButtonElement;
   private signature = "";
   private accum = 0;
 
-  constructor(private game: Game, onStart: () => void) {
-    this.startBtn.addEventListener("click", onStart);
+  constructor(private game: Game, private onStart: () => void) {
+    this.startBtn?.addEventListener("click", () => this.onStart());
     this.cardsEl.addEventListener("click", (ev) => {
       const card = (ev.target as HTMLElement).closest<HTMLElement>("[data-id]");
       if (!card) return;
@@ -40,6 +41,26 @@ export class InventoryPanel {
       this.signature = "";
       this.update(0);
     });
+  }
+
+  /**
+   * 「开始」只在准备阶段存在：战斗开始后直接从 DOM 移除，而不是禁用变灰。
+   * 重开 / 重玩回到准备阶段时再按原位置重建。
+   */
+  private syncStartButton(visible: boolean): void {
+    if (!visible) {
+      this.startBtn?.remove();
+      this.startBtn = null;
+      return;
+    }
+    if (this.startBtn?.isConnected) return;
+    const btn = document.createElement("button");
+    btn.className = "inv-start";
+    btn.id = "btnPlacementStart";
+    btn.textContent = "▶ 开始";
+    btn.addEventListener("click", () => this.onStart());
+    this.headEl.appendChild(btn);
+    this.startBtn = btn;
   }
 
   show(): void {
@@ -69,7 +90,7 @@ export class InventoryPanel {
     if (sig === this.signature) return;
     this.signature = sig;
 
-    this.startBtn.classList.toggle("hidden", g.phase !== "prepare");
+    this.syncStartButton(g.phase === "prepare");
 
     let hint = "点击人类区空地放置人类";
     if (g.phase === "prepare") {

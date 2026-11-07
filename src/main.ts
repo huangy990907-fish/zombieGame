@@ -376,8 +376,8 @@ async function boot(): Promise<void> {
           ev.stopPropagation();
           const act = actionBtn.dataset.act;
           const id = actionBtn.dataset.id!;
-          if (!levelEditor) {
-            showMapNotice("关卡编辑器只在开发态可用");
+          if (!isDevModeEnabled()) {
+            showMapNotice("关卡编辑仅对开发者模式开放");
             return;
           }
           if (act === "edit") {
@@ -385,9 +385,9 @@ async function boot(): Promise<void> {
               showMapNotice("内置教学关为只读，请先「复制」后再编辑");
               return;
             }
-            levelEditor.open("edit", id);
+            openLevelEditor("edit", id);
           } else if (act === "copy") {
-            levelEditor.open("copy", id);
+            openLevelEditor("copy", id);
           } else if (act === "delete") {
             void deleteLevelFromList(id);
           }
@@ -440,12 +440,7 @@ async function boot(): Promise<void> {
   };
 
   levelNewBtn.addEventListener("click", () => {
-    if (!isDevModeEnabled()) return;
-    if (!levelEditor) {
-      showMapNotice("关卡编辑器只在开发态可用");
-      return;
-    }
-    levelEditor.open("new");
+    openLevelEditor("new");
   });
 
   // ============================================================
@@ -511,12 +506,16 @@ async function boot(): Promise<void> {
 
   // ====== 关卡编辑器：整块只在开发态加载（生产构建不含编辑器代码与接口文案） ======
   let levelEditor: LevelEditorPage | undefined;
+  let pendingEditorRequest: { mode: "new" | "edit" | "copy"; id?: string } | undefined;
   if (import.meta.env.DEV) {
     void import("./levelEditor/page")
       .then(({ LevelEditorPage: Editor }) => {
         levelEditor = new Editor({
           onClose: () => {
-            if (router.get() === "levels") refreshLevelsPage();
+            if (router.get() !== "levels") return;
+            // 从 #/levels/edit 直达打开的编辑器，关闭后回到普通选关页
+            if (isLevelEditPath()) router.go("levels");
+            else refreshLevelsPage();
           },
           onSaved: async (id) => {
             await refreshLevelCatalog(id);
@@ -527,9 +526,38 @@ async function boot(): Promise<void> {
             showMapNotice(`关卡「${id}」已删除`);
           },
         });
+        if (pendingEditorRequest && isDevModeEnabled()) {
+          levelEditor.open(pendingEditorRequest.mode, pendingEditorRequest.id);
+        }
+        pendingEditorRequest = undefined;
       })
       .catch((err) => console.warn("[levelEditor] 开发态编辑器加载失败", err));
   }
+
+  /** 是否为关卡编辑器直达路径 `#/levels/edit` */
+  function isLevelEditPath(): boolean {
+    return window.location.hash.replace(/^#/, "").split("?")[0] === "/levels/edit";
+  }
+
+  /**
+   * 打开编辑器前统一校验开发者模式：玩家模式不渲染、也不允许进入编辑页。
+   * 生产构建里 levelEditor 恒为 undefined（模块整块被剔除）。
+   */
+  const openLevelEditor = (mode: "new" | "edit" | "copy", id?: string): void => {
+    if (!isDevModeEnabled()) {
+      showMapNotice("关卡编辑器仅对开发者模式开放");
+      if (router.get() !== "levels") router.go("levels");
+      return;
+    }
+    if (!levelEditor) {
+      pendingEditorRequest = { mode, id };
+      showMapNotice(
+        import.meta.env.DEV ? "关卡编辑器正在加载…" : "关卡编辑器只在开发态可用",
+      );
+      return;
+    }
+    levelEditor.open(mode, id);
+  };
 
   /** 列表「删除」：只在开发态可用；只读关与仍被引用的关卡受保护 */
   const deleteLevelFromList = async (id: string): Promise<void> => {
@@ -581,7 +609,10 @@ async function boot(): Promise<void> {
     renderer.setPlacementZones(false);
     inventoryPanel.hide();
     document.body.classList.remove("training");
+    document.body.classList.remove("placement");
     workshop.deactivate();
+    // 离开选关页时关闭关卡编辑器弹层，避免覆盖其它页面
+    if (route !== "levels" && levelEditor?.isOpen) levelEditor.close();
 
     switch (route) {
       case "menu":
@@ -591,14 +622,28 @@ async function boot(): Promise<void> {
         settingsPanel.classList.remove("open");
         sound.pause(); // 主菜单静音
         break;
-      case "levels":
+      case "levels": {
         showOverlay("levels");
         topbar.classList.add("hidden");
         bottom.classList.add("hidden");
         settingsPanel.classList.remove("open");
         refreshLevelsPage();
+        // 直达 #/levels/edit：只有开发者模式能进编辑器，玩家模式挡回列表并提示
+        if (isLevelEditPath()) {
+          if (!isDevModeEnabled()) {
+            showMapNotice("关卡编辑器仅对开发者模式开放");
+            router.go("levels");
+            break;
+          }
+          const id = router.getQuery("id");
+          const target = id ? findLevel(id) : undefined;
+          if (target && !isReadOnlyLevel(target.id)) openLevelEditor("edit", target.id);
+          else if (target) openLevelEditor("copy", target.id);
+          else openLevelEditor("new");
+        }
         sound.pause(); // 选关页静音
         break;
+      }
       case "play": {
         showOverlay(null);
         topbar.classList.remove("hidden");
@@ -629,6 +674,8 @@ async function boot(): Promise<void> {
         renderer.setMap(game.map);
         renderer.setPlacementZones(game.phase === "prepare");
         inventoryPanel.show();
+        // play 路由：库存面板固定在右侧一栏，画布按剩余宽度缩放
+        document.body.classList.add("placement");
         refreshButtons();
         refreshPanelValues();
         sound.resumeAudio(); // 进入战斗场景恢复声音（AudioContext resume 在这里发生）
@@ -896,8 +943,9 @@ async function boot(): Promise<void> {
     devModeDisableBtn.classList.toggle("hidden", !on);
     devModeFeedbackEl.textContent = message;
     devModeFeedbackEl.classList.toggle("ok", ok);
-    // 关掉开发者模式时若还停在工坊页，立刻回到主菜单
+    // 关掉开发者模式时若还停在工坊页 / 关卡编辑器，立刻退出
     if (!on && router.get() === "workshop") router.go("menu");
+    if (!on && levelEditor?.isOpen) levelEditor.close();
     // 开发者模式切换会改变选关列表的可玩范围与操作按钮
     if (router.get() === "levels") refreshLevelsPage();
   };

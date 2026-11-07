@@ -12,6 +12,7 @@ const VALID_ROUTES: Record<string, Route> = {
   "/": "menu",
   "/menu": "menu",
   "/levels": "levels",
+  "/levels/edit": "levels",
   "/play": "play",
   "/training": "training",
   "/workshop": "workshop",

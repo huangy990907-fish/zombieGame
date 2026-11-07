@@ -758,6 +758,11 @@ body {
   box-shadow: 0 4px 16px rgba(139, 92, 246, 0.35);
 }
 
+/* 玩家模式不渲染「新建关卡」入口 */
+.levels-new.hidden {
+  display: none;
+}
+
 .levels-list {
   display: flex;
   flex-direction: column;
@@ -1542,8 +1547,7 @@ body.training .screen canvas {
 
 .ws-head button,
 .ws-tools button,
-.ws-side button,
-.ws-builtin button {
+.ws-side button {
   padding: 5px 10px;
   font: inherit;
   font-size: 12px;
@@ -1557,8 +1561,7 @@ body.training .screen canvas {
 
 .ws-head button:hover:not(:disabled),
 .ws-tools button:hover:not(:disabled),
-.ws-side button:hover:not(:disabled),
-.ws-builtin button:hover:not(:disabled) {
+.ws-side button:hover:not(:disabled) {
   color: #fff;
   border-color: #4a5a80;
   background: #171a2a;
@@ -1661,6 +1664,74 @@ body.training .screen canvas {
 
 .ws-hint.live {
   color: #c9a227;
+}
+
+/* 左侧常驻地图列表：只显示名称，内置图带只读标记 */
+.ws-map-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 190px;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.ws-map-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ws-map-group-title {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  color: #7c86a0;
+}
+
+.ws-tools .ws-map-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 6px 8px;
+  text-align: left;
+}
+
+.ws-tools .ws-map-item.selected {
+  border-color: #8b5cf6;
+  background: rgba(139, 92, 246, 0.16);
+  box-shadow: 0 0 10px rgba(139, 92, 246, 0.16);
+}
+
+.ws-map-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 12px;
+  color: #c6cfdd;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ws-tools .ws-map-item.selected .ws-map-name {
+  color: #fff;
+}
+
+.ws-map-tag {
+  flex: none;
+  padding: 1px 5px;
+  font-size: 10px;
+  color: #8b95a8;
+  border: 1px solid #2a3350;
+  border-radius: 4px;
+}
+
+.ws-map-actions {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 6px;
+  margin: 8px 0 2px;
 }
 
 .ws-defaults {
@@ -2016,24 +2087,6 @@ body.training .screen canvas {
   background: rgba(34, 197, 94, 0.2);
 }
 
-.ws-builtin {
-  display: flex;
-  gap: 6px;
-  margin-top: 8px;
-}
-
-.ws-builtin select {
-  flex: 1;
-  min-width: 0;
-  padding: 4px 6px;
-  font: inherit;
-  font-size: 11px;
-  color: #c6cfdd;
-  background: #0f111c;
-  border: 1px solid #2f3a5a;
-  border-radius: 4px;
-}
-
 .ws-io code {
   padding: 1px 4px;
   font-size: 10px;
@@ -2082,12 +2135,49 @@ body.training .screen canvas {
    放置模式库存面板（0.6.0）
    ============================================================ */
 
+/* play 路由：画布在左、库存面板固定在右侧一栏，画布按剩余宽度等比缩放 */
+body.placement .frame {
+  width: min(1460px, 100vw);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 252px;
+  grid-template-rows: auto auto auto;
+  grid-template-areas:
+    "top    top"
+    "screen inv"
+    "bottom inv";
+  column-gap: 14px;
+}
+
+body.placement .topbar {
+  grid-area: top;
+}
+
+body.placement .screen {
+  grid-area: screen;
+}
+
+body.placement .bottom {
+  grid-area: bottom;
+}
+
+body.placement .screen canvas {
+  max-height: calc(100vh - 170px);
+}
+
+body.placement .inv-panel {
+  grid-area: inv;
+  align-self: start;
+  width: auto;
+  max-height: calc(100vh - 40px);
+  margin: 0 10px 0 0;
+  overflow-y: auto;
+}
+
+body.placement .inv-cards {
+  grid-template-columns: 1fr;
+}
+
 .inv-panel {
-  position: absolute;
-  left: 50%;
-  bottom: 84px;
-  transform: translateX(-50%);
-  width: min(760px, 94%);
   padding: 10px 14px 12px;
   background: rgba(8, 9, 17, 0.94);
   border: 1px solid #2a3350;
@@ -2095,6 +2185,36 @@ body.training .screen canvas {
   box-shadow: 0 10px 32px rgba(0, 0, 0, 0.55);
   backdrop-filter: blur(6px);
   z-index: 6;
+}
+
+/* 面板在非 play 路由 / 未激活时完全不占位 */
+.inv-panel.hidden {
+  display: none;
+}
+
+/* 窄屏：右栏改为底部横排，避免挤压画布 */
+@media (max-width: 900px) {
+  body.placement .frame {
+    width: min(1184px, 100vw);
+    display: flex;
+    flex-direction: column;
+  }
+
+  body.placement .screen canvas {
+    max-height: max(220px, calc(100vh - 340px));
+  }
+
+  body.placement .inv-panel {
+    align-self: stretch;
+    width: auto;
+    max-height: none;
+    margin: 10px 10px 0;
+    overflow: visible;
+  }
+
+  body.placement .inv-cards {
+    grid-template-columns: repeat(auto-fit, minmax(104px, 1fr));
+  }
 }
 
 .inv-head {

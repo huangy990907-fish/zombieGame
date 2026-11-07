@@ -61,11 +61,11 @@ interface WallRun {
 }
 
 /**
- * 把墙瓦片合并成矩形。
+ * 把同一种瓦片合并成矩形。
  * 先按行找连续段，再把相邻行中 x / w 完全相同的段纵向合并；
  * 这样 arena 的 7 段墙会得到 7 个矩形，不会退化成逐格矩形。
  */
-function compileWalls(tiles: string[]): Rect[] {
+function compileRuns(tiles: string[], char: string): Rect[] {
   const rects: Rect[] = [];
   let bands: WallRun[] = [];
 
@@ -82,9 +82,9 @@ function compileWalls(tiles: string[]): Rect[] {
     const row = tiles[y];
     const runs: WallRun[] = [];
     for (let x = 0; x < row.length; x++) {
-      if (row[x] !== TILE_CHARS.wall) continue;
+      if (row[x] !== char) continue;
       const start = x;
-      while (x + 1 < row.length && row[x + 1] === TILE_CHARS.wall) x++;
+      while (x + 1 < row.length && row[x + 1] === char) x++;
       runs.push({ x: start, w: x - start + 1, y });
     }
 
@@ -103,6 +103,19 @@ function compileWalls(tiles: string[]): Rect[] {
     bands = nextBands;
   }
   for (const band of bands) emit(band, tiles.length);
+  return rects;
+}
+
+/** 逐格收集指定瓦片（草丛需要按格维护燃烧 / 重生状态，不能合并） */
+function compileTileRects(tiles: string[], char: string): Rect[] {
+  const rects: Rect[] = [];
+  for (let y = 0; y < tiles.length; y++) {
+    const row = tiles[y];
+    for (let x = 0; x < row.length; x++) {
+      if (row[x] !== char) continue;
+      rects.push({ x: x * TILE_SIZE, y: y * TILE_SIZE, w: TILE_SIZE, h: TILE_SIZE });
+    }
+  }
   return rects;
 }
 
@@ -137,7 +150,10 @@ export function compileTilesToMapDef(json: MapJson): MapDef {
     throw new Error(`地图「${json.id ?? "?"}」校验失败：${detail}`);
   }
 
-  const walls = compileWalls(json.tiles);
+  const walls = compileRuns(json.tiles, TILE_CHARS.wall);
+  const grassTiles = compileTileRects(json.tiles, TILE_CHARS.grass);
+  const waterTiles = compileTileRects(json.tiles, TILE_CHARS.water);
+  const waterBlockers = compileRuns(json.tiles, TILE_CHARS.water);
   const room = compileRoom(walls, TILE_SIZE);
 
   // 门在前、窗在后；同类按从上到下、从左到右排序，保证编译结果稳定
@@ -174,5 +190,8 @@ export function compileTilesToMapDef(json: MapJson): MapDef {
     humanBounds: humanBoundsOf(room),
     buildBiteDamage: json.buildBiteDamage,
     buildBiteSlow: json.buildBiteSlow,
+    grassTiles,
+    waterTiles,
+    waterBlockers,
   };
 }

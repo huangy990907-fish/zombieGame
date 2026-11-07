@@ -45,6 +45,8 @@ const TOOLS: Array<{ id: EditorTool; label: string; icon: string; hint: string }
   { id: "wall", label: "墙", icon: "#", hint: "拖动连续画墙；画在门窗上会把门窗还原成墙" },
   { id: "door", label: "门", icon: "D", hint: "按住拖拽决定宽度（16px 整数倍），门可被胖子穿过" },
   { id: "window", label: "窗", icon: "W", hint: "按住拖拽决定宽度；窗只放行普通 / 狂奔僵尸" },
+  { id: "grass", label: "草丛", icon: "G", hint: "可通行；范围内人类 / 僵尸移速 ×0.8，人类索敌减半，可被喷火烧毁后重生" },
+  { id: "water", label: "水池", icon: "≈", hint: "阻挡人类与僵尸、参与寻路；子弹与电击射线可穿过" },
   { id: "human", label: "人类区", icon: "人", hint: "拖出矩形人类出生区，可放多块；只决定出生点，不限制后续活动" },
   { id: "spawn", label: "僵尸区", icon: "僵", hint: "拖出矩形僵尸出生区，可放多块；必须可通行且不与人类区重叠" },
   { id: "erase", label: "擦除", icon: "✕", hint: "擦门窗时还原成墙；擦墙 / 空地清成空地" },

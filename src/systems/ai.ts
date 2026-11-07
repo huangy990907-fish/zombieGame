@@ -16,6 +16,7 @@
 import { HUMAN_BODY_DIAMETER, HUMAN_DEF } from "../data/humans";
 import { MAX_ZOMBIE_RADIUS, WANDER_TUNING, ZOMBIE_IDS, ZOMBIE_SLOW } from "../data/zombies";
 import { effectiveWeapon, effectiveZombie, openingTuning, settings } from "../data/settings/runtime";
+import { TERRAIN } from "../data/terrain";
 import type { ZombiePursuitMode } from "../data/types";
 import { openingNetWidth } from "./flowField";
 import { tryFire, updateFlame } from "./combat";
@@ -92,6 +93,7 @@ export function updateHumans(world: World, dt: number): void {
     // 血条存续时间：受伤后 3 秒淡出，与朝向 / 移动无关
     if (h.hurtTimer > 0) h.hurtTimer = Math.max(0, h.hurtTimer - dt);
     const def = effectiveWeapon(h.weapon);
+    const def2 = h.weapon2 ? effectiveWeapon(h.weapon2) : null;
     const posted = postedMode && h.post >= 0 && h.post < world.posts.length;
 
     // 冷却与换弹计时。喷火有自己的一套"持续喷射"计时，交给 updateFlame 推进
@@ -102,6 +104,15 @@ export function updateHumans(world: World, dt: number): void {
       if (h.reloadTimer <= 0) {
         h.reloadTimer = 0;
         h.ammo = def.magazine;
+      }
+    }
+    // 副武器：冷却 / 换弹 / 喷火计时完全独立，与主武器同时推进
+    if (def2) {
+      if (def2.kind === "flame") updateFlame(world, h, dt, 1);
+      else if ((h.fire2 ?? 0) > 0) h.fire2 = Math.max(0, (h.fire2 ?? 0) - dt);
+      if ((h.reload2 ?? 0) > 0) {
+        h.reload2 = Math.max(0, (h.reload2 ?? 0) - dt);
+        if (h.reload2 === 0) h.ammo2 = def2.magazine;
       }
     }
 
@@ -127,8 +138,11 @@ export function updateHumans(world: World, dt: number): void {
      *    的旧目标，近处已经进入射程的僵尸反而永远不开火
      */
     h.sight -= dt;
-    // 训练场可以给单个单位覆盖视野；普通对局 sightOverride 为 undefined，读全局值
-    const sightR = h.sightOverride ?? s.human.sight;
+    // 训练场可以给单个单位覆盖视野；普通对局 sightOverride 为 undefined，读全局值。
+    // 草丛内人类索敌缩短；丧尸索敌不受影响（这里只作用于人类）。
+    const sightR =
+      (h.sightOverride ?? s.human.sight) *
+      (1 - (1 - TERRAIN.grass.humanSightMul) * world.grassEffectAt(h.x, h.y));
     let best = h.target;
     if (best !== null) {
       if (
@@ -162,6 +176,10 @@ export function updateHumans(world: World, dt: number): void {
       threatDist = dist;
       if (dist <= def.range && Math.abs(angDiff(h.facing, ang)) < 0.3) {
         tryFire(world, h, h.facing);
+      }
+      // 副武器按自己的射程 / 冷却同时开火，目标与主武器一致
+      if (def2 && dist <= def2.range && Math.abs(angDiff(h.facing, ang)) < 0.3) {
+        tryFire(world, h, h.facing, 1);
       }
 
       if (!posted) {
@@ -269,8 +287,10 @@ export function updateHumans(world: World, dt: number): void {
       }
     }
 
-    // 期望方向 -> 平滑加速到目标速度（训练场可覆盖单个人类的移速）
-    const moveSpeed = h.speedOverride ?? s.human.speed;
+    // 期望方向 -> 平滑加速到目标速度（训练场可覆盖单个人类的移速；草丛内减速）
+    const moveSpeed =
+      (h.speedOverride ?? s.human.speed) *
+      (1 - (1 - TERRAIN.grass.speedMul) * world.grassEffectAt(h.x, h.y));
     const len = Math.hypot(dx, dy);
     if (len > 0.001 && h.turning <= 0) {
       dx /= len;
@@ -776,7 +796,9 @@ export function updateZombies(world: World, dt: number): void {
     // 受击减速对索敌和漫游同时生效；不碰咬合间隔与咬人伤害
     const slowMul =
       z.slowTimer > 0 ? 1 - (1 - z.slowMul) * (z.slowTimer / ZOMBIE_SLOW.duration) : 1;
-    const speed = z.speed * passMul * (cnt >= 5 ? 0.72 : 1) * wanderMul * slowMul;
+    // 草丛内丧尸也减速；失效 / 休眠 / 重生中的草按 grassEffectAt 的 0..1 线性过渡
+    const grassMul = 1 - (1 - TERRAIN.grass.speedMul) * world.grassEffectAt(z.x, z.y);
+    const speed = z.speed * passMul * (cnt >= 5 ? 0.72 : 1) * wanderMul * slowMul * grassMul;
     let x = z.x + (dx / len) * speed * dt;
     let y = z.y + (dy / len) * speed * dt;
 

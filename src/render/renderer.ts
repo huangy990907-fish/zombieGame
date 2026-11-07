@@ -11,6 +11,8 @@
 import { Application, CanvasSource, Container, Graphics, Sprite, Text, Texture } from "pixi.js";
 import { COMBO_SPRITES, SPRITE_LIST, SPRITE_SIZE, getNativeFrame, getSprite, type SpriteDef } from "../art";
 import { DEFAULT_MAP, type MapDef } from "../data/maps";
+import { TILE_SIZE } from "../data/maps/schema";
+import { TERRAIN } from "../data/terrain";
 import { settings } from "../data/settings/runtime";
 import type { Effect, Human, World, Zombie } from "../core/world";
 import { HUMAN_DIAMETER, humanSpriteId, spriteDef, spriteRotation, spriteScale, VISUAL_SCALE, zombieDeathSpriteId, zombieSpriteId } from "./pixel";
@@ -101,6 +103,10 @@ export class Renderer {
   private floorLayer = new Container();
   /** 地板网格复用同一张 Graphics，换图时 clear 后重画，避免旧图残留 */
   private floorG!: Graphics;
+  /** 静态地形：水面填充与水池边框（换图时重画） */
+  private terrainLayer = new Graphics();
+  /** 动态地形：草丛正常 / 燃烧 / 休眠 / 重生四种状态，逐帧重画 */
+  private grassLayer = new Graphics();
   private trainingLayer = new Graphics();
   /** 准备阶段的出生区标记（人类区绿色 / 僵尸区红色），战斗中隐藏 */
   private placementLayer = new Container();
@@ -186,6 +192,8 @@ export class Renderer {
     // 门窗在特效之上：火焰飞过门口会被盖住；墙体最后画，遮住飞出去的特效
     this.app.stage.addChild(
       this.floorLayer,
+      this.terrainLayer,
+      this.grassLayer,
       this.placementLayer,
       this.trainingLayer,
       this.pickupLayer,
@@ -325,6 +333,17 @@ export class Renderer {
     }
     floor.stroke({ width: 1, color: 0x141d2a, alpha: 0.85 });
 
+    // 水池：逐格铺底（带一点深浅交错的波纹感），合并矩形描边区分边界
+    const terrain = this.terrainLayer;
+    terrain.clear();
+    for (const t of this.map.waterTiles) {
+      const deep = ((t.x / TILE_SIZE) + (t.y / TILE_SIZE)) % 2 === 0;
+      terrain.rect(t.x, t.y, t.w, t.h).fill({ color: deep ? 0x0e2740 : 0x123049, alpha: 0.94 });
+    }
+    for (const b of this.map.waterBlockers) {
+      terrain.rect(b.x, b.y, b.w, b.h).stroke({ width: 1, color: 0x2f6f92, alpha: 0.9 });
+    }
+
     const walls = this.wallLayer;
     walls.clear();
     for (const w of mapWalls) {
@@ -415,6 +434,35 @@ export class Renderer {
       g.circle(orb.x, orb.y, orb.radius * 2.6).fill({ color: 0xa855f7, alpha: 0.16 * pulse });
       g.circle(orb.x, orb.y, orb.radius * 1.5).fill({ color: 0xa855f7, alpha: 0.45 * pulse });
       g.circle(orb.x, orb.y, orb.radius).fill({ color: 0xf3e8ff, alpha: 0.95 });
+    }
+  }
+
+  /**
+   * 草丛：逐格按运行时状态重画。
+   *  正常 = 半透明绿色 + 上缘亮边；燃烧 = 浅黄并轻微闪烁；休眠 = 灰烬；
+   *  重生 = 灰烬底上按剩余计时线性叠回绿色。水域不在这里画（静态层已铺好）。
+   */
+  private renderTerrain(world: World): void {
+    const g = this.grassLayer;
+    g.clear();
+    const ash = 0x4a463c;
+    const green = 0x2f7d4a;
+    for (const t of world.grass) {
+      const flicker = 0.85 + 0.15 * Math.sin(this.t * 18 + t.x * 0.7 + t.y * 0.4);
+      if (t.phase === 0) {
+        g.rect(t.x, t.y, TILE_SIZE, TILE_SIZE).fill({ color: green, alpha: 0.5 });
+        g.rect(t.x, t.y, TILE_SIZE, 2).fill({ color: 0x59b56f, alpha: 0.5 });
+      } else if (t.phase === 1) {
+        g.rect(t.x, t.y, TILE_SIZE, TILE_SIZE).fill({ color: 0xd8c690, alpha: 0.72 * flicker });
+        g.rect(t.x, t.y, TILE_SIZE, TILE_SIZE).stroke({ width: 1, color: 0xffe9b0, alpha: 0.8 * flicker });
+      } else if (t.phase === 2) {
+        g.rect(t.x, t.y, TILE_SIZE, TILE_SIZE).fill({ color: ash, alpha: 0.55 });
+      } else {
+        const p = 1 - Math.min(1, Math.max(0, t.timer / TERRAIN.grass.regrowFade));
+        g.rect(t.x, t.y, TILE_SIZE, TILE_SIZE).fill({ color: ash, alpha: 0.55 });
+        g.rect(t.x, t.y, TILE_SIZE, TILE_SIZE).fill({ color: green, alpha: 0.5 * p });
+        g.rect(t.x, t.y, TILE_SIZE, 2).fill({ color: 0x59b56f, alpha: 0.5 * p });
+      }
     }
   }
 
@@ -713,6 +761,7 @@ export class Renderer {
     const w = world;
 
     this.renderPickups(extra?.orbs);
+    this.renderTerrain(w);
     this.renderHumans(w.humans, dt);
     this.renderZombies(w.zombies, dt);
     this.renderDeaths(dt);

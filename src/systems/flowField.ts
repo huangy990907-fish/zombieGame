@@ -68,14 +68,15 @@ export class FlowField {
       this.sources = map.openingCenters;
     }
 
-    // 先把所有被墙体覆盖的格子标记为不可走（门窗开口不算墙）；
+    // 先把所有被墙体 / 水池覆盖的格子标记为不可走（门窗开口不算墙）；
     // 体型过不去的开口同样按阻挡处理，避免胖子顺着流场顶到窗边。
+    const solids = [...map.walls, ...map.waterBlockers];
     for (let gy = 0; gy < this.rows; gy++) {
       for (let gx = 0; gx < this.cols; gx++) {
         const cx = (gx + 0.5) * CELL;
         const cy = (gy + 0.5) * CELL;
         let solid = false;
-        for (const w of map.walls) {
+        for (const w of solids) {
           if (cx >= w.x && cx <= w.x + w.w && cy >= w.y && cy <= w.y + w.h) {
             solid = true;
             break;

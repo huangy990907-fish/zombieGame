@@ -80,6 +80,9 @@ export class TrainingPanel {
   private rhythmHintEl!: HTMLElement;
   private selectBtn!: HTMLButtonElement;
   private deleteBtn!: HTMLButtonElement;
+  private grassBtn!: HTMLButtonElement;
+  private waterBtn!: HTMLButtonElement;
+  private terrainEraseBtn!: HTMLButtonElement;
   private mapSelectEl!: HTMLSelectElement;
   private mapInfoEl!: HTMLElement;
   private mapHintEl!: HTMLElement;
@@ -142,6 +145,9 @@ export class TrainingPanel {
       <div class="tp-tools">
         <button id="tpToolSelect" class="active">🖱 选择/编辑</button>
         <button id="tpToolDelete">🗑 删除</button>
+        <button id="tpToolGrass">🌿 草丛</button>
+        <button id="tpToolWater">💧 水池</button>
+        <button id="tpToolErase">🧽 擦地形</button>
         <button id="tpClear">🧹 清场</button>
         <button id="tpResetStats">↺ 读数清零</button>
       </div>
@@ -207,6 +213,9 @@ export class TrainingPanel {
     (this.el("tpBack") as HTMLButtonElement).onclick = () => this.onBack();
     this.selectBtn = this.el("tpToolSelect") as HTMLButtonElement;
     this.deleteBtn = this.el("tpToolDelete") as HTMLButtonElement;
+    this.grassBtn = this.el("tpToolGrass") as HTMLButtonElement;
+    this.waterBtn = this.el("tpToolWater") as HTMLButtonElement;
+    this.terrainEraseBtn = this.el("tpToolErase") as HTMLButtonElement;
     this.selectBtn.onclick = () => {
       this.session.tool = "select";
       this.session.armed = null;
@@ -217,6 +226,14 @@ export class TrainingPanel {
       this.session.armed = null;
       this.refresh(1);
     };
+    const pickTerrain = (tool: "grass" | "water" | "terrain-erase"): void => {
+      this.session.tool = tool;
+      this.session.armed = null;
+      this.refresh(1);
+    };
+    this.grassBtn.onclick = () => pickTerrain("grass");
+    this.waterBtn.onclick = () => pickTerrain("water");
+    this.terrainEraseBtn.onclick = () => pickTerrain("terrain-erase");
     (this.el("tpClear") as HTMLButtonElement).onclick = () => {
       this.session.clearUnits();
       this.editorKey = "";
@@ -372,6 +389,9 @@ export class TrainingPanel {
     const armed = this.session.armed;
     this.selectBtn.classList.toggle("active", this.session.tool === "select" && armed === null);
     this.deleteBtn.classList.toggle("active", this.session.tool === "delete");
+    this.grassBtn.classList.toggle("active", this.session.tool === "grass");
+    this.waterBtn.classList.toggle("active", this.session.tool === "water");
+    this.terrainEraseBtn.classList.toggle("active", this.session.tool === "terrain-erase");
   }
 
   private refreshRhythm(): void {
@@ -396,6 +416,18 @@ export class TrainingPanel {
     }
     if (this.session.tool === "delete") {
       this.hintEl.textContent = "删除模式：点击战场上的单位删除它";
+      return;
+    }
+    if (this.session.tool === "grass") {
+      this.hintEl.textContent = "草丛画笔：点击 16px 格绘制；范围内人类 / 僵尸移速 ×0.8、人类索敌减半，喷火可烧毁后重生";
+      return;
+    }
+    if (this.session.tool === "water") {
+      this.hintEl.textContent = "水池画笔：点击绘制阻挡格；人类与僵尸无法进入，子弹与电击射线可穿过";
+      return;
+    }
+    if (this.session.tool === "terrain-erase") {
+      this.hintEl.textContent = "擦地形：点击清除该格草丛或水池";
       return;
     }
     this.hintEl.textContent = "点击战场上的单位选中并编辑；先点上方类型再点空地生成";

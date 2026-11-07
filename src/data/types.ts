@@ -186,6 +186,12 @@ export interface MapDef {
   buildBiteDamage: number;
   /** 啃建筑比咬人慢的倍率（拆门是个力气活） */
   buildBiteSlow: number;
+  /** 可通行草丛瓦片（16×16 px，逐格；燃烧 / 重生状态在 World 中维护） */
+  grassTiles: Rect[];
+  /** 水池瓦片（16×16 px，逐格；仅用于渲染） */
+  waterTiles: Rect[];
+  /** 水池合并后的阻挡矩形（碰撞 / 流场 / 区域连通用；不参与子弹与视线判定） */
+  waterBlockers: Rect[];
 }
 
 // ============================================================

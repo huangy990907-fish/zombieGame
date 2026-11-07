@@ -11,6 +11,8 @@
  * 流程调度在 core/game.ts。
  */
 import { DEFAULT_MAP, type MapDef } from "../data/maps";
+import { TILE_SIZE } from "../data/maps/schema";
+import { TERRAIN } from "../data/terrain";
 import { effectiveHuman, effectiveWeapon, effectiveZombie, openingInstance, setActiveMap, settings } from "../data/settings/runtime";
 import { zombieBodyDiameter } from "../data/zombies";
 import type { HumanMode, Rect, SpawnRegion, ZombieMode } from "../data/types";
@@ -19,6 +21,14 @@ import { findFreePoint, isBlockedForBody } from "../systems/collision";
 import { RegionMap } from "../systems/regions";
 import { gaussClamped, randRange, segRectHit } from "../utils/math";
 import { SpatialHash } from "../utils/spatialHash";
+
+/** 草丛格运行时状态：0 正常 / 1 燃烧 / 2 休眠 / 3 重生中 */
+export interface GrassTileState {
+  x: number;
+  y: number;
+  phase: 0 | 1 | 2 | 3;
+  timer: number;
+}
 
 export interface Human {
   id: number;
@@ -29,14 +39,24 @@ export interface Human {
   hp: number;
   /** 武器 id：如 "mg" / "flame" / "shotgun" / "rocket" */
   weapon: string;
+  /** 第二把武器 id（尸潮求生双持）；null / 未设置表示只有主武器 */
+  weapon2?: string | null;
   /** 当前弹匣剩余弹药 */
   ammo: number;
+  /** 第二把武器的弹匣剩余弹药 */
+  ammo2?: number;
   /** >0 表示正在换弹，倒计时结束后回满弹药 */
   reloadTimer: number;
+  /** 第二把武器的换弹倒计时 */
+  reload2?: number;
   /** 开火冷却，>0 时不能射击；喷火时表示两次伤害结算的间隔 */
   fire: number;
+  /** 第二把武器的开火冷却 */
+  fire2?: number;
   /** >0 表示喷火正在持续喷射，剩余喷射时间；其他武器恒为 0 */
   burst: number;
+  /** 第二把武器若为喷火时的持续喷射计时 */
+  burst2?: number;
   /** 当前锁定的丧尸（可能已经死亡，用前要检查 alive） */
   target: Zombie | null;
   /** 重新索敌的计时：每隔一小段时间才做一次大范围查询，省性能 */
@@ -89,6 +109,12 @@ export interface Human {
   spreadOverride?: number;
   /** 承伤倍率：撕咬伤害乘以该值；未设置时按 1（生存模式单独调低） */
   damageTakenMul?: number;
+  /** 通用属性：每次开火额外增加的投射物数量（0..4；电击枪为额外弧线数） */
+  extraProjectiles?: number;
+  /** 暴击率 0..1；未设置 = 不会暴击 */
+  critChance?: number;
+  /** 暴击伤害倍率（如 1.5 = 150%）；未设置按 1 */
+  critMul?: number;
 }
 
 export interface Zombie {
@@ -248,6 +274,8 @@ function computeBulletWalls(map: MapDef): Rect[] {
 }
 
 export class World {
+  /** 当前地图（训练场地形画笔会替换成画过地形的副本） */
+  map: MapDef;
   humans: Human[] = [];
   zombies: Zombie[] = [];
   bullets: Bullet[] = [];
@@ -296,9 +324,17 @@ export class World {
   onTeslaVolley?: (hits: number, singleBonus: boolean) => void;
   private nextId = 1;
   private readonly bulletWalls: Rect[];
+  /** 单位 / 寻路共同使用的阻挡矩形：墙体 + 水池（子弹与视线仍只用墙体） */
+  private blockers: Rect[];
+  /** 草丛逐格运行时状态（燃烧 / 休眠 / 重生） */
+  grass: GrassTileState[];
+  /** 草丛瓦片索引：<列主序格子号, grass 下标>，用于 O(1) 位置查询 */
+  private readonly grassIndex = new Map<number, number>();
+  private readonly grassCols: number;
 
-  constructor(readonly map: MapDef = DEFAULT_MAP) {
+  constructor(map: MapDef = DEFAULT_MAP) {
     // 先切设置口径，再按每扇开口自己的 JSON 默认值建实例
+    this.map = map;
     setActiveMap(map);
     this.openings = map.openings.map((def) => {
       const { maxHp, passSpeed } = openingInstance(def);
@@ -317,7 +353,95 @@ export class World {
     this.flow = new FlowField(map);
     this.minOpeningWidth = Math.min(...map.openings.map((o) => openingNetWidth(o.rect)));
     this.bulletWalls = computeBulletWalls(map);
+    // 水池并入导航阻挡，但不进入 bulletWalls / sightBlocked
+    this.blockers = [...map.walls, ...map.waterBlockers];
+    this.grassCols = Math.ceil(map.width / TILE_SIZE);
+    this.grass = map.grassTiles.map<GrassTileState>((r) => ({ x: r.x, y: r.y, phase: 0, timer: 0 }));
+    this.grass.forEach((g, i) => {
+      const tx = Math.floor(g.x / TILE_SIZE);
+      const ty = Math.floor(g.y / TILE_SIZE);
+      this.grassIndex.set(ty * this.grassCols + tx, i);
+    });
     for (const o of this.openings) this.openingIndex.set(o.id, o);
+  }
+
+  /**
+   * 训练场地形画笔：替换地图的地形数据并重建阻挡 / 草丛 / 流场 / 区域缓存，保留单位。
+   * 只用于训练场沙盒；正式对局的地图不会在运行中变化。
+   */
+  applyTerrainMap(map: MapDef): void {
+    const prevGrass = new Map<string, GrassTileState>();
+    for (const g of this.grass) prevGrass.set(`${g.x},${g.y}`, g);
+    this.map = map;
+    setActiveMap(map);
+    this.flow = new FlowField(map);
+    this.blockers = [...map.walls, ...map.waterBlockers];
+    this.grass = map.grassTiles.map<GrassTileState>((r) => {
+      const old = prevGrass.get(`${r.x},${r.y}`);
+      return old ? old : { x: r.x, y: r.y, phase: 0, timer: 0 };
+    });
+    this.grassIndex.clear();
+    this.grass.forEach((g, i) => {
+      const tx = Math.floor(g.x / TILE_SIZE);
+      const ty = Math.floor(g.y / TILE_SIZE);
+      this.grassIndex.set(ty * this.grassCols + tx, i);
+    });
+    this.flowCache.clear();
+    this.regionCache.clear();
+    this.humanFlowCache.clear();
+    this.openingFlowCache.clear();
+  }
+
+  /** 草丛格子的有效程度：0 = 完全失效，1 = 正常；重生期间线性恢复 */
+  grassEffectAt(x: number, y: number): number {
+    const g = this.grassTileAt(x, y);
+    if (!g) return 0;
+    if (g.phase === 0) return 1;
+    if (g.phase === 3) {
+      return Math.min(1, Math.max(0, 1 - g.timer / TERRAIN.grass.regrowFade));
+    }
+    return 0;
+  }
+
+  /** 点燃包含该点的草丛格；持续喷火会不断刷新燃烧计时 */
+  igniteGrassAt(x: number, y: number): void {
+    const g = this.grassTileAt(x, y);
+    if (!g) return;
+    g.phase = 1;
+    g.timer = TERRAIN.grass.burnTime;
+  }
+
+  /** 推进草丛的燃烧 / 休眠 / 重生计时（各会话每帧调用一次） */
+  tickTerrain(dt: number): void {
+    for (const g of this.grass) {
+      if (g.phase === 1) {
+        g.timer -= dt;
+        if (g.timer <= 0) {
+          g.phase = 2;
+          g.timer = TERRAIN.grass.regrowDelay;
+        }
+      } else if (g.phase === 2) {
+        g.timer -= dt;
+        if (g.timer <= 0) {
+          g.phase = 3;
+          g.timer = TERRAIN.grass.regrowFade;
+        }
+      } else if (g.phase === 3) {
+        g.timer -= dt;
+        if (g.timer <= 0) {
+          g.phase = 0;
+          g.timer = 0;
+        }
+      }
+    }
+  }
+
+  private grassTileAt(x: number, y: number): GrassTileState | undefined {
+    const tx = Math.floor(x / TILE_SIZE);
+    const ty = Math.floor(y / TILE_SIZE);
+    if (tx < 0 || ty < 0 || tx >= this.grassCols) return undefined;
+    const idx = this.grassIndex.get(ty * this.grassCols + tx);
+    return idx === undefined ? undefined : this.grass[idx];
   }
 
   /** 按 id 取运行时开口实例（breach 追击的破口目标用） */
@@ -357,7 +481,8 @@ export class World {
   private navMap(bodyDiameter: number, exceptId?: string): MapDef {
     return {
       ...this.map,
-      walls: [...this.map.walls, ...this.blockedOpeningRects(bodyDiameter, exceptId)],
+      walls: [...this.blockers, ...this.blockedOpeningRects(bodyDiameter, exceptId)],
+      waterBlockers: [],
       openings: [],
     };
   }
@@ -430,7 +555,7 @@ export class World {
    * 具体条件集中在 systems/collision.ts，新地形只需在那里登记。
    */
   solidAt(x: number, y: number, pad = 0, bodyDiameter = 0): boolean {
-    return isBlockedForBody(bodyDiameter, x, y, this.map.walls, this.openings, pad);
+    return isBlockedForBody(bodyDiameter, x, y, this.blockers, this.openings, pad);
   }
 
   /** 在指定区域内找最近的可用落点（生成人类 / 巡逻目标点用） */
@@ -441,7 +566,7 @@ export class World {
     area: SpawnRegion,
     pad = 0,
   ): { x: number; y: number } | null {
-    return findFreePoint(bodyDiameter, x, y, this.map.walls, this.openings, area, pad);
+    return findFreePoint(bodyDiameter, x, y, this.blockers, this.openings, area, pad);
   }
 
   /**

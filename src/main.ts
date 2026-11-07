@@ -120,6 +120,8 @@ async function boot(): Promise<void> {
   // 面板常驻 DOM，只在 #/training 路由滑出；退出时整个会话被丢弃，不残留任何修改。
   // 换图由面板下拉触发：重建 World + 静态层；reset 同时清空单位与读数，避免跨图混算。
   const training = new TrainingSession(mapOverrideId);
+  // 训练场地形画笔改动后重画静态层（水面 / 水体边框）；草丛由渲染层逐帧绘制
+  training.onTerrainChanged = () => renderer.setMap(training.world.map);
   const switchTrainingMap = (id: string): void => {
     training.reset(id);
     reportMapFallback(training.mapFallback, training.requestedMapId, training.world.map.name);
@@ -143,6 +145,10 @@ async function boot(): Promise<void> {
     onUpgrade: (id) => {
       (document.activeElement as HTMLElement | null)?.blur();
       survival.chooseUpgrade(id);
+    },
+    onWeaponPick: (id) => {
+      (document.activeElement as HTMLElement | null)?.blur();
+      survival.chooseWeapon(id);
     },
     onReplay: () => startSurvival(survival.map.id),
     onMenu: () => router.go("menu"),

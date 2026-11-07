@@ -12,6 +12,8 @@
  *   #  墙
  *   w  窗（对应 openings 里 kind = "window" 的矩形）
  *   d  门（对应 openings 里 kind = "door" 的矩形）
+ *   g  草丛（可通行，减速 + 缩短人类索敌）
+ *   ~  水池（不可通行，参与碰撞 / 寻路 / 区域连通；不挡子弹与视线）
  */
 
 export const MAP_SCHEMA_VERSION = 1;
@@ -26,6 +28,8 @@ export const TILE_CHARS = {
   wall: "#",
   window: "w",
   door: "d",
+  grass: "g",
+  water: "~",
 } as const;
 
 export type TileChar = (typeof TILE_CHARS)[keyof typeof TILE_CHARS];
@@ -176,7 +180,7 @@ function readGrid(raw: unknown, errors: MapValidationError[]): GridRead | null {
     for (let x = 0; x < row.length; x++) {
       if (!allowed.has(row[x])) {
         errors.push({
-          message: `未知瓦片字符 "${row[x]}"（只允许 . / # / w / d）`,
+          message: `未知瓦片字符 "${row[x]}"（只允许 . / # / w / d / g / ~）`,
           x,
           y,
         });
@@ -223,7 +227,7 @@ function checkReachability(
   const queue: number[] = [];
   const push = (x: number, y: number): void => {
     if (x < 0 || y < 0 || x >= GRID_COLS || y >= GRID_ROWS) return;
-    if (grid[y]?.[x] === TILE_CHARS.wall) return;
+    if (grid[y]?.[x] === TILE_CHARS.wall || grid[y]?.[x] === TILE_CHARS.water) return;
     const i = y * GRID_COLS + x;
     if (visited[i]) return;
     visited[i] = 1;
@@ -287,10 +291,11 @@ function checkReachability(
   }
 }
 
-/** 两侧被墙体堵住的格（越界也算堵） */
+/** 两侧被墙体或水池堵住的格（越界也算堵） */
 function isBlockedSide(grid: string[], x: number, y: number): boolean {
   if (x < 0 || y < 0 || x >= GRID_COLS || y >= GRID_ROWS) return true;
-  return grid[y]?.[x] === TILE_CHARS.wall;
+  const ch = grid[y]?.[x];
+  return ch === TILE_CHARS.wall || ch === TILE_CHARS.water;
 }
 
 /**
@@ -334,7 +339,7 @@ function checkOpeningPassages(
 
     if (blocked) {
       errors.push({
-        message: `开口「${opening.id}」有一侧被墙体堵住，丧尸无法从两边通过`,
+        message: `开口「${opening.id}」有一侧被墙体或水池堵住，丧尸无法从两边通过`,
         x: blocked.x,
         y: blocked.y,
       });

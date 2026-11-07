@@ -2945,6 +2945,50 @@ body.survival .screen canvas {
   color: #eaf1ff;
 }
 
+.sv-weapons {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+  color: #cbd5e1;
+  letter-spacing: 0.5px;
+}
+
+.sv-weapon {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  border: 1px solid rgba(120, 140, 180, 0.28);
+  background: rgba(20, 26, 45, 0.55);
+}
+
+.sv-weapon.secondary {
+  border-color: rgba(167, 139, 250, 0.55);
+  background: rgba(60, 40, 100, 0.4);
+}
+
+.sv-weapon-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+  box-shadow: 0 0 6px rgba(255, 255, 255, 0.25);
+}
+
+.sv-weapon-name {
+  font-variant-numeric: tabular-nums;
+}
+
+.sv-weapon-tag {
+  font-size: 10px;
+  color: #c4b5fd;
+  border: 1px solid rgba(167, 139, 250, 0.5);
+  border-radius: 4px;
+  padding: 0 3px;
+}
+
 .sv-paused {
   text-align: center;
   font-size: 12px;

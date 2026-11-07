@@ -4,7 +4,17 @@
  */
 import { isDevModeEnabled } from "../core/devMode";
 import type { SurvivalUpgradeDef } from "../data/survival/config";
+import { getWeaponDef } from "../data/weapons";
 import type { SurvivalSession } from "./session";
+
+/** 二段选武器时展示的一句话说明（名称 / 颜色来自武器定义） */
+const WEAPON_DESC: Record<string, string> = {
+  mg: "高射速直线弹道",
+  flame: "持续喷射，锥形灼烧",
+  shotgun: "一次多颗弹丸，近距离爆发",
+  rocket: "范围爆炸伤害",
+  tesla: "链式电弧，单体目标强化",
+};
 
 export interface SurvivalMapOption {
   id: string;
@@ -15,6 +25,7 @@ export interface SurvivalMapOption {
 interface SurvivalUiCallbacks {
   onStart(mapId: string): void;
   onUpgrade(id: string): void;
+  onWeaponPick(id: string): void;
   onReplay(): void;
   onMenu(): void;
   onWorkshop(): void;
@@ -64,6 +75,7 @@ export class SurvivalUi {
   private reloadEl = document.getElementById("svReload") as HTMLElement;
   private reloadFill = document.getElementById("svReloadFill") as HTMLElement;
   private reloadText = document.getElementById("svReloadText") as HTMLElement;
+  private weaponsEl = document.getElementById("svWeapons") as HTMLElement;
 
   private upgradeEl = document.getElementById("survivalUpgrade") as HTMLElement;
   private upgradeCardsEl = document.getElementById("survivalUpgradeCards") as HTMLElement;
@@ -74,6 +86,7 @@ export class SurvivalUi {
   private maps: SurvivalMapOption[] = [];
   private selectedMapId = "";
   private lastChoicesKey = "";
+  private lastWeaponsKey = "";
   private lastDefeatKey = "";
 
   constructor(private readonly session: SurvivalSession, cbs: SurvivalUiCallbacks) {
@@ -93,6 +106,12 @@ export class SurvivalUi {
     });
 
     this.upgradeCardsEl.addEventListener("click", (e) => {
+      const weapon = (e.target as HTMLElement).closest<HTMLElement>("[data-weapon-id]");
+      if (weapon) {
+        const id = weapon.dataset.weaponId;
+        if (id) cbs.onWeaponPick(id);
+        return;
+      }
       const card = (e.target as HTMLElement).closest<HTMLElement>("[data-upgrade-id]");
       if (!card) return;
       const id = card.dataset.upgradeId;
@@ -134,6 +153,7 @@ export class SurvivalUi {
     this.defeatEl.classList.add("hidden");
     this.defeatEl.classList.remove("active");
     this.lastChoicesKey = "";
+    this.lastWeaponsKey = "";
     this.lastDefeatKey = "";
     this.hudEl.classList.remove("hidden");
   }
@@ -175,6 +195,13 @@ export class SurvivalUi {
     this.tierEl.textContent = `强度 ${s.tier + 1}`;
     this.pausedEl.classList.toggle("hidden", s.state !== "paused");
 
+    // 武器栏：主武器 + 副武器（双持时用色块图标列出第二把）
+    const weaponsKey = s.weapons.join(",");
+    if (weaponsKey !== this.lastWeaponsKey) {
+      this.lastWeaponsKey = weaponsKey;
+      this.renderWeapons(s.weapons);
+    }
+
     // 换弹：只在换弹期间出现，进度按剩余时间反推
     const reload = s.reload;
     if (reload) {
@@ -187,11 +214,20 @@ export class SurvivalUi {
     }
 
     if (s.state === "choosing") {
-      // 带上抽卡序号：即使两次抽到的 id 与顺序完全一样，也按新一轮重新渲染
-      const key = `${s.choiceSeq}|${s.choices.map((c) => c.id).join(",")}`;
-      if (key !== this.lastChoicesKey) {
-        this.lastChoicesKey = key;
-        this.renderUpgradeChoices(s.choices);
+      if (s.weaponPicks.length > 0) {
+        // 二段武器选择：展示全部未持有武器
+        const key = `w|${s.weaponPicks.join(",")}`;
+        if (key !== this.lastChoicesKey) {
+          this.lastChoicesKey = key;
+          this.renderWeaponPicks(s.weaponPicks);
+        }
+      } else {
+        // 带上抽卡序号：即使两次抽到的 id 与顺序完全一样，也按新一轮重新渲染
+        const key = `${s.choiceSeq}|${s.choices.map((c) => c.id).join(",")}`;
+        if (key !== this.lastChoicesKey) {
+          this.lastChoicesKey = key;
+          this.renderUpgradeChoices(s.choices);
+        }
       }
       this.upgradeEl.classList.remove("hidden");
       requestAnimationFrame(() => this.upgradeEl.classList.add("active"));
@@ -225,6 +261,36 @@ export class SurvivalUi {
       .join("");
     this.mapListEl.innerHTML = html;
     this.startBtn.disabled = !this.selectedMapId;
+  }
+
+  /** HUD 武器栏：主武器在前，副武器带「副」标记与自己的颜色图标 */
+  private renderWeapons(ids: string[]): void {
+    this.weaponsEl.innerHTML = ids
+      .map((id, i) => {
+        const def = getWeaponDef(id);
+        const color = `#${def.color.toString(16).padStart(6, "0")}`;
+        return `<span class="sv-weapon${i > 0 ? " secondary" : ""}">
+          <span class="sv-weapon-dot" style="background:${color}"></span>
+          <span class="sv-weapon-name">${escapeHtml(def.name)}</span>
+          ${i > 0 ? '<span class="sv-weapon-tag">副</span>' : ""}
+        </span>`;
+      })
+      .join("");
+  }
+
+  /** 二段选武器：用与三选一相同的卡片样式，点击装备为副武器 */
+  private renderWeaponPicks(ids: string[]): void {
+    this.upgradeCardsEl.innerHTML = ids
+      .map((id, i) => {
+        const def = getWeaponDef(id);
+        const color = `#${def.color.toString(16).padStart(6, "0")}`;
+        return `<button class="sv-upgrade-card" data-weapon-id="${escapeHtml(id)}">
+          <span class="sv-upgrade-index">${i + 1}</span>
+          <span class="sv-upgrade-name"><span class="sv-weapon-dot" style="background:${color}"></span>${escapeHtml(def.name)}</span>
+          <span class="sv-upgrade-desc">${escapeHtml(WEAPON_DESC[id] ?? "新武器")}</span>
+        </button>`;
+      })
+      .join("");
   }
 
   private renderUpgradeChoices(choices: SurvivalUpgradeDef[]): void {

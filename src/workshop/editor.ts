@@ -38,7 +38,16 @@ import {
   OPENING_DEFAULTS,
 } from "./doc";
 
-export type EditorTool = "empty" | "wall" | "door" | "window" | "human" | "spawn" | "erase";
+export type EditorTool =
+  | "empty"
+  | "wall"
+  | "door"
+  | "window"
+  | "grass"
+  | "water"
+  | "human"
+  | "spawn"
+  | "erase";
 
 /** 区域选中引用：kind + 数组下标 */
 export interface ZoneRef {
@@ -90,6 +99,10 @@ const COLORS = {
   doorEdge: "#c9a227",
   window: "#2b6a96",
   windowEdge: "#5aa9dc",
+  grass: "#2f6b3d",
+  grassEdge: "#59b56f",
+  water: "#12405f",
+  waterEdge: "#3d8fbc",
   grid: "rgba(255, 255, 255, 0.05)",
   humanFill: "rgba(74, 222, 128, 0.10)",
   humanStroke: "rgba(74, 222, 128, 0.55)",
@@ -680,6 +693,13 @@ export class WorkshopEditor {
       if (current !== TILE_CODES.wall) setTile(this.doc, x, y, TILE_CODES.wall);
       return;
     }
+    if (this.tool === "grass" || this.tool === "water") {
+      // 地形画在门窗上时把该开口一并移除，避免瓦片与 openings 数据打架
+      const code = this.tool === "grass" ? TILE_CODES.grass : TILE_CODES.water;
+      removeOpeningAt(this.doc, x, y, code);
+      if (current !== code) setTile(this.doc, x, y, code);
+      return;
+    }
     if (this.tool === "erase") {
       // 擦门窗恢复成墙，擦墙 / 空地清成空地
       if (removeOpeningAt(this.doc, x, y, TILE_CODES.wall)) return;
@@ -840,12 +860,26 @@ export class WorkshopEditor {
             ctx.fillStyle = COLORS.doorEdge;
             ctx.fillRect(sx, sy, size, Math.min(2, scale * 0.12));
           }
-        } else {
+        } else if (code === TILE_CODES.window) {
           ctx.fillStyle = COLORS.window;
           ctx.fillRect(sx, sy, size, size);
           if (scale >= 8) {
             ctx.fillStyle = COLORS.windowEdge;
             ctx.fillRect(sx, sy, size, Math.min(2, scale * 0.12));
+          }
+        } else if (code === TILE_CODES.grass) {
+          ctx.fillStyle = COLORS.grass;
+          ctx.fillRect(sx, sy, size, size);
+          if (scale >= 8) {
+            ctx.fillStyle = COLORS.grassEdge;
+            ctx.fillRect(sx, sy, size, Math.min(2, scale * 0.12));
+          }
+        } else {
+          ctx.fillStyle = COLORS.water;
+          ctx.fillRect(sx, sy, size, size);
+          if (scale >= 8) {
+            ctx.fillStyle = COLORS.waterEdge;
+            ctx.fillRect(sx, sy + size * 0.35, size, Math.min(1.6, scale * 0.08));
           }
         }
       }
@@ -1051,7 +1085,11 @@ export class WorkshopEditor {
             ? COLORS.wall
             : code === TILE_CODES.door
               ? COLORS.doorEdge
-              : COLORS.windowEdge;
+              : code === TILE_CODES.window
+                ? COLORS.windowEdge
+                : code === TILE_CODES.grass
+                  ? COLORS.grassEdge
+                  : COLORS.waterEdge;
         ctx.fillRect(offsetX + x * cell, offsetY + y * cell, cell + 0.5, cell + 0.5);
       }
     }

@@ -104,4 +104,7 @@ export const arena: MapDef = {
   },
   buildBiteDamage: 4,
   buildBiteSlow: 1.5,
+  grassTiles: [],
+  waterTiles: [],
+  waterBlockers: [],
 };

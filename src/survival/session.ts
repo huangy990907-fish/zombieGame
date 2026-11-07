@@ -11,6 +11,7 @@ import { HUMAN_DEF } from "../data/humans";
 import { resolveMap, type MapDef } from "../data/maps";
 import { effectiveHuman, effectiveWeapon } from "../data/settings/runtime";
 import { SURVIVAL, SURVIVAL_XP_BY_KIND, xpNeedFor, type SurvivalUpgradeDef } from "../data/survival/config";
+import { WEAPON_LIST } from "../data/weapons";
 import { ZOMBIE_IDS, getZombieDef, zombieBodyDiameter } from "../data/zombies";
 import type { SpawnRegion } from "../data/types";
 import { createWorld, type Human, type World, type Zombie } from "../core/world";
@@ -44,6 +45,8 @@ export class SurvivalSession {
   pendingLevelUps = 0;
   /** 当前三选一候选 */
   choices: SurvivalUpgradeDef[] = [];
+  /** 抽到「获得新武器」后的二段候选（未持有武器 id） */
+  weaponPicks: string[] = [];
   /** 抽卡序号：每次重抽 +1，UI 用它区分“id 与顺序恰好相同”的两次独立结果 */
   choiceSeq = 0;
   record: SurvivalRecord = loadSurvivalRecord();
@@ -54,6 +57,12 @@ export class SurvivalSession {
   private maxHpBonus = 0;
   private moveMul = 1;
   private weaponLevel = 1;
+  private ownedWeapons: string[] = [SURVIVAL.weapon];
+  private extraProjectiles = 0;
+  private critChance = 0;
+  private critMul = SURVIVAL.baseCritMul;
+  private lifesteal = 0;
+  private pickupMul = SURVIVAL.basePickupMul;
 
   private inputX = 0;
   private inputY = 0;
@@ -85,6 +94,21 @@ export class SurvivalSession {
     return SURVIVAL.weaponLevels.length;
   }
 
+  /** 已持有武器 id（主武器在前；最多 2 把） */
+  get weapons(): string[] {
+    return this.ownedWeapons.slice();
+  }
+
+  /** 第二把武器 id；未持有时 null */
+  get secondaryWeapon(): string | null {
+    return this.ownedWeapons.length > 1 ? this.ownedWeapons[1] : null;
+  }
+
+  /** 是否还能再拿一把武器 */
+  get canTakeWeapon(): boolean {
+    return this.ownedWeapons.length < SURVIVAL.maxWeapons;
+  }
+
   /** 开始 / 重开一局；记录不重置 */
   start(mapOrId?: string): void {
     this.map = resolveMap(mapOrId ?? this.map.id).map;
@@ -95,12 +119,19 @@ export class SurvivalSession {
     this.xpNeed = xpNeedFor(1);
     this.pendingLevelUps = 0;
     this.choices = [];
+    this.weaponPicks = [];
     this.choiceSeq = 0;
     this.attackMul = 1;
     this.fireRateMul = 1;
     this.maxHpBonus = 0;
     this.moveMul = 1;
     this.weaponLevel = 1;
+    this.ownedWeapons = [SURVIVAL.weapon];
+    this.extraProjectiles = 0;
+    this.critChance = 0;
+    this.critMul = SURVIVAL.baseCritMul;
+    this.lifesteal = 0;
+    this.pickupMul = SURVIVAL.basePickupMul;
     this.inputX = 0;
     this.inputY = 0;
     this.spawnTimer = SURVIVAL.spawn.initialDelay;
@@ -166,6 +197,7 @@ export class SurvivalSession {
     updateZombies(this.world, dt);
     updateCombat(this.world, dt);
     this.world.ageEffects(dt);
+    this.world.tickTerrain(dt);
     this.world.compact();
 
     if (player.hp <= 0) {
@@ -186,15 +218,26 @@ export class SurvivalSession {
     if (this.state !== "choosing") return;
     const up = this.choices.find((c) => c.id === id);
     if (!up) return;
-    this.applyUpgrade(up);
-    this.pendingLevelUps = Math.max(0, this.pendingLevelUps - 1);
-    sound.play(SFX.UI_CLICK);
-    if (this.pendingLevelUps > 0) {
-      this.choices = this.rollChoices();
-    } else {
+    // 「获得新武器」先进入第二段武器选择，不立即结算
+    if (up.kind === "newWeapon") {
+      const picks = this.rollWeaponPicks();
+      if (picks.length === 0) return;
+      this.weaponPicks = picks;
       this.choices = [];
-      this.state = "playing";
+      sound.play(SFX.UI_CLICK);
+      return;
     }
+    this.applyUpgrade(up);
+    this.consumeChoice();
+  }
+
+  /** 二段武器选择：从 weaponPicks 里挑一把装备为副武器 */
+  chooseWeapon(id: string): void {
+    if (this.state !== "choosing") return;
+    if (!this.weaponPicks.includes(id)) return;
+    this.addWeapon(id);
+    this.weaponPicks = [];
+    this.consumeChoice();
   }
 
   /** 渲染层读取：经验球位置 */
@@ -249,6 +292,51 @@ export class SurvivalSession {
     player.speedOverride = effectiveHuman().speed * this.moveMul;
     player.maxHp = this.baseHp + this.maxHpBonus;
     player.hp = Math.min(player.hp, player.maxHp);
+    player.extraProjectiles = this.extraProjectiles;
+    player.critChance = this.critChance;
+    player.critMul = this.critMul;
+  }
+
+  /** 结算一次已选升级：扣待选次数，继续弹下一组或恢复游戏 */
+  private consumeChoice(): void {
+    this.pendingLevelUps = Math.max(0, this.pendingLevelUps - 1);
+    sound.play(SFX.UI_CLICK);
+    this.weaponPicks = [];
+    if (this.pendingLevelUps > 0) {
+      this.choices = this.rollChoices();
+    } else {
+      this.choices = [];
+      this.state = "playing";
+    }
+  }
+
+  /** 未持有武器随机排序；抽到「获得新武器」时展示 */
+  private rollWeaponPicks(): string[] {
+    if (!this.canTakeWeapon) return [];
+    const pool = WEAPON_LIST.map((w) => w.id).filter((id) => !this.ownedWeapons.includes(id));
+    for (let i = pool.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [pool[i], pool[j]] = [pool[j], pool[i]];
+    }
+    return pool;
+  }
+
+  /** 装备副武器（最多 2 把）；弹药 / 冷却 / 换弹独立初始化 */
+  private addWeapon(id: string): void {
+    if (!this.canTakeWeapon || this.ownedWeapons.includes(id)) return;
+    const player = this.player;
+    this.ownedWeapons.push(id);
+    if (player) {
+      if (!player.weapon2) {
+        const def = effectiveWeapon(id);
+        player.weapon2 = id;
+        player.ammo2 = def.magazine;
+        player.fire2 = 0;
+        player.reload2 = 0;
+        player.burst2 = 0;
+      }
+      this.syncPlayerStats();
+    }
   }
 
   private applyUpgrade(up: SurvivalUpgradeDef): void {
@@ -274,6 +362,24 @@ export class SurvivalSession {
       case "weapon":
         this.weaponLevel = Math.min(this.weaponLevelMax, this.weaponLevel + 1);
         break;
+      case "extraProjectile":
+        this.extraProjectiles = Math.min(SURVIVAL.extraProjectileMax, this.extraProjectiles + 1);
+        break;
+      case "critChance":
+        this.critChance = Math.min(1, this.critChance + up.amount);
+        break;
+      case "critDamage":
+        this.critMul += up.amount;
+        break;
+      case "lifesteal":
+        this.lifesteal += up.amount;
+        break;
+      case "pickupRange":
+        this.pickupMul += up.amount;
+        break;
+      case "newWeapon":
+        // 二段选择在 chooseUpgrade / chooseWeapon 里处理
+        break;
     }
     this.syncPlayerStats();
   }
@@ -287,6 +393,12 @@ export class SurvivalSession {
     const pool: SurvivalUpgradeDef[] = [];
     for (const u of SURVIVAL.upgrades) {
       if (u.kind === "weapon" && this.weaponLevel >= this.weaponLevelMax) continue;
+      if (u.kind === "newWeapon" && !this.canTakeWeapon) continue;
+      if (u.kind === "extraProjectile" && this.extraProjectiles >= SURVIVAL.extraProjectileMax) continue;
+      if ("maxStacks" in u && u.maxStacks !== undefined) {
+        // 目前只有额外投射物用 maxStacks；其它卡如需叠加上限在此扩展计数
+        if (u.kind === "extraProjectile" && this.extraProjectiles >= u.maxStacks) continue;
+      }
       pool.push(u as SurvivalUpgradeDef);
     }
     for (let i = pool.length - 1; i > 0; i--) {
@@ -313,6 +425,12 @@ export class SurvivalSession {
   }
 
   private onZombieKilled(z: Zombie): void {
+    // 吸血：击杀即按最大生命比例回血（与是否掉经验无关）
+    const player = this.player;
+    if (player && player.alive && this.lifesteal > 0) {
+      const maxHp = player.maxHp ?? 100;
+      player.hp = Math.min(maxHp, player.hp + maxHp * this.lifesteal);
+    }
     if (Math.random() > SURVIVAL.xp.dropChance) return;
     const off = SURVIVAL.xp.orbOffset;
     this.orbs.push({
@@ -326,7 +444,8 @@ export class SurvivalSession {
   private updateOrbs(dt: number): void {
     const player = this.player;
     if (!player) return;
-    const pickup2 = SURVIVAL.xp.pickupRadius * SURVIVAL.xp.pickupRadius;
+    const pickup2 = SURVIVAL.xp.pickupRadius * this.pickupMul;
+    const pickupSq = pickup2 * pickup2;
     const collect = SURVIVAL.xp.collectRadius;
     // 本帧的吸附步长，固定不变；是否“够得着”由步长和剩余距离比较决定
     const step = SURVIVAL.xp.magnetSpeed * dt;
@@ -335,7 +454,7 @@ export class SurvivalSession {
       const dx = player.x - orb.x;
       const dy = player.y - orb.y;
       const d2 = dx * dx + dy * dy;
-      if (d2 > pickup2) continue;
+      if (d2 > pickupSq) continue;
       const d = Math.sqrt(d2);
       /*
        * 这一帧能走到拾取圈内（或已经贴脸）就直接吃掉。
@@ -376,6 +495,12 @@ export class SurvivalSession {
     const min2 = cfg.minDistance * cfg.minDistance;
     const viewW = this.map.width / SURVIVAL.cameraZoom;
     const viewH = this.map.height / SURVIVAL.cameraZoom;
+    // 随对局时长提升僵尸血量，与同屏上限一起构成难度曲线
+    const tier = Math.floor(this.elapsed / cfg.tierSeconds);
+    const hpScale = Math.min(
+      SURVIVAL.difficulty.hpMaxScale,
+      1 + tier * SURVIVAL.difficulty.hpPerTier,
+    );
 
     for (let i = 0; i < cfg.attempts; i++) {
       const x = randRange(this.area.x0, this.area.x1);
@@ -389,7 +514,7 @@ export class SurvivalSession {
       if (!offscreen) continue;
       const spot = this.world.findFreeSpot(x, y, body, this.area);
       if (!spot) continue;
-      this.world.spawnZombie(spot.x, spot.y, kind, 1);
+      this.world.spawnZombie(spot.x, spot.y, kind, hpScale);
       return;
     }
   }

@@ -23,6 +23,8 @@ export const TILE_CODES = {
   wall: 1,
   door: 2,
   window: 3,
+  grass: 4,
+  water: 5,
 } as const;
 
 export type TileCode = (typeof TILE_CODES)[keyof typeof TILE_CODES];
@@ -32,6 +34,8 @@ const CHAR_OF_CODE: Record<TileCode, string> = {
   [TILE_CODES.wall]: TILE_CHARS.wall,
   [TILE_CODES.door]: TILE_CHARS.door,
   [TILE_CODES.window]: TILE_CHARS.window,
+  [TILE_CODES.grass]: TILE_CHARS.grass,
+  [TILE_CODES.water]: TILE_CHARS.water,
 };
 
 const CODE_OF_CHAR: Record<string, TileCode> = {
@@ -39,6 +43,8 @@ const CODE_OF_CHAR: Record<string, TileCode> = {
   [TILE_CHARS.wall]: TILE_CODES.wall,
   [TILE_CHARS.door]: TILE_CODES.door,
   [TILE_CHARS.window]: TILE_CODES.window,
+  [TILE_CHARS.grass]: TILE_CODES.grass,
+  [TILE_CHARS.water]: TILE_CODES.water,
 };
 
 export const TILE_NAMES: Record<TileCode, string> = {
@@ -46,6 +52,8 @@ export const TILE_NAMES: Record<TileCode, string> = {
   [TILE_CODES.wall]: "墙",
   [TILE_CODES.door]: "门",
   [TILE_CODES.window]: "窗",
+  [TILE_CODES.grass]: "草丛",
+  [TILE_CODES.water]: "水池",
 };
 
 /** 文档元信息 + 内容；门窗 / 区域允许暂缺，校验面板会报错 */

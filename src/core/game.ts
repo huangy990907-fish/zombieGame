@@ -331,6 +331,7 @@ export class Game {
     updateZombies(this.world, dt);
     updateCombat(this.world, dt);
     this.world.ageEffects(dt);
+    this.world.tickTerrain(dt);
     this.world.compact();
 
     if (!this.started) return;

@@ -18,43 +18,109 @@ import { humanMuzzle } from "../render/pixel";
 
 const queryBuf: Zombie[] = [];
 
+/** 暴击掷骰：返回最终伤害（未设置暴击率时原样返回，不影响其它模式） */
+function critRoll(h: Human, damage: number): number {
+  const chance = h.critChance ?? 0;
+  if (chance <= 0 || Math.random() >= chance) return damage;
+  return damage * (h.critMul ?? 1);
+}
+
+/** 取指定槽位（0 = 主武器，1 = 副武器）的武器状态；副武器未持有时返回空值 */
+interface WeaponSlotState {
+  ammo: () => number;
+  setAmmo: (v: number) => void;
+  fire: () => number;
+  setFire: (v: number) => void;
+  reload: () => number;
+  setReload: (v: number) => void;
+  burst: () => number;
+  setBurst: (v: number) => void;
+}
+
+function slotState(h: Human, slot: 0 | 1): WeaponSlotState {
+  if (slot === 1) {
+    return {
+      ammo: () => h.ammo2 ?? 0,
+      setAmmo: (v) => {
+        h.ammo2 = v;
+      },
+      fire: () => h.fire2 ?? 0,
+      setFire: (v) => {
+        h.fire2 = v;
+      },
+      reload: () => h.reload2 ?? 0,
+      setReload: (v) => {
+        h.reload2 = v;
+      },
+      burst: () => h.burst2 ?? 0,
+      setBurst: (v) => {
+        h.burst2 = v;
+      },
+    };
+  }
+  return {
+    ammo: () => h.ammo,
+    setAmmo: (v) => {
+      h.ammo = v;
+    },
+    fire: () => h.fire,
+    setFire: (v) => {
+      h.fire = v;
+    },
+    reload: () => h.reloadTimer,
+    setReload: (v) => {
+      h.reloadTimer = v;
+    },
+    burst: () => h.burst,
+    setBurst: (v) => {
+      h.burst = v;
+    },
+  };
+}
+
 /**
  * 尝试开火。冷却中 / 换弹中 / 没弹药则直接返回。
  * 弹药打空自动进入换弹。
  *
+ * slot = 1 时使用副武器（尸潮求生双持），冷却 / 弹药 / 换弹完全独立。
+ *
  * 喷火是特例：它不发射子弹，而是"扣 1 格燃料 → 连续喷 burst 秒"，
  * 所以这里只负责点燃，真正的持续伤害由 updateFlame() 每帧推进。
  */
-export function tryFire(world: World, h: Human, angle: number): void {
-  const def = effectiveWeapon(h.weapon);
+export function tryFire(world: World, h: Human, angle: number, slot: 0 | 1 = 0): void {
+  if (slot === 1 && !h.weapon2) return;
+  const weaponId = slot === 1 ? (h.weapon2 as string) : h.weapon;
+  const def = effectiveWeapon(weaponId);
   // 训练场可给单个人类覆盖伤害 / 射速；普通对局两个倍率都是 undefined → 1
   const dmgMul = h.dmgMul ?? 1;
   const cooldown = def.cooldown * (h.cdMul ?? 1);
   // 生存模式等的单角色操控可以单独收窄散布（其余模式不设置，沿用武器定义）
   const spread = h.spreadOverride ?? def.spread;
+  const extra = Math.max(0, Math.min(4, h.extraProjectiles ?? 0));
+  const st = slotState(h, slot);
 
   if (def.kind === "flame") {
-    if (h.burst > 0 || h.reloadTimer > 0 || h.ammo <= 0) return;
-    h.ammo--;
-    h.burst = def.burst;
-    h.fire = 0; // 归零后下一帧立刻开始第一次伤害结算
+    if (st.burst() > 0 || st.reload() > 0 || st.ammo() <= 0) return;
+    st.setAmmo(st.ammo() - 1);
+    st.setBurst(def.burst);
+    st.setFire(0); // 归零后下一帧立刻开始第一次伤害结算
     return;
   }
 
   if (def.kind === "tesla") {
-    if (h.fire > 0 || h.reloadTimer > 0 || h.ammo <= 0) return;
-    h.fire = cooldown;
-    h.ammo--;
+    if (st.fire() > 0 || st.reload() > 0 || st.ammo() <= 0) return;
+    st.setFire(cooldown);
+    st.setAmmo(st.ammo() - 1);
     sound.play(SFX.TESLA);
-    fireTesla(world, h, angle, def, dmgMul);
-    if (h.ammo <= 0) h.reloadTimer = def.reload;
+    fireTesla(world, h, angle, def, dmgMul, weaponId, extra);
+    if (st.ammo() <= 0) st.setReload(def.reload);
     return;
   }
 
-  if (h.fire > 0 || h.reloadTimer > 0 || h.ammo <= 0) return;
+  if (st.fire() > 0 || st.reload() > 0 || st.ammo() <= 0) return;
 
-  h.fire = cooldown;
-  h.ammo--;
+  st.setFire(cooldown);
+  st.setAmmo(st.ammo() - 1);
 
   // —— 武器音效触发（每种武器独立限频，密集开火自然形成火力密度）——
   if (def.kind === "bullet") sound.play(SFX.MG_SHOT);
@@ -62,19 +128,44 @@ export function tryFire(world: World, h: Human, angle: number): void {
   else if (def.kind === "rocket") sound.play(SFX.ROCKET);
 
   if (def.kind === "pellet") {
-    // 霰弹：一发多颗弹丸，每颗独立散布
-    for (let i = 0; i < def.pellets; i++) {
+    // 霰弹：一发多颗弹丸，额外投射物每层多一颗；每颗独立散布与暴击
+    const count = def.pellets + extra;
+    for (let i = 0; i < count; i++) {
       const a = angle + (Math.random() - 0.5) * spread * 2;
-      spawnBullet(world, h, a, def.speed, def.damage * dmgMul, "bullet", 0, def.range / def.speed);
+      spawnBullet(
+        world,
+        h,
+        a,
+        def.speed,
+        critRoll(h, def.damage * dmgMul),
+        "bullet",
+        0,
+        def.range / def.speed,
+        weaponId,
+      );
     }
   } else {
-    // 机枪 / 火箭：单发弹道
-    const a = angle + (Math.random() - 0.5) * spread * 2;
+    // 机枪 / 火箭：额外投射物每层多一条独立弹道，按小角度均匀散开避免完全重叠
+    const count = 1 + extra;
     const kind: BulletKind = def.kind === "rocket" ? "rocket" : "bullet";
-    spawnBullet(world, h, a, def.speed, def.damage * dmgMul, kind, def.blast, def.range / def.speed);
+    for (let i = 0; i < count; i++) {
+      const offset = count > 1 ? (i - (count - 1) / 2) * 0.05 : 0;
+      const a = angle + offset + (Math.random() - 0.5) * spread * 2;
+      spawnBullet(
+        world,
+        h,
+        a,
+        def.speed,
+        critRoll(h, def.damage * dmgMul),
+        kind,
+        def.blast,
+        def.range / def.speed,
+        weaponId,
+      );
+    }
   }
 
-  if (h.ammo <= 0) h.reloadTimer = def.reload;
+  if (st.ammo() <= 0) st.setReload(def.reload);
 }
 
 /** 电击枪视线：墙体和未破的门/窗都会挡住链式跳跃（破口后放行） */
@@ -250,54 +341,71 @@ function addTeslaHitFeedback(world: World, z: Zombie, empowered: boolean): void 
  * 首个目标单挑时伤害 ×2.2；否则以它为起点逐只链式跳跃，
  * 最多命中 chainMaxTargets 只，每跳伤害按 chainFalloff 衰减。
  */
-function fireTesla(world: World, h: Human, angle: number, def: WeaponDef, dmgMul: number): void {
+function fireTesla(
+  world: World,
+  h: Human,
+  angle: number,
+  def: WeaponDef,
+  dmgMul: number,
+  weaponId: string,
+  extraArcs: number,
+): void {
   const cfg = def.tesla;
   if (!cfg) return;
-  const muzzle = humanMuzzle(h.weapon, h.x, h.y, angle);
-  const first = findTeslaFirst(world, muzzle.x, muzzle.y, angle, def.range);
-  if (!first) return;
+  // 额外投射物：每层多一道独立电弧，各自选目标；起始角度小幅散开避免完全重叠
+  const arcs = 1 + Math.max(0, extraArcs);
+  let totalHits = 0;
+  let anySolo = false;
+  for (let arc = 0; arc < arcs; arc++) {
+    const arcAngle = angle + (arc === 0 ? 0 : (Math.random() - 0.5) * 0.18);
+    const muzzle = humanMuzzle(weaponId, h.x, h.y, arcAngle);
+    const first = findTeslaFirst(world, muzzle.x, muzzle.y, arcAngle, def.range);
+    if (!first) continue;
 
-  // 单体加成只看“首个目标附近有没有其他僵尸”，不看它们是否被墙挡住
-  let hasOtherNear = false;
-  world.zombieGrid.query(first.x, first.y, cfg.singleRadius, queryBuf);
-  for (let i = 0; i < queryBuf.length; i++) {
-    const z = queryBuf[i];
-    if (z.alive && z !== first) {
-      hasOtherNear = true;
-      break;
+    // 单体加成只看“首个目标附近有没有其他僵尸”，不看它们是否被墙挡住
+    let hasOtherNear = false;
+    world.zombieGrid.query(first.x, first.y, cfg.singleRadius, queryBuf);
+    for (let i = 0; i < queryBuf.length; i++) {
+      const z = queryBuf[i];
+      if (z.alive && z !== first) {
+        hasOtherNear = true;
+        break;
+      }
     }
-  }
-  const solo = !hasOtherNear;
-  const firstDamage = def.damage * dmgMul * (solo ? cfg.singleBonus : 1);
-  const source: DamageSource = { weapon: h.weapon, humanId: h.id };
-  addTeslaArc(world, muzzle.x, muzzle.y, first.x, first.y, 0xffe14d, 1);
-  damageZombie(world, first, firstDamage, source);
-  addTeslaHitFeedback(world, first, solo);
+    const solo = !hasOtherNear;
+    anySolo = anySolo || solo;
+    const firstDamage = critRoll(h, def.damage * dmgMul) * (solo ? cfg.singleBonus : 1);
+    const source: DamageSource = { weapon: weaponId, humanId: h.id };
+    addTeslaArc(world, muzzle.x, muzzle.y, first.x, first.y, 0xffe14d, 1);
+    damageZombie(world, first, firstDamage, source);
+    addTeslaHitFeedback(world, first, solo);
 
-  const visited = new Set<number>([first.id]);
-  let current = first;
-  let damage = firstDamage;
-  let hits = 1;
-  for (let jump = 1; jump < cfg.chainMaxTargets; jump++) {
-    const next = findTeslaNext(world, current, cfg.chainRadius, visited);
-    if (!next) break;
-    damage *= cfg.chainFalloff;
-    addTeslaArc(
-      world,
-      current.x,
-      current.y,
-      next.x,
-      next.y,
-      0xffe14d,
-      arcStrength(cfg.chainFalloff, jump),
-    );
-    damageZombie(world, next, damage, source);
-    addTeslaHitFeedback(world, next, false);
-    visited.add(next.id);
-    current = next;
-    hits++;
+    const visited = new Set<number>([first.id]);
+    let current = first;
+    let damage = firstDamage;
+    let hits = 1;
+    for (let jump = 1; jump < cfg.chainMaxTargets; jump++) {
+      const next = findTeslaNext(world, current, cfg.chainRadius, visited);
+      if (!next) break;
+      damage *= cfg.chainFalloff;
+      addTeslaArc(
+        world,
+        current.x,
+        current.y,
+        next.x,
+        next.y,
+        0xffe14d,
+        arcStrength(cfg.chainFalloff, jump),
+      );
+      damageZombie(world, next, damage, source);
+      addTeslaHitFeedback(world, next, false);
+      visited.add(next.id);
+      current = next;
+      hits++;
+    }
+    totalHits += hits;
   }
-  world.onTeslaVolley?.(hits, solo);
+  world.onTeslaVolley?.(totalHits, anySolo);
 }
 
 /**
@@ -306,29 +414,31 @@ function fireTesla(world: World, h: Human, angle: number, def: WeaponDef, dmgMul
  * 喷射中：每 cooldown 秒结算一次锥形范围内的伤害，并生成一簇散射火舌；
  * 一轮喷完：进入散热倒计时（reloadTimer），这段时间不能再喷。
  */
-export function updateFlame(world: World, h: Human, dt: number): void {
-  if (h.fire > 0) h.fire -= dt;
-  if (h.burst <= 0) return;
+export function updateFlame(world: World, h: Human, dt: number, slot: 0 | 1 = 0): void {
+  const st = slotState(h, slot);
+  if (st.fire() > 0) st.setFire(st.fire() - dt);
+  if (st.burst() <= 0) return;
 
-  const def = effectiveWeapon(h.weapon);
-  h.burst -= dt;
-  if (h.fire > 0) return;
+  const weaponId = slot === 1 ? (h.weapon2 as string) : h.weapon;
+  const def = effectiveWeapon(weaponId);
+  st.setBurst(st.burst() - dt);
+  if (st.fire() > 0) return;
 
   // 射速倍率对喷火同样生效：倍率越大，伤害结算越频繁
-  h.fire = def.cooldown * (h.cdMul ?? 1);
+  st.setFire(def.cooldown * (h.cdMul ?? 1));
   sound.play(SFX.FLAME); // 持续喷火每轮结算都响（限频 60ms）
-  flameTick(world, h, def);
-  if (h.burst <= 0) h.reloadTimer = def.reload;
+  flameTick(world, h, def, weaponId);
+  if (st.burst() <= 0) st.setReload(def.reload);
 }
 
 /** 一次火焰伤害结算：喷出一簇倒锥形的 ember 火星 + 对锥形内丧尸造成伤害 */
-function flameTick(world: World, h: Human, def: WeaponDef): void {
+function flameTick(world: World, h: Human, def: WeaponDef, weaponId: string): void {
   const angle = h.facing;
   const dirX = Math.cos(angle);
   const dirY = Math.sin(angle);
   // 枪口位置：精灵 fire 帧的 muzzle 偏移（muzzle - anchor）按朝向旋转，
   // 子弹与火舌都从这里出膛，保证视觉上贴着枪管口
-  const muzzle = humanMuzzle(h.weapon, h.x, h.y, angle);
+  const muzzle = humanMuzzle(weaponId, h.x, h.y, angle);
   const muzzleX = muzzle.x;
   const muzzleY = muzzle.y;
 
@@ -361,8 +471,23 @@ function flameTick(world: World, h: Human, def: WeaponDef): void {
   // 锥形范围持续伤害：用点积判断丧尸是否落在以 facing 为中心的扇形里
   world.zombieGrid.query(h.x, h.y, def.range, queryBuf);
   const minDot = Math.cos(def.spread);
+
+  // 火焰覆盖到的草丛格进入燃烧；持续喷火会不断刷新燃烧计时
+  const range2 = def.range * def.range;
+  for (const tile of world.map.grassTiles) {
+    const cx = tile.x + tile.w * 0.5;
+    const cy = tile.y + tile.h * 0.5;
+    const dx = cx - muzzleX;
+    const dy = cy - muzzleY;
+    const d2 = dx * dx + dy * dy;
+    if (d2 > range2) continue;
+    const d = Math.sqrt(d2);
+    if (d < 1 || (dx * dirX + dy * dirY) / d < minDot) continue;
+    world.igniteGrassAt(cx, cy);
+  }
+
   const dmgMul = h.dmgMul ?? 1;
-  const source: DamageSource = { weapon: h.weapon, humanId: h.id };
+  const source: DamageSource = { weapon: weaponId, humanId: h.id };
   for (let i = 0; i < queryBuf.length; i++) {
     const z = queryBuf[i];
     if (!z.alive) continue;
@@ -371,7 +496,7 @@ function flameTick(world: World, h: Human, def: WeaponDef): void {
     const d = Math.hypot(dx, dy);
     if (d < 1 || d > def.range) continue;
     if ((dx * dirX + dy * dirY) / d < minDot) continue;
-    damageZombie(world, z, def.damage * dmgMul, source);
+    damageZombie(world, z, critRoll(h, def.damage * dmgMul), source);
   }
 }
 
@@ -384,8 +509,9 @@ function spawnBullet(
   kind: BulletKind,
   blast: number,
   life: number,
+  weaponId: string = h.weapon,
 ): void {
-  const muzzle = humanMuzzle(h.weapon, h.x, h.y, angle);
+  const muzzle = humanMuzzle(weaponId, h.x, h.y, angle);
   const x = muzzle.x;
   const y = muzzle.y;
   world.bullets.push({
@@ -401,7 +527,7 @@ function spawnBullet(
     life,
     alive: true,
     // 记录来源，训练场据此把伤害/击杀归到具体武器
-    weapon: h.weapon,
+    weapon: weaponId,
     ownerId: h.id,
     dmgMul: h.dmgMul ?? 1,
   });

@@ -15,7 +15,9 @@
  */
 import { HUMAN_BODY_DIAMETER } from "../data/humans";
 import { DEFAULT_MAP, resolveMap, type MapDef } from "../data/maps";
+import { TILE_SIZE } from "../data/maps/schema";
 import { effectiveWeapon } from "../data/settings/runtime";
+import type { Rect } from "../data/types";
 import { WEAPON_LIST, getWeaponDef } from "../data/weapons";
 import { ZOMBIE_LIST, getZombieDef, zombieBodyDiameter } from "../data/zombies";
 import { createWorld } from "../core/world";
@@ -28,8 +30,49 @@ import type { FloatingText } from "../render/renderer";
 /** 逻辑固定步长（和正式对局一致：1/60 秒） */
 export const STEP = 1 / 60;
 
-export type TrainTool = "select" | "delete";
+export type TrainTool = "select" | "delete" | "grass" | "water" | "terrain-erase";
 export type UnitKind = "human" | "zombie";
+
+/** 把同种地形格合并成矩形（草丛 / 水池画笔后重算导航阻挡用） */
+function mergeCellRects(cells: Set<number>, cols: number, rows: number): Rect[] {
+  interface Band {
+    x: number;
+    w: number;
+    y: number;
+  }
+  const rects: Rect[] = [];
+  let bands: Band[] = [];
+  const emit = (band: Band, endY: number): void => {
+    rects.push({
+      x: band.x * TILE_SIZE,
+      y: band.y * TILE_SIZE,
+      w: band.w * TILE_SIZE,
+      h: (endY - band.y) * TILE_SIZE,
+    });
+  };
+  for (let y = 0; y < rows; y++) {
+    const runs: Band[] = [];
+    for (let x = 0; x < cols; x++) {
+      if (!cells.has(y * cols + x)) continue;
+      const start = x;
+      while (x + 1 < cols && cells.has(y * cols + x + 1)) x++;
+      runs.push({ x: start, w: x - start + 1, y });
+    }
+    const next: Band[] = [];
+    for (const band of bands) {
+      const hit = runs.findIndex((r) => r.x === band.x && r.w === band.w);
+      if (hit >= 0) {
+        next.push(band);
+        runs.splice(hit, 1);
+      } else {
+        emit(band, y);
+      }
+    }
+    bands = next.concat(runs);
+  }
+  for (const band of bands) emit(band, rows);
+  return rects;
+}
 
 export interface ZombieOption {
   id: string;
@@ -138,10 +181,14 @@ export class TrainingSession {
   private preferredMap: MapDef | undefined = undefined;
   /** 构造 / reset 时显式指定的地图 id；未指定则沿用当前地图 */
   private preferredMapId: string | undefined = undefined;
+  /** 未经地形画笔修改的原始地图，reset 时回到它（画笔改动不跨会话保留） */
+  private baseMap: MapDef = DEFAULT_MAP;
   /** 最近一次地图解析是否回退默认图（main.ts 据此提示） */
   mapFallback = false;
   /** 最近一次请求的地图 id */
   requestedMapId: string | undefined = undefined;
+  /** 地形画笔改动后回调（main.ts 用它重建渲染静态层） */
+  onTerrainChanged?: () => void;
   paused = false;
   /** 速度倍率：1 = 正常，0.25 = 慢放 */
   speed = 1;
@@ -197,6 +244,7 @@ export class TrainingSession {
     const resolved = resolveMap(mapOrId);
     this.mapFallback = resolved.fallback;
     this.requestedMapId = resolved.requestedId;
+    this.baseMap = resolved.map;
     this.world = createWorld(resolved.map);
   }
 
@@ -204,7 +252,7 @@ export class TrainingSession {
   reset(mapOrId?: MapDef | string): void {
     if (typeof mapOrId === "string") this.preferredMapId = mapOrId;
     else if (mapOrId) this.preferredMap = mapOrId;
-    this.applyMap(mapOrId ?? this.preferredMap ?? this.preferredMapId ?? this.world.map);
+    this.applyMap(mapOrId ?? this.preferredMap ?? this.preferredMapId ?? this.baseMap);
     this.installHooks();
     this.paused = false;
     this.speed = 1;
@@ -405,6 +453,7 @@ export class TrainingSession {
     updateZombies(this.world, dt);
     updateCombat(this.world, dt);
     this.world.ageEffects(dt);
+    this.world.tickTerrain(dt);
     this.world.compact();
     this.ageFloaters(dt);
     this.dropDeadSelection();
@@ -456,8 +505,11 @@ export class TrainingSession {
     return h;
   }
 
-  /** 画布点击的统一入口：按当前工具决定生成 / 删除 / 选中 */
+  /** 画布点击的统一入口：按当前工具决定地形绘制 / 生成 / 删除 / 选中 */
   handleClick(x: number, y: number): boolean {
+    if (this.tool === "grass") return this.paintTerrain(x, y, "grass");
+    if (this.tool === "water") return this.paintTerrain(x, y, "water");
+    if (this.tool === "terrain-erase") return this.paintTerrain(x, y, "clear");
     if (this.armed) {
       if (this.armed.kind === "zombie") return this.spawnZombie(this.armed.id, x, y) !== null;
       return this.spawnHuman(this.armed.id, x, y) !== null;
@@ -466,6 +518,59 @@ export class TrainingSession {
       return this.deleteAt(x, y);
     }
     return this.selectAt(x, y);
+  }
+
+  /**
+   * 训练场地形画笔：在 16px 格上画 / 擦草丛与水池。
+   * 复制当前地图后再改，避免污染从工坊 / 目录共享出来的 MapDef；
+   * 改完由 World 重建流场与区域缓存，并通知渲染层重画静态层。
+   */
+  paintTerrain(x: number, y: number, kind: "grass" | "water" | "clear"): boolean {
+    const map = this.world.map;
+    const cols = Math.ceil(map.width / TILE_SIZE);
+    const rows = Math.ceil(map.height / TILE_SIZE);
+    const tx = Math.floor(x / TILE_SIZE);
+    const ty = Math.floor(y / TILE_SIZE);
+    if (tx < 0 || ty < 0 || tx >= cols || ty >= rows) return false;
+    const cell = ty * cols + tx;
+    const cellRect: Rect = { x: tx * TILE_SIZE, y: ty * TILE_SIZE, w: TILE_SIZE, h: TILE_SIZE };
+    // 墙体 / 门窗上不画地形，避免视觉与碰撞打架
+    const overlaps = (r: Rect): boolean =>
+      cellRect.x < r.x + r.w && r.x < cellRect.x + cellRect.w && cellRect.y < r.y + r.h && r.y < cellRect.y + cellRect.h;
+    if (map.walls.some(overlaps) || map.openings.some((o) => overlaps(o.rect))) return false;
+
+    const grass = new Set<number>();
+    for (const r of map.grassTiles) grass.add(Math.floor(r.y / TILE_SIZE) * cols + Math.floor(r.x / TILE_SIZE));
+    const water = new Set<number>();
+    for (const r of map.waterTiles) water.add(Math.floor(r.y / TILE_SIZE) * cols + Math.floor(r.x / TILE_SIZE));
+
+    const hadGrass = grass.has(cell);
+    const hadWater = water.has(cell);
+    if (kind === "grass" && hadGrass) return false;
+    if (kind === "water" && hadWater) return false;
+    if (kind === "clear" && !hadGrass && !hadWater) return false;
+
+    grass.delete(cell);
+    water.delete(cell);
+    if (kind === "grass") grass.add(cell);
+    else if (kind === "water") water.add(cell);
+
+    const toRects = (cells: Set<number>): Rect[] =>
+      [...cells].map((c) => ({
+        x: (c % cols) * TILE_SIZE,
+        y: Math.floor(c / cols) * TILE_SIZE,
+        w: TILE_SIZE,
+        h: TILE_SIZE,
+      }));
+    const next: MapDef = {
+      ...map,
+      grassTiles: toRects(grass),
+      waterTiles: toRects(water),
+      waterBlockers: mergeCellRects(water, cols, rows),
+    };
+    this.world.applyTerrainMap(next);
+    this.onTerrainChanged?.();
+    return true;
   }
 
   selectAt(x: number, y: number, radius = 24): boolean {

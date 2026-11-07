@@ -52,12 +52,14 @@ export class RegionMap {
     const cells = this.cols * this.rows;
     const blocked = new Uint8Array(cells);
 
-    // 墙体：与流场一致，用格子中心是否落在墙内判定
+    // 墙体与水池：与流场一致，用格子中心是否落在阻挡矩形内判定；
+    // 水池是不可穿越边界，不进入开口候选。
+    const solids = [...map.walls, ...map.waterBlockers];
     for (let gy = 0; gy < this.rows; gy++) {
       for (let gx = 0; gx < this.cols; gx++) {
         const cx = (gx + 0.5) * CELL;
         const cy = (gy + 0.5) * CELL;
-        for (const w of map.walls) {
+        for (const w of solids) {
           if (cx >= w.x && cx <= w.x + w.w && cy >= w.y && cy <= w.y + w.h) {
             blocked[gy * this.cols + gx] = 1;
             break;

@@ -12,7 +12,13 @@ export type SurvivalUpgradeKind =
   | "fireRate"
   | "maxHp"
   | "moveSpeed"
-  | "weapon";
+  | "weapon"
+  | "newWeapon"
+  | "extraProjectile"
+  | "critChance"
+  | "critDamage"
+  | "lifesteal"
+  | "pickupRange";
 
 export interface SurvivalUpgradeDef {
   id: string;
@@ -26,8 +32,16 @@ export interface SurvivalUpgradeDef {
    *  - maxHp：血量上限增量，并等量回复
    *  - moveSpeed：移速倍率增量
    *  - weapon：武器等级 +1
+   *  - newWeapon：进入第二段武器选择（amount 不用）
+   *  - extraProjectile：额外投射物层数 +1
+   *  - critChance：暴击率增量
+   *  - critDamage：暴击伤害倍率增量
+   *  - lifesteal：每次击杀回复最大生命的比例
+   *  - pickupRange：经验拾取范围倍率增量
    */
   amount: number;
+  /** 最多可叠加层数；未设置表示无上限（受其它上限过滤） */
+  maxStacks?: number;
 }
 
 export const SURVIVAL = {
@@ -35,6 +49,14 @@ export const SURVIVAL = {
   defaultMapId: "open-field",
   /** 玩家固定武器 */
   weapon: "mg",
+  /** 最多同时持有的武器数量（主武器 + 副武器） */
+  maxWeapons: 2,
+  /** 「额外投射物」最多叠加层数 */
+  extraProjectileMax: 4,
+  /** 暴击伤害基础倍率（暴击率默认 0） */
+  baseCritMul: 1.5,
+  /** 拾取范围基础倍率 */
+  basePickupMul: 1,
   /**
    * 玩家基础伤害倍率。单人面对整片尸潮，需要比放置模式更高的
    * 单位输出；升级的「火力强化」在此基础上继续累乘。
@@ -73,11 +95,11 @@ export const SURVIVAL = {
     /** 出怪间隔下限（秒） */
     minInterval: 0.7,
     /** 基础同屏上限 */
-    baseMaxAlive: 5,
+    baseMaxAlive: 6,
     /** 每档增加的同屏上限 */
     maxAliveStep: 2,
     /** 同屏上限封顶 */
-    maxAliveCap: 24,
+    maxAliveCap: 28,
   },
 
   difficulty: {
@@ -90,6 +112,10 @@ export const SURVIVAL = {
     fatStartLevel: 4,
     fatBase: 2,
     fatPerLevel: 2,
+    /** 每档（30 秒）僵尸血量额外增长比例 */
+    hpPerTier: 0.08,
+    /** 血量倍率封顶，避免长局单只僵尸硬到打不动 */
+    hpMaxScale: 2.5,
   },
 
   xp: {
@@ -123,7 +149,32 @@ export const SURVIVAL = {
     { id: "fireRate", name: "急速装填", desc: "射击间隔 -8%", kind: "fireRate", amount: 0.92 },
     { id: "maxHp", name: "强健体魄", desc: "血量上限 +20，并立即回复 20", kind: "maxHp", amount: 20 },
     { id: "moveSpeed", name: "轻装疾行", desc: "移动速度 +8%", kind: "moveSpeed", amount: 0.08 },
-    { id: "weapon", name: "武器升级", desc: "冲锋枪 +1 级（最高 3 级）", kind: "weapon", amount: 1 },
+    { id: "weapon", name: "武器升级", desc: "主武器 +1 级（最高 3 级）", kind: "weapon", amount: 1 },
+    {
+      id: "newWeapon",
+      name: "获得新武器",
+      desc: "从尚未持有的武器中二选一，最多同时持有 2 把",
+      kind: "newWeapon",
+      amount: 1,
+    },
+    {
+      id: "extraProjectile",
+      name: "额外投射物 +1",
+      desc: "多一发弹道；电击枪多一道电弧（最多叠 4 层）",
+      kind: "extraProjectile",
+      amount: 1,
+      maxStacks: 4,
+    },
+    { id: "critChance", name: "致命一击", desc: "暴击率 +8%", kind: "critChance", amount: 0.08 },
+    { id: "critDamage", name: "暴击强化", desc: "暴击伤害 +30%", kind: "critDamage", amount: 0.3 },
+    { id: "lifesteal", name: "嗜血", desc: "每次击杀回复 2% 最大生命", kind: "lifesteal", amount: 0.02 },
+    {
+      id: "pickupRange",
+      name: "磁力扩散",
+      desc: "经验拾取范围 +25%",
+      kind: "pickupRange",
+      amount: 0.25,
+    },
   ] satisfies SurvivalUpgradeDef[],
 } as const;
 

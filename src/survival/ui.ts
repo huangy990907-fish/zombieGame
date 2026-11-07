@@ -61,6 +61,9 @@ export class SurvivalUi {
   private killsEl = document.getElementById("svKills") as HTMLElement;
   private tierEl = document.getElementById("svTier") as HTMLElement;
   private pausedEl = document.getElementById("svPaused") as HTMLElement;
+  private reloadEl = document.getElementById("svReload") as HTMLElement;
+  private reloadFill = document.getElementById("svReloadFill") as HTMLElement;
+  private reloadText = document.getElementById("svReloadText") as HTMLElement;
 
   private upgradeEl = document.getElementById("survivalUpgrade") as HTMLElement;
   private upgradeCardsEl = document.getElementById("survivalUpgradeCards") as HTMLElement;
@@ -172,8 +175,20 @@ export class SurvivalUi {
     this.tierEl.textContent = `强度 ${s.tier + 1}`;
     this.pausedEl.classList.toggle("hidden", s.state !== "paused");
 
+    // 换弹：只在换弹期间出现，进度按剩余时间反推
+    const reload = s.reload;
+    if (reload) {
+      const p = Math.max(0, Math.min(1, 1 - reload.remaining / reload.total));
+      this.reloadEl.classList.remove("hidden");
+      this.reloadFill.style.width = `${p * 100}%`;
+      this.reloadText.textContent = `换弹中 ${reload.remaining.toFixed(1)}s`;
+    } else {
+      this.reloadEl.classList.add("hidden");
+    }
+
     if (s.state === "choosing") {
-      const key = s.choices.map((c) => c.id).join(",");
+      // 带上抽卡序号：即使两次抽到的 id 与顺序完全一样，也按新一轮重新渲染
+      const key = `${s.choiceSeq}|${s.choices.map((c) => c.id).join(",")}`;
       if (key !== this.lastChoicesKey) {
         this.lastChoicesKey = key;
         this.renderUpgradeChoices(s.choices);

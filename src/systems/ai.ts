@@ -121,8 +121,10 @@ export function updateHumans(world: World, dt: number): void {
 
     /*
      * 索敌（带节流）：大范围查询比较贵，不必每帧都做。
-     * 每 0.25~0.4 秒重新找一次；其余帧复用缓存的目标，
-     * 目标死亡、跑出视野或视线被挡住就立刻丢掉重找。
+     * 每 0.25~0.4 秒重新挑一次最近的可见目标；其余帧复用缓存。
+     *  - 目标死亡 / 跑出视野 / 视线被挡住 → 立刻重找，不等节拍
+     *  - 目标仍然有效 → 到点也要重挑。否则会一直锁着远处（视野 420 > 射程 275）
+     *    的旧目标，近处已经进入射程的僵尸反而永远不开火
      */
     h.sight -= dt;
     // 训练场可以给单个单位覆盖视野；普通对局 sightOverride 为 undefined，读全局值
@@ -135,9 +137,11 @@ export function updateHumans(world: World, dt: number): void {
         world.sightBlocked(h.x, h.y, best.x, best.y, WINDOW_SIGHT_PAD)
       ) {
         best = null;
+        h.target = null;
+        h.sight = 0; // 失效目标立刻重找
       }
     }
-    if (best === null && h.sight <= 0) {
+    if (best === null || h.sight <= 0) {
       best = nearestZombie(world, h, Math.max(def.range, sightR));
       h.target = best;
       h.sight = 0.25 + Math.random() * 0.15;

@@ -9,7 +9,7 @@
  */
 import { HUMAN_DEF } from "../data/humans";
 import { resolveMap, type MapDef } from "../data/maps";
-import { effectiveHuman } from "../data/settings/runtime";
+import { effectiveHuman, effectiveWeapon } from "../data/settings/runtime";
 import { SURVIVAL, SURVIVAL_XP_BY_KIND, xpNeedFor, type SurvivalUpgradeDef } from "../data/survival/config";
 import { ZOMBIE_IDS, getZombieDef, zombieBodyDiameter } from "../data/zombies";
 import type { SpawnRegion } from "../data/types";
@@ -44,6 +44,8 @@ export class SurvivalSession {
   pendingLevelUps = 0;
   /** 当前三选一候选 */
   choices: SurvivalUpgradeDef[] = [];
+  /** 抽卡序号：每次重抽 +1，UI 用它区分“id 与顺序恰好相同”的两次独立结果 */
+  choiceSeq = 0;
   record: SurvivalRecord = loadSurvivalRecord();
 
   private baseHp = HUMAN_DEF.hp;
@@ -93,6 +95,7 @@ export class SurvivalSession {
     this.xpNeed = xpNeedFor(1);
     this.pendingLevelUps = 0;
     this.choices = [];
+    this.choiceSeq = 0;
     this.attackMul = 1;
     this.fireRateMul = 1;
     this.maxHpBonus = 0;
@@ -199,6 +202,14 @@ export class SurvivalSession {
     return this.orbs;
   }
 
+  /** 当前换弹进度（HUD / 头顶提示用）；不在换弹时返回 null */
+  get reload(): { remaining: number; total: number } | null {
+    const p = this.player;
+    if (!p || !p.alive || p.reloadTimer <= 0) return null;
+    const total = effectiveWeapon(p.weapon).reload;
+    return { remaining: p.reloadTimer, total: total > 0 ? total : p.reloadTimer };
+  }
+
   // ============================================================
   // 内部
   // ============================================================
@@ -267,6 +278,11 @@ export class SurvivalSession {
     this.syncPlayerStats();
   }
 
+  /**
+   * 抽 3 张互不重复的升级卡。
+   * 每次调用都重新拷贝候选池并完整洗牌（Fisher-Yates），不复用上一轮结果：
+   * 洗牌后前 3 项即均匀无偏，同一项在后续轮次可以再次出现。
+   */
   private rollChoices(): SurvivalUpgradeDef[] {
     const pool: SurvivalUpgradeDef[] = [];
     for (const u of SURVIVAL.upgrades) {
@@ -277,6 +293,7 @@ export class SurvivalSession {
       const j = Math.floor(Math.random() * (i + 1));
       [pool[i], pool[j]] = [pool[j], pool[i]];
     }
+    this.choiceSeq++;
     return pool.slice(0, 3);
   }
 
@@ -311,19 +328,25 @@ export class SurvivalSession {
     if (!player) return;
     const pickup2 = SURVIVAL.xp.pickupRadius * SURVIVAL.xp.pickupRadius;
     const collect = SURVIVAL.xp.collectRadius;
+    // 本帧的吸附步长，固定不变；是否“够得着”由步长和剩余距离比较决定
+    const step = SURVIVAL.xp.magnetSpeed * dt;
     for (let i = this.orbs.length - 1; i >= 0; i--) {
       const orb = this.orbs[i];
       const dx = player.x - orb.x;
       const dy = player.y - orb.y;
       const d2 = dx * dx + dy * dy;
       if (d2 > pickup2) continue;
-      const d = Math.sqrt(d2) || 1;
-      if (d <= collect) {
+      const d = Math.sqrt(d2);
+      /*
+       * 这一帧能走到拾取圈内（或已经贴脸）就直接吃掉。
+       * 不能把步长钳成 min(step, d - collect)：那样球只会停在拾取圈外沿，
+       * 而玩家每帧都在移动，下一帧判定又发生在移动之前，球就会永远尾随不消失。
+       */
+      if (d <= collect || step >= d - collect) {
         this.addXp(orb.value);
         this.orbs.splice(i, 1);
         continue;
       }
-      const step = Math.min(SURVIVAL.xp.magnetSpeed * dt, d - collect);
       orb.x += (dx / d) * step;
       orb.y += (dy / d) * step;
     }

@@ -25,6 +25,8 @@ export interface FloatingText {
   life: number;
   /** 每秒上飘速度（像素/秒） */
   vy: number;
+  /** 额外缩放（默认 1；换弹提示用它画得小一点） */
+  scale?: number;
 }
 
 /** 渲染附加信息：正式对局不传，训练场用它画选中框和飘字 */
@@ -805,7 +807,7 @@ export class Renderer {
       s.position.set(f.x, f.y);
       s.tint = f.color;
       s.alpha = p < 0.65 ? 1 : (1 - p) / 0.35;
-      s.scale.set(1 + p * 0.22);
+      s.scale.set((1 + p * 0.22) * (f.scale ?? 1));
     }
   }
 }

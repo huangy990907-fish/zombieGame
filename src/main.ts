@@ -862,7 +862,26 @@ async function boot(): Promise<void> {
       } else {
         renderer.setCamera(null);
       }
-      renderer.render(survival.world, real, { orbs: survival.orbsForRender() });
+      // 换弹期间在头顶挂一个跟随玩家的短提示，换弹结束自动消失（life = 剩余时间）
+      const reload = survival.reload;
+      renderer.render(survival.world, real, {
+        orbs: survival.orbsForRender(),
+        floating:
+          reload && player
+            ? [
+                {
+                  x: player.x,
+                  y: player.y - 22,
+                  text: "换弹中",
+                  color: 0xc084fc,
+                  age: 0,
+                  life: reload.remaining,
+                  vy: 0,
+                  scale: 0.75,
+                },
+              ]
+            : undefined,
+      });
       survivalUi.sync();
       return;
     }

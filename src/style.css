@@ -2952,9 +2952,48 @@ body.survival .screen canvas {
   color: #ffe14d;
 }
 
-/* 这两个元素不在 overlay 体系里，需要单独声明 hidden 才真正隐藏 */
+/* 换弹状态：只在换弹期间显示，紧贴血量条右侧 */
+.sv-reload {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  padding: 2px 7px;
+  border: 1px solid #5b3a86;
+  border-radius: 999px;
+  background: rgba(88, 28, 135, 0.32);
+  font-size: 10px;
+  line-height: 1;
+  letter-spacing: 0.5px;
+  color: #d8b4fe;
+  white-space: nowrap;
+}
+
+.sv-reload-track {
+  display: block;
+  width: 46px;
+  height: 4px;
+  border-radius: 3px;
+  background: #1a1130;
+  overflow: hidden;
+}
+
+.sv-reload-track b {
+  display: block;
+  height: 100%;
+  width: 0;
+  background: linear-gradient(90deg, #a855f7, #e9d5ff);
+  transition: width 0.1s linear;
+}
+
+#svReloadText {
+  font-variant-numeric: tabular-nums;
+}
+
+/* 这三个元素不在 overlay 体系里，需要单独声明 hidden 才真正隐藏 */
 .survival-hud.hidden,
-.sv-paused.hidden {
+.sv-paused.hidden,
+.sv-reload.hidden {
   display: none;
 }
 

@@ -4,9 +4,9 @@
 
 ## 一句话定位
 
-浏览器 2D 关卡制自动对抗小游戏：玩家在关卡里的人类区放置不同武器的人类（各自有库存与恢复），抵御从门/窗涌入的丧尸；开发者可在选关页新建 / 编辑关卡。玩家不直接操控单位，通过放置、切行为模式与速度观察战局；另有独立训练场做单位与武器回归。技术栈 **PixiJS 8 + TypeScript 5.7 + Vite 6**，像素美术与音效全部内置于仓库，无外部 CDN / 在线美术依赖。
+浏览器 2D 关卡制自动对抗小游戏：玩家在关卡里的人类区放置不同武器的人类（各自有库存与恢复），抵御从门/窗涌入的丧尸；开发者可在选关页新建 / 编辑关卡。玩家不直接操控单位，通过放置、切行为模式与速度观察战局；「尸潮求生」则是单角色 Roguelike 生存，玩家自己移动、自动开火、吃经验升级，只计失败；另有独立训练场做单位与武器回归。技术栈 **PixiJS 8 + TypeScript 5.7 + Vite 6**，像素美术与音效全部内置于仓库，无外部 CDN / 在线美术依赖。
 
-当前版本 **0.6.0**。路由只有 5 个：`#/menu`（主菜单）、`#/levels`（选关与关卡编辑入口，`?level=<id>` 进关；`#/levels/edit?id=<id>` 是编辑器直达别名，映射到本路由且仅开发者模式可打开）、`#/play`（对局）、`#/training`（训练场）、`#/workshop`（工坊编辑器，仅开发者模式可见，玩家模式直达会被挡回主菜单）。
+当前版本 **0.7.0**。路由只有 6 个：`#/menu`（主菜单）、`#/levels`（选关与关卡编辑入口，`?level=<id>` 进关；`#/levels/edit?id=<id>` 是编辑器直达别名，映射到本路由且仅开发者模式可打开）、`#/play`（对局）、`#/survival`（尸潮求生，单角色 Roguelike 生存）、`#/training`（训练场）、`#/workshop`（工坊编辑器，仅开发者模式可见，玩家模式直达会被挡回主菜单）。
 
 ## 顶层目录职责
 
@@ -21,6 +21,7 @@
 | `src/art/` | 32×32 像素精灵数据：`sprites.ts` 单体，`composites.ts` 人类+武器烘焙，`preview.ts` 预览页 | 不 import 游戏其它模块 |
 | `src/audio/` | `events.ts` 事件/文件/限频，`manager.ts` 预加载与播放 | 音频文件在 `public/audio/`，必须登记授权 |
 | `src/training/` | `session.ts` 独立沙盒 World 与统计，`panel.ts` 右侧 DOM 面板 | 复用正式玩法，不复制 AI/战斗逻辑 |
+| `src/survival/` | `session.ts` 单角色生存会话（输入移动、自动战斗、经验/升级、出怪、失败），`ui.ts` 选图/HUD/三选一/结算，`storage.ts` 最佳记录 | 复用 world/ai/combat/collision，不复制战斗逻辑；数值只在 `src/data/survival/config.ts` |
 | `src/levelEditor/` | `page.ts` 开发者关卡编辑器弹层，`devSave.ts` / `devDelete.ts` 开发态请求封装 | 只编辑 JSON；保存 / 删除接口只在 dev；生产构建整块剥离 |
 | `src/workshop/` | `doc.ts` 瓦片文档与历史快照，`editor.ts` 2D 画布，`page.ts` 整页 UI，`devSave.ts` 开发态保存请求，`storage.ts` 草稿与试玩预览 | 只编辑 JSON，不直接改运行时 World；保存接口只在 dev |
 | `scripts/` | `workshop-save-plugin.ts`：地图 / 关卡「保存、删除」Vite dev 中间件（只读保护 / 名称唯一 / 备份 / manifest 登记与移除 / `/maps/*.json`、`/levels/*.json` 即时读取） | 只在 dev 注册；不进入构建产物 |
@@ -40,6 +41,9 @@
 | 新增地图 | `public/maps/<id>.json` + `public/maps/manifest.json`（瓦片 74×45 / 16px）、`src/data/maps/index.ts`（注册与加载） | `src/data/maps/schema.ts`（校验）、`src/data/maps/compile.ts`（编译）、`src/data/maps/arena.ts`（TS 兜底）、`src/levels.ts`（`LevelDef.mapId` 引用）、`src/render/renderer.ts`（`setMap()` 重建静态层） |
 | 新增音效 | `public/audio/<name>.mp3`、`src/audio/events.ts`（`SFX` + `SFX_MAP` + `SFX_THROTTLE` 三处） | `public/audio/CREDITS.md`、调用点（`src/systems/ai.ts` / `src/systems/combat.ts` / `src/core/game.ts` / `src/main.ts`） |
 | 改 AI 行为 | `src/systems/ai.ts`（含 `breach` / `direct` 分发） | `src/data/zombies/<id>.ts`（`pursuit`）、`src/data/types.ts`（`ZombiePursuitMode`）、`src/systems/regions.ts`（连通区域图）、`src/systems/flowField.ts`（寻路规则）、`src/core/world.ts`（区域 / 流场缓存与 `invalidateNavigation`）、`src/data/zombies/index.ts`（`WANDER_TUNING`）、`src/data/settings/runtime.ts` + `sliders.ts`（可调参数） |
+| 改尸潮求生数值 / 奖励池 | `src/data/survival/config.ts` | `src/survival/session.ts`（升级应用 `syncPlayerStats`）、`src/survival/ui.ts`（卡片文案） |
+| 改尸潮求生流程 / 出怪 / 经验 | `src/survival/session.ts` | `src/data/survival/config.ts`、`src/core/world.ts`（`findFreeSpot` / `onKill`）、`src/main.ts`（ticker 与键盘输入） |
+| 改求生 HUD / 升级 / 结算界面 | `src/survival/ui.ts`、`index.html`、`src/style.css` | `src/main.ts`（路由、镜头、快捷键）、`src/survival/storage.ts`（记录展示） |
 | 改移动 / 碰撞判定 | `src/systems/collision.ts`（`isBlockedForBody` / `findFreePoint`） | `src/core/world.ts`（`solidAt` / `findFreeSpot`）、`src/systems/ai.ts`（人类逐轴移动）、`src/core/game.ts`（随机出生落点）、`src/training/session.ts`（点选生成）、`src/data/humans.ts`（`HUMAN_BODY_DIAMETER`） |
 | 改渲染 / 外观 | `src/render/renderer.ts`、`src/render/pixel.ts` | `src/art/sprites.ts`（像素数据）、`sprites.html` 预览 |
 | 改训练场 | `src/training/session.ts`、`src/training/panel.ts`、`index.html`（面板 DOM）、`src/style.css` | `src/audio/events.ts`（如新增操作音） |
@@ -86,6 +90,7 @@ npx tsc --noEmit  # 单项类型检查
 - 启动后控制台应出现 `[audio] 预加载完成`；若某 mp3 缺失会静默降级，不抛错。地图正常路径应出现 `[maps] 已加载「arena」1184×720` 与 `[maps] 内置地图就绪 N/N（默认「arena」）`（N 为 manifest 条目数，就绪数与 manifest 一致）；关卡正常路径应出现 `[levels] 关卡就绪 N 个（清单 N 项）`。出现 `[maps] ... 回退 TS 定义` 或 `[levels] ... 使用 TS 兜底关卡` 说明 JSON / 校验失败，选关页顶部会有 `.map-notice` 提示。
 - **训练场是主要回归入口**：可自由生成僵尸/人类、破门窗、调速度、逐帧单步，验证 AI、命中、感染、倒地与窗洞通行。
 - `#/play` 冒烟：主菜单「放置抵抗」→ `#/levels` → 点已解锁关 → 准备阶段可见人类区 / 僵尸区与库存面板 → 放置人类 → 开始 → 波次推进 → 无 console error。未放置人类点「开始」应只提示、不判负。
+- `#/survival` 冒烟：主菜单「尸潮求生」→ 选图卡片默认「空旷地」→ 开始求生 → HUD 血量 / 经验 / 计时 / 击杀正常 → `WASD` 移动且镜头跟随 → 击杀掉经验、靠近吸附、满经验弹出三选一 → 选择后继续 → 血量归零出现结算并能重开 / 回主菜单 → 无 console error。
 - 开发者模式验收：玩家模式 `#/menu` 无「地图工坊」按钮；设置里输入 `VITE_DEV_PASSWORD`（默认 `zb9993`）后入口出现并可进 `#/workshop`；退出后入口消失，直达 `#/workshop` 被挡回主菜单、直达 `#/levels/edit?id=<id>` 被挡回 `#/levels` 并提示。开发者模式下 `#/levels` 全解锁并出现「新建 / 编辑 / 复制 / 删除」，内置教学关只能「复制」，`#/levels/edit?id=<id>` 可直接打开编辑器。密码放 `.env.local`，不要提交。
 - 关卡编辑器验收：新建关 → 填名称 → 保存 → 列表热刷新出现新关；重名被拦截；删除后 manifest 与列表恢复；`npm run build` 后 `dist` 搜不到 `__levels/save` / `__levels/delete` / `保存到项目（dev）` / `删除关卡`，`npm run preview` 下接口 404。
 - 像素外观改动先看 `sprites.html`；单位尺寸由 `src/render/pixel.ts` 的 `VISUAL_SCALE = 1.5` 与 `Zombie.bodyDiameter`（= 2 × 碰撞半径）决定。
@@ -127,9 +132,20 @@ npx tsc --noEmit  # 单项类型检查
 - 0.6.0 规则（局内布局）：play 路由给 `body` 加 `placement`；`.frame` 改为两列 grid（画布 `1fr` + 库存 252px），`.inv-panel` 用 `grid-area: inv`，画布按剩余宽度等比缩放，不再覆盖；`max-width: 900px` 时 `.frame` 改 flex 纵向、面板 `align-self: stretch` 底部横排。`InventoryPanel.syncStartButton()` 在非准备阶段直接 `remove()`「开始」按钮，重开回到 prepare 时重建，不靠禁用或 `hidden` 类。
 - 0.6.0 规则（模式差异）：开发者专属按钮一律按 `isDevModeEnabled()` 条件渲染，玩家模式整组不渲染（不是禁用变灰）。`#/levels/edit?id=<id>` 由 router 映射到 `levels` 路由：未开开发者模式 `showMapNotice` 后 `router.go("levels")`，已开启则编辑（只读关转复制 / 未知 id 转新建）。`applyRoute` 离开 `levels` 时自动 `levelEditor.close()`，`syncDevModeUI` 关闭开发者模式时也会关闭编辑器。
 - 0.6.0 规则（工坊地图列表）：左栏 `#wsMapGroups` 常驻列表，分「内置地图（只读）」与「我的地图」，项只显示名称（内置图带只读标记）。`loadMapFromCatalog()` 切图前走 `confirmDiscard()`：`dirty` 在 `handleDocChange`、名称输入与门窗参数编辑时置位，切图 / 新建 / 复制 / 显式保存后清零。新建用 `createBlankDoc()`，复制用 `cloneDoc()`（内置图也可复制），副本名 `uniqueName(原名 + " 副本")` 且参与全局唯一校验；切图同时 `resetEditorState()` 清选中项与工具。原「载入内置图」下拉已合并并移除，不要重新加回。
+- 0.7.0 规则（尸潮求生）：独立路由 `#/survival`，会话在 `src/survival/session.ts`，拥有自己的 `World`，不复用 `Game` / `TrainingSession`。进入后先选地图（`SurvivalUi.showSelect()`），默认 `open-field`；玩家模式可玩所有已注册地图，开发者模式额外显示「打开地图工坊」。`main.ts` 的 ticker 在 `survival` 路由下持续跑固定步长并 `renderer.setCamera(player.x, player.y, SURVIVAL.cameraZoom)`，离开路由时 `survival.stop()`、`renderer.setCamera(null)`、清空 `heldKeys`。
+- 0.7.0 规则（玩家单位）：单个人类，固定 `mg`，血量 / 移速沿用 `HUMAN_DEF`；`Human.manual = true` 让 `ai.ts` 跳过闲逛 / 归岗 / 进攻走位，直接按 `moveX/moveY` 走逐轴碰撞，并用身体半径夹在地图边界（`freeBounds`）。自动索敌与开火仍走 `updateHumans` → `nearestZombie` → `tryFire`，朝向跟随目标。只额外覆盖 `spreadOverride`（收窄散布）与 `damageTakenMul`（降承伤），不复制战斗逻辑。
+- 0.7.0 规则（经验与升级）：击杀经 `World.onKill` 掉经验球（`SURVIVAL.xp.dropChance`），玩家 48px 内吸附；`addXp` 满 `xpNeedFor(level)` 时 `pendingLevelUps++`，tick 末尾 `beginChoice()` 把状态切到 `choosing` 并暂停世界。`rollChoices()` 随机抽 3 个不重复项，武器满级时过滤武器项；选择后 `syncPlayerStats()` 重算 `dmgMul = attackMul × 武器倍率 × baseDamageMul`、`cdMul = fireRateMul × 武器冷却倍率`、`speedOverride`、`maxHp`。奖励可重复、永久累乘。
+- 0.7.0 规则（出怪与难度）：`spawnOne()` 只从可通行落点里抽（`World.findFreeSpot`），要求离玩家 ≥320px 且屏幕外（`|dx| > viewW/2 + 24 || |dy| > viewH/2 + 24`）；每 30 秒一档，出怪间隔与同屏上限按 `SURVIVAL.spawn` 推导；僵尸种类权重由玩家等级驱动（`difficulty`）。忽略地图的人类区 / 僵尸区语义。
+- 0.7.0 规则（空地地图与校验）：`open-field` 是 74×45 全空地，`openings: []`。`validateMapJson()` 仅在「整张画布无墙且无任何门窗」时豁免「至少 1 扇门 / 至少 1 格墙体」，其余地图规则不变；`openingTuning()` 对空 openings 返回 `doorHp = 0`、`winHp = 0`、`winPassSpeed = 1` 兜底。
+- 0.7.0 规则（渲染与记录）：经验球通过 `RenderExtra.orbs` 传入 `Renderer.render()`，由新增的 `pickupLayer` 画呼吸光晕；`Renderer.setCamera()` 变换舞台并在渲染时按地图边界夹取。最佳记录 key 为 `zombieGame.survival.v1`，只存 `bestTime` / `bestLevel`；`clearProgress()` 一并清理。
+- 0.7.0 规则（快捷键与焦点）：survival 路由 `WASD` / 方向键写 `heldKeys`，`Space` 暂停 / 继续（同时识别 `code === "Space"` 与 `key === " "`），`R` 重开，`choosing` 时 `1–3` 选卡；点击「开始求生」与升级卡后 `document.activeElement.blur()`，并在 survival 路由对 `Space` keyup `preventDefault()`，避免残留焦点按钮被空格再次激活。
 
-## 已知限制（0.6.0 现状）
+## 已知限制（0.7.0 现状）
 
+- 尸潮求生只持久化最佳存活时间与最高等级（`zombieGame.survival.v1`），不保存当局升级组合或进度；重开与重新进入完全清零。出怪忽略地图的人类区 / 僵尸区语义，仅按「离玩家 ≥320px、屏幕外、可通行」选点，玩家被墙围住或经验球落到不可达区域时没有补救机制。
+- 求生模式只额外覆盖 `spreadOverride` 与 `damageTakenMul`，没有对局内数值滑块；升级三选一不可刷新 / 跳过，武器满级后池中只剩其它四项。
+- 求生模式依赖 `Human.manual` 与全图边界夹取；人类区 / 僵尸区只在出生点与旧模式里生效。地图若没有人类区，出生点取地图中心，仍走 `findFreeSpot`。
+- 本模式没有自动化测试与平衡回归；数值调整后建议用 `#/survival` 实跑：静置观察击杀 / 掉血节奏，再移动吃经验验证升级。
 - 局内布局在窗口宽度 ≤ 900px 时库存面板改为底部横排；880×720 这类更小的窗口需要纵向滚动才能看到完整面板。
 - 开发者 / 玩家模式差异只是界面显隐（`isDevModeEnabled()` 读 localStorage），玩家改 localStorage 仍可绕过；生产构建另外通过动态导入剥离编辑器代码与 dev 接口。
 - 工坊「未保存改动」以 `dirty` 标记为准（自上次载入 / 显式保存后是否有编辑），自动写入 localStorage 的草稿不算“已保存”；切图确认后草稿会被新图覆盖。
@@ -139,14 +155,14 @@ npx tsc --noEmit  # 单项类型检查
 - breach 追击的区域层级只看“门窗通不通”，破拆耗时按 `maxHp / buildBiteDamage * bite` 估算，未计入多只僵尸同时啃食加速；同区追击用流场绕墙，不处理“同区但被内部墙隔开需要绕远”的额外代价。`direct` 模式仍是旧的全局最近人类直扑。
 - 无 BGM；只有一次性音效，且同一事件全局限频，**没有随机音效变体**（音高/时长变化）。
 - `weapon-reload`、`human-hurt` 两个事件已声明、文件已备好，但当前没有调用点。
-- 内置教学关 1 关（`level-1`「初次尸潮」，8 波共 1186 只，只读）与 3 张只读地图（`arena` / `test-yard` / `test-multi`），另有 dev 期保存的工坊图（如 `my-map`）。开发者可在 dev 下新增关卡 / 地图，保存后直接进入对应列表，但不会自动产生新的游玩模式入口。玩家模式选关页只显示已解锁关卡，开发者模式全关解锁并在列表提供「新建 / 编辑 / 复制 / 删除」，内置教学关只能复制。地图 JSON 支持固定 `74×45` / `16px` 画布、任意数量门窗（至少 1 扇门）与多块人类区 / 僵尸区。工坊与关卡编辑器入口都只在开发者模式下显示；玩家模式直达 `#/workshop` 会被挡回主菜单、直达 `#/levels/edit?id=<id>` 会被挡回 `#/levels` 并提示，`#/levels` 只显示已解锁关卡。这些只是界面显隐，不是安全边界。训练场已可选图，`#/play` 仍只跑关卡绑定地图、没有对局内选图 UI，调试仍可用 `?map=<id>`。
+- 内置教学关 1 关（`level-1`「初次尸潮」，8 波共 1186 只，只读）与 4 张只读地图（`arena` / `test-yard` / `test-multi` / `open-field`），另有 dev 期保存的工坊图（如 `my-map`）。开发者可在 dev 下新增关卡 / 地图，保存后直接进入对应列表，但不会自动产生新的游玩模式入口。玩家模式选关页只显示已解锁关卡，开发者模式全关解锁并在列表提供「新建 / 编辑 / 复制 / 删除」，内置教学关只能复制。地图 JSON 支持固定 `74×45` / `16px` 画布、任意数量门窗（完全空白的画布允许 0 扇门）与多块人类区 / 僵尸区。工坊与关卡编辑器入口都只在开发者模式下显示；玩家模式直达 `#/workshop` 会被挡回主菜单、直达 `#/levels/edit?id=<id>` 会被挡回 `#/levels` 并提示，`#/levels` 只显示已解锁关卡。这些只是界面显隐，不是安全边界。训练场已可选图，`#/play` 仍只跑关卡绑定地图、没有对局内选图 UI，调试仍可用 `?map=<id>`；尸潮求生有自己的选图卡片。
 - 正式对局的人类补充完全依赖库存恢复，不再有「每波补 1 人」；库存恢复在准备阶段也走表，暂停时不恢复。
-- 胜负目前各只有一种：胜利 = 打完全部配置波次，失败 = 已放置过人类后场上无人类；「闯关模式」及其它胜负条件只预留了引用 / 进度 key，尚未实现。
+- 胜负：放置模式胜利 = 打完全部配置波次，失败 = 已放置过人类后场上无人类；尸潮求生只有失败（玩家血量归零），没有胜利条件。其它模式的胜负规则只预留了引用 / 进度 key。
 - 关卡人类种类严格等于武器种类，不能自定义新职业或给同一武器多档血量；编辑器不能改关卡 id，也不能编辑教学关的 `settings` 兼容块（需手改 JSON）。
 - 关卡编辑器的保存 / 删除只在 `npm run dev` 可用（`npm run preview` / `dist` 下接口 404、按钮不存在），默认只接受 loopback；`VITE_WORKSHOP_ALLOW_REMOTE=1` 同样会把关卡写接口暴露给局域网，仅限可信网络。
 - 开口参数折中：`World` 按每扇门窗自身 JSON 初始化 `maxHp/passSpeed`，但玩家设置的门 / 窗覆盖仍按种类统一生效且优先级更高；`#/play` 下 `level-1` 的 `doorHp=450 / winHp=100 / winPassSpeed=0.45` 会覆盖 `test-multi` 的逐扇默认值，逐扇差异需在 `#/training` 或无关卡覆盖的场景观察。逐扇独立覆盖 UI 属于后续阶段。
-- 「闯关模式」只有主菜单入口与占位说明，**尚未实现**，不会进入空页面。
-- 主菜单「清空存档」只清玩法进度（放置抵抗关卡进度 + 预留的 `zombieGame.challenge.*`），保留音量偏好与参数覆盖值。
+- `#/survival` 的选图卡片由 `SurvivalUi.showSelect()` 管理，地图选项来自 `MAP_LIST`；玩家模式可玩所有已注册地图。开发者模式额外显示「打开地图工坊」，但新建 / 编辑地图仍要回工坊，求生页不提供编辑器。
+- 主菜单「清空存档」只清玩法进度（放置抵抗关卡进度、尸潮求生最佳记录、预留的 `zombieGame.challenge.*`），保留音量偏好与参数覆盖值。
 - 工坊「保存到项目 / 删除地图」只在 `npm run dev` 可用：`npm run preview` / `dist` 没有接口和按钮；默认只接受 loopback，`npm run dev --host` 暴露给局域网后保存 / 删除会 403，除非显式设 `VITE_WORKSHOP_ALLOW_REMOTE=1`（此时任何能访问 dev server 的人都能写 / 删 `public/maps` 与 `public/levels`，仅限可信网络）。
 - 工坊保存只写 `public/maps/<id>.json` 与 manifest，**不创建关卡**；关卡编辑器保存只写 `public/levels/<id>.json` 与 manifest，**不创建新的模式入口**。新地图仍只在训练场下拉与 `?map=` 可选，要进正式对局需给关卡 JSON 写 `mapId`。
 - 备份只在本机 `public/maps/.bak/` 与 `public/levels/.bak/`，每个 id 留最近 5 份且被 git 忽略；`vite.config.ts` 的 build-only 插件会在构建后删除 `dist` 内的 `.bak`。保存 / 删除都不 reload 当前训练会话，覆盖或删除当前训练图时要切走再切回（删除当前训练图会自动切回 `arena` 并重建 World）。

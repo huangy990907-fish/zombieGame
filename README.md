@@ -434,20 +434,26 @@ npm run app:build:win # 在 Windows 上先 build，再出 NSIS 安装包
 
 ## 桌面版（Electron）
 
-桌面版把同一份 `dist/` 构建产物装进 Electron 外壳，玩法与浏览器版一致（放置抵抗、尸潮求生、训练场），**不提供地图工坊的保存 / 删除**（这些入口只存在于 `npm run dev`，生产构建里已剥离）。
+桌面版把同一份 `dist/` 构建产物装进 Electron 外壳，玩法与浏览器版一致（放置抵抗、尸潮求生、训练场）。**桌面版不支持地图工坊的保存 / 删除**：这些入口只存在于 `npm run dev`，生产构建里已剥离。要新增 / 修改地图，请在本机跑 `npm run dev` 进 `#/workshop` 编辑并「保存到项目」，再重新 `npm run app:build` 打包。
+
+### 前置
+
+- Node.js 18 及以上（与「[快速开始](#快速开始)」相同）、npm。
+- 首次打包前先安装依赖：`npm install`（会把 `electron` 与 `electron-builder` 装进 devDependencies）。
 
 ### 打包
 
 ```bash
 npm install
-npm run app:build      # 先 tsc + vite build，再按当前平台打包（macOS 出 dmg，内含 ZombieSwarm.app）
-npm run app:build:win  # 在 Windows 上执行：先 build，再出 NSIS 安装包
+npm run app:build      # macOS：先 tsc + vite build，再出 .app 并封装 dmg
+npm run app:build:win  # Windows：先 build，再出 NSIS 安装包
 ```
 
-- 产物在 `release/`（已加入 `.gitignore`，不提交）：
-  - macOS：`release/ZombieSwarm-0.8.1-mac-arm64.dmg`，以及同目录 `mac-arm64/ZombieSwarm.app`（Apple Silicon；在 Intel Mac 上打包时架构名随之变化）。
-  - Windows：`release/ZombieSwarm-0.8.1-win-x64.exe`（NSIS 安装包）。
-- 打包流程：`npm run app:build` 先 `tsc + vite build`，再由 `electron-builder` 产出 `.app`（macOS）或 NSIS 安装包（Windows），最后在 macOS 上用 `scripts/make-dmg.mjs` 调 `hdiutil` 把 `.app` 封成 dmg。DMG 不走 electron-builder 的 dmgbuild，避免受限环境写挂载卷隐藏文件被拦截。
+- 产物统一放在仓库根目录的 `release/`，文件名里的 `<version>` 取自 `package.json`，`<arch>` 跟随打包机器（如 `arm64` / `x64`）：
+  - macOS：`release/ZombieSwarm-<version>-mac-<arch>.dmg`（分发用），以及 `release/mac-<arch>/ZombieSwarm.app`（可直接拖进「应用程序」）。在 Apple Silicon 上打包得到 `mac-arm64`，Intel Mac 上得到 `mac-x64`。
+  - Windows：`release/ZombieSwarm-<version>-win-<arch>.exe`（NSIS 安装包，安装时可自选目录，非一键安装）。
+- **`release/` 已写入 `.gitignore`，打包产物不提交**；`git status` 里看不到它。
+- 打包流程：`npm run app:build` 先 `tsc + vite build`，再由 `electron-builder` 产出 `.app`，最后在 macOS 上用 `scripts/make-dmg.mjs` 调 `hdiutil` 把 `.app` 封成 dmg。DMG 不走 electron-builder 的 dmgbuild，避免受限环境写挂载卷隐藏文件被拦截。
 - 主进程启动时在 `127.0.0.1` 的随机端口起一个只读静态服务指向 `dist`，再 `loadURL`，因此地图 / 关卡 JSON 的 `fetch` 正常；窗口 1280×720、最小 960×600、可缩放，保留系统菜单栏，关闭窗口即退出。
 - 本地调试：先 `npm run build`，再执行 `npx electron .`。
 - 在 macOS 上交叉编译 Windows 安装包（已验证可出包，但未在 Windows 实跑）：`npx electron-builder --win nsis --x64 --publish never`。不指定 `--x64` 时按当前机器架构产出（Apple Silicon 会得到 `win-arm64`）。

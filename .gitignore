@@ -50,3 +50,8 @@ coverage/
 public/maps/.bak/
 public/maps/*.tmp
 public/maps/.*.tmp
+
+# 关卡编辑器「保存到项目」的备份与临时文件
+public/levels/.bak/
+public/levels/*.tmp
+public/levels/.*.tmp

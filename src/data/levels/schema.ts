@@ -75,10 +75,29 @@ function isPositiveInt(value: unknown): value is number {
 }
 
 /**
+ * 校验上下文：开发态服务端没有运行时的 `MAPS` 注册表（JSON 未加载），
+ * 由调用方传入 manifest 里的地图 id；省略时使用浏览器侧注册表。
+ */
+export interface LevelValidationContext {
+  mapIds?: ReadonlySet<string>;
+  weaponIds?: ReadonlySet<string>;
+  zombieIds?: ReadonlySet<string>;
+}
+
+/**
  * 校验关卡 JSON。
  * 返回空数组表示通过；否则每条是可直接展示给用户的中文错误。
  */
-export function validateLevelJson(raw: unknown): string[] {
+export function validateLevelJson(raw: unknown, ctx: LevelValidationContext = {}): string[] {
+  const mapOk = ctx.mapIds
+    ? (id: string): boolean => ctx.mapIds!.has(id)
+    : (id: string): boolean => Boolean(MAPS[id]);
+  const weaponOk = ctx.weaponIds
+    ? (id: string): boolean => ctx.weaponIds!.has(id)
+    : (id: string): boolean => Boolean(WEAPONS[id]);
+  const zombieOk = ctx.zombieIds
+    ? (id: string): boolean => ctx.zombieIds!.has(id)
+    : (id: string): boolean => new Set<string>(Object.values(ZOMBIE_IDS)).has(id);
   const errors: string[] = [];
   if (!isRecord(raw)) return ["关卡数据不是对象"];
 
@@ -100,7 +119,7 @@ export function validateLevelJson(raw: unknown): string[] {
     errors.push("mode 必须是 placement");
   }
 
-  if (typeof raw.mapId !== "string" || !MAPS[raw.mapId]) {
+  if (typeof raw.mapId !== "string" || !mapOk(raw.mapId)) {
     errors.push(`mapId「${String(raw.mapId)}」未注册`);
   }
 
@@ -116,7 +135,7 @@ export function validateLevelJson(raw: unknown): string[] {
         return;
       }
       const hid = item.id;
-      if (typeof hid !== "string" || !WEAPONS[hid]) {
+      if (typeof hid !== "string" || !weaponOk(hid)) {
         errors.push(`humans[${i}].id「${String(hid)}」不是已注册武器`);
       } else if (seen.has(hid)) {
         errors.push(`humans 中武器「${hid}」重复`);
@@ -149,7 +168,6 @@ export function validateLevelJson(raw: unknown): string[] {
   if (!Array.isArray(raw.waves) || raw.waves.length === 0) {
     errors.push("waves 至少需要 1 波");
   } else {
-    const knownZombies = new Set<string>(Object.values(ZOMBIE_IDS));
     raw.waves.forEach((wave, wi) => {
       if (!isRecord(wave)) {
         errors.push(`waves[${wi}] 不是对象`);
@@ -168,7 +186,7 @@ export function validateLevelJson(raw: unknown): string[] {
           errors.push(`waves[${wi}].zombies[${gi}] 不是对象`);
           return;
         }
-        if (typeof group.kind !== "string" || !knownZombies.has(group.kind)) {
+        if (typeof group.kind !== "string" || !zombieOk(group.kind)) {
           errors.push(`waves[${wi}].zombies[${gi}].kind「${String(group.kind)}」未注册`);
         }
         if (!isPositiveInt(group.count)) {

@@ -18,9 +18,16 @@
 import { getSetting, setSetting } from "./data/settings/runtime";
 import { SLIDER_GROUPS } from "./data/settings/sliders";
 import { loadBuiltinMaps, getMap, registerRuntimeMap } from "./data/maps";
-import { levelLoadError, levelsFallback, loadLevels } from "./data/levels";
+import {
+  isReadOnlyLevel,
+  levelLoadError,
+  levelsFallback,
+  loadLevels,
+  resetLevelCatalog,
+} from "./data/levels";
 import { sound, SFX } from "./audio/manager";
 import { WorkshopPage } from "./workshop/page";
+import type { LevelEditorPage } from "./levelEditor/page";
 import { WORKSHOP_PREVIEW_MAP_ID, compileWorkshopPreview } from "./workshop/storage";
 import {
   FSA_SUPPORTED,
@@ -340,11 +347,12 @@ async function boot(): Promise<void> {
         : unlocked
           ? "可挑战"
           : `🔒 通关「${LEVELS[i - 1]?.title ?? "上一关"}」后解锁`;
+      const readOnly = isReadOnlyLevel(lvl.id);
       const actions = dev
         ? `<div class="row-actions">
-             <button data-act="edit" data-id="${lvl.id}">编辑</button>
+             ${readOnly ? "" : `<button data-act="edit" data-id="${lvl.id}">编辑</button>`}
              <button data-act="copy" data-id="${lvl.id}">复制</button>
-             <button data-act="delete" data-id="${lvl.id}">删除</button>
+             ${readOnly ? "" : `<button data-act="delete" data-id="${lvl.id}">删除</button>`}
            </div>`
         : "";
       rows += `<div class="level-row ${cls} ${selected ? "selected" : ""}"
@@ -366,7 +374,23 @@ async function boot(): Promise<void> {
         const actionBtn = target.closest<HTMLButtonElement>("[data-act]");
         if (actionBtn) {
           ev.stopPropagation();
-          showMapNotice("关卡编辑器将在下一阶段开放");
+          const act = actionBtn.dataset.act;
+          const id = actionBtn.dataset.id!;
+          if (!levelEditor) {
+            showMapNotice("关卡编辑器只在开发态可用");
+            return;
+          }
+          if (act === "edit") {
+            if (isReadOnlyLevel(id)) {
+              showMapNotice("内置教学关为只读，请先「复制」后再编辑");
+              return;
+            }
+            levelEditor.open("edit", id);
+          } else if (act === "copy") {
+            levelEditor.open("copy", id);
+          } else if (act === "delete") {
+            void deleteLevelFromList(id);
+          }
           return;
         }
         if (row.dataset.locked === "1" && !isDevModeEnabled()) {
@@ -416,7 +440,12 @@ async function boot(): Promise<void> {
   };
 
   levelNewBtn.addEventListener("click", () => {
-    showMapNotice("关卡编辑器将在下一阶段开放");
+    if (!isDevModeEnabled()) return;
+    if (!levelEditor) {
+      showMapNotice("关卡编辑器只在开发态可用");
+      return;
+    }
+    levelEditor.open("new");
   });
 
   // ============================================================
@@ -466,6 +495,72 @@ async function boot(): Promise<void> {
   ): void => {
     if (fallback && requested) {
       showMapNotice(`地图「${requested}」不存在，已回退默认图「${actualName}」`);
+    }
+  };
+
+  /** 关卡保存 / 删除后的热刷新：重读 manifest → 同步展示层 → 重绘列表（不整页 reload） */
+  const refreshLevelCatalog = async (selectId?: string): Promise<void> => {
+    resetLevelCatalog();
+    await loadLevels();
+    refreshLevelDefs();
+    if (levelsFallback && levelLoadError) {
+      showMapNotice(`关卡加载异常：${levelLoadError}；已回退安全默认关卡`);
+    }
+    refreshLevelsPage(selectId);
+  };
+
+  // ====== 关卡编辑器：整块只在开发态加载（生产构建不含编辑器代码与接口文案） ======
+  let levelEditor: LevelEditorPage | undefined;
+  if (import.meta.env.DEV) {
+    void import("./levelEditor/page")
+      .then(({ LevelEditorPage: Editor }) => {
+        levelEditor = new Editor({
+          onClose: () => {
+            if (router.get() === "levels") refreshLevelsPage();
+          },
+          onSaved: async (id) => {
+            await refreshLevelCatalog(id);
+            showMapNotice("关卡已保存，选关列表已刷新");
+          },
+          onDeleted: async (id) => {
+            await refreshLevelCatalog();
+            showMapNotice(`关卡「${id}」已删除`);
+          },
+        });
+      })
+      .catch((err) => console.warn("[levelEditor] 开发态编辑器加载失败", err));
+  }
+
+  /** 列表「删除」：只在开发态可用；只读关与仍被引用的关卡受保护 */
+  const deleteLevelFromList = async (id: string): Promise<void> => {
+    if (!import.meta.env.DEV) {
+      showMapNotice("该操作只在开发态可用");
+      return;
+    }
+    const lvl = findLevel(id);
+    if (!lvl) return;
+    if (isReadOnlyLevel(id)) {
+      showMapNotice("内置教学关为只读，不能删除");
+      return;
+    }
+    const confirmed = window.confirm(
+      `确定删除「${lvl.title}」（${id}）？\n删除前会备份到 public/levels/.bak/。`,
+    );
+    if (!confirmed) return;
+    // 动态导入只放在 DEV 分支里，生产构建会把整块剔除
+    if (import.meta.env.DEV) {
+      try {
+        const { deleteLevelFromProject } = await import("./levelEditor/devDelete");
+        const result = await deleteLevelFromProject(id);
+        if (!result.ok) {
+          showMapNotice(result.message || "删除失败");
+          return;
+        }
+        await refreshLevelCatalog();
+        showMapNotice(`关卡「${lvl.title}」已删除`);
+      } catch (err) {
+        showMapNotice(`删除失败：${err instanceof Error ? err.message : String(err)}`);
+      }
     }
   };
 

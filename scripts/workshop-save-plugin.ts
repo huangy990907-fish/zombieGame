@@ -13,10 +13,19 @@ import {
   validateMapJson,
   type MapJson,
 } from "../src/data/maps/schema";
-import { getMapReferences } from "../src/levels";
+import {
+  LEVEL_SCHEMA_VERSION,
+  validateLevelJson,
+  type LevelJson,
+} from "../src/data/levels/schema";
+import { WEAPON_IDS } from "../src/data/weapons";
+import { ZOMBIE_IDS } from "../src/data/zombies";
+import { getLevelReferences, getMapReferences } from "../src/levels";
 
 const SAVE_ROUTE = "/__workshop/save";
 const DELETE_ROUTE = "/__workshop/delete";
+const LEVEL_SAVE_ROUTE = "/__levels/save";
+const LEVEL_DELETE_ROUTE = "/__levels/delete";
 const MAX_BODY_BYTES = 256 * 1024;
 const ID_PATTERN = /^[a-z0-9][a-z0-9_-]{0,31}$/;
 const RESERVED_IDS = new Set(["workshop-draft"]);
@@ -33,9 +42,20 @@ interface MapManifest {
   maps: ManifestEntry[];
 }
 
+interface LevelManifest {
+  schemaVersion: number;
+  levels: ManifestEntry[];
+}
+
 interface SaveRequestBody {
   id?: unknown;
   map?: unknown;
+  overwrite?: unknown;
+}
+
+interface LevelSaveRequestBody {
+  id?: unknown;
+  level?: unknown;
   overwrite?: unknown;
 }
 
@@ -208,8 +228,68 @@ async function readManifest(mapsDir: string): Promise<{ manifest: MapManifest; t
   }
 }
 
+async function readLevelManifest(
+  levelsDir: string,
+): Promise<{ manifest: LevelManifest; text: string }> {
+  const manifestPath = path.join(levelsDir, "manifest.json");
+  try {
+    const text = await fs.promises.readFile(manifestPath, "utf8");
+    const manifest = JSON.parse(text) as LevelManifest;
+    if (
+      !manifest ||
+      manifest.schemaVersion !== LEVEL_SCHEMA_VERSION ||
+      !Array.isArray(manifest.levels)
+    ) {
+      throw new SaveError(500, "关卡 manifest 结构非法，拒绝操作", "manifest_invalid");
+    }
+    return { manifest, text };
+  } catch (err) {
+    if (err instanceof SaveError) throw err;
+    throw new SaveError(
+      500,
+      `关卡 manifest 读取失败：${err instanceof Error ? err.message : err}`,
+      "manifest_read",
+    );
+  }
+}
+
+/** 服务端校验用的已注册地图 id（地图 manifest 条目即为运行时注册表） */
+async function readMapIds(mapsDir: string): Promise<Set<string>> {
+  const { manifest } = await readManifest(mapsDir);
+  return new Set(manifest.maps.filter((m) => m && typeof m.id === "string").map((m) => m.id));
+}
+
+/**
+ * 关卡名称全局唯一（服务端二次校验）：遍历 manifest 下所有关卡 JSON 的 name，
+ * 去首尾空格后精确比较（区分大小写），排除正在保存的同一 id。
+ */
+async function findLevelNameConflict(
+  levelsDir: string,
+  manifest: LevelManifest,
+  id: string,
+  name: string,
+): Promise<{ id: string; name: string } | null> {
+  for (const entry of manifest.levels) {
+    if (!entry || entry.id === id) continue;
+    const filePath = resolveMapFile(levelsDir, entry.file);
+    if (!filePath) continue;
+    try {
+      const json = JSON.parse(await fs.promises.readFile(filePath, "utf8")) as LevelJson;
+      const otherName = typeof json.name === "string" ? json.name.trim() : "";
+      if (otherName && otherName === name) return { id: entry.id, name: otherName };
+    } catch {
+      // 无法读取的关卡不参与名称占用（避免坏文件阻断保存）
+    }
+  }
+  return null;
+}
+
+const weaponIds = new Set(Object.values(WEAPON_IDS));
+const zombieIds = new Set(Object.values(ZOMBIE_IDS));
+
 export function workshopSavePlugin(): Plugin {
   let mapsDir = "";
+  let levelsDir = "";
   let allowRemote = false;
   let chain: Promise<unknown> = Promise.resolve();
 
@@ -459,12 +539,244 @@ export function workshopSavePlugin(): Plugin {
     sendJson(res, 200, result as unknown as Record<string, unknown>);
   };
 
+  /**
+   * 保存关卡（新建 / 覆盖 readOnly:false 的工坊关卡）。
+   * 校验顺序：loopback → JSON → id → level.id 一致 → schema + 内容 →
+   * manifest → 名称唯一 → 只读保护 → 覆盖确认 → 备份 → 原子写入 → 登记 manifest。
+   */
+  const handleLevelSave = async (
+    req: { socket: { remoteAddress?: string }; on: (e: string, cb: (c?: unknown) => void) => void },
+    res: { statusCode: number; setHeader: (k: string, v: string) => void; end: (b: string) => void },
+  ): Promise<void> => {
+    if (!allowRemote && !isLoopback(req)) {
+      throw new SaveError(403, "只允许本机（loopback）保存关卡；远程开发请显式开启开关", "remote_forbidden");
+    }
+
+    const raw = await readBody(req);
+    let body: LevelSaveRequestBody;
+    try {
+      body = JSON.parse(raw) as LevelSaveRequestBody;
+    } catch {
+      throw new SaveError(400, "请求体不是合法 JSON", "bad_json");
+    }
+    if (!body || typeof body !== "object") {
+      throw new SaveError(400, "请求体必须是 JSON 对象", "bad_json");
+    }
+
+    const id = typeof body.id === "string" ? body.id.trim() : "";
+    if (!ID_PATTERN.test(id)) {
+      throw new SaveError(
+        400,
+        "id 只允许 1–32 位小写字母、数字、- 或 _，且必须以字母或数字开头",
+        "bad_id",
+      );
+    }
+    if (!body.level || typeof body.level !== "object") {
+      throw new SaveError(400, "缺少 level 对象", "bad_level");
+    }
+    const level = body.level as LevelJson;
+    if (level.id !== id) {
+      throw new SaveError(400, `level.id「${level.id}」与请求 id「${id}」不一致`, "id_mismatch");
+    }
+
+    const mapIds = await readMapIds(mapsDir);
+    const errors = validateLevelJson(level, { mapIds, weaponIds, zombieIds });
+    if (errors.length > 0) {
+      throw new SaveError(
+        400,
+        `关卡校验失败：${errors.slice(0, 3).join("；")}`,
+        "invalid_level",
+      );
+    }
+
+    const manifestPath = path.join(levelsDir, "manifest.json");
+    const { manifest } = await readLevelManifest(levelsDir);
+
+    const name = typeof level.name === "string" ? level.name.trim() : "";
+    if (name) {
+      const conflict = await findLevelNameConflict(levelsDir, manifest, id, name);
+      if (conflict) {
+        throw new SaveError(
+          409,
+          `关卡名称「${name}」已被「${conflict.name}」（${conflict.id}）使用，请换一个名称`,
+          "name_taken",
+        );
+      }
+    }
+
+    const entry = manifest.levels.find((m) => m && m.id === id);
+    if (entry && entry.readOnly !== false) {
+      throw new SaveError(403, `「${id}」是内置只读关卡，不能覆盖（请先复制副本）`, "readonly");
+    }
+
+    let targetFile = `${id}.json`;
+    if (entry) {
+      const resolved = resolveMapFile(levelsDir, entry.file);
+      if (!resolved) {
+        throw new SaveError(500, `manifest 中的文件名「${entry.file}」非法`, "bad_manifest_file");
+      }
+      targetFile = entry.file;
+    }
+    const targetPath = resolveMapFile(levelsDir, targetFile);
+    if (!targetPath) {
+      throw new SaveError(400, "目标文件路径非法", "bad_path");
+    }
+
+    const exists =
+      Boolean(entry) ||
+      fs.existsSync(targetPath) ||
+      fs.existsSync(path.join(levelsDir, `${id}.json`));
+    if (exists && body.overwrite !== true) {
+      throw new SaveError(409, `「${id}」已存在，确认后会先备份再覆盖`, "exists");
+    }
+
+    const backupDir = path.join(levelsDir, ".bak");
+    let backupPath: string | null = null;
+    if (fs.existsSync(targetPath)) {
+      await fs.promises.mkdir(backupDir, { recursive: true });
+      const stamp = Date.now();
+      backupPath = path.join(backupDir, `${id}-${stamp}.json`);
+      await fs.promises.copyFile(targetPath, backupPath);
+    }
+
+    try {
+      await writeAtomic(targetPath, `${JSON.stringify(level, null, 2)}\n`);
+      const nextLevels = manifest.levels.slice();
+      if (entry) {
+        entry.file = targetFile;
+        entry.readOnly = false;
+      } else {
+        nextLevels.push({ id, file: targetFile, readOnly: false });
+      }
+      const nextManifest: LevelManifest = {
+        schemaVersion: LEVEL_SCHEMA_VERSION,
+        levels: nextLevels,
+      };
+      await writeAtomic(manifestPath, `${JSON.stringify(nextManifest, null, 2)}\n`);
+    } catch (err) {
+      try {
+        if (backupPath) await fs.promises.copyFile(backupPath, targetPath);
+        else await fs.promises.rm(targetPath, { force: true });
+      } catch (rollbackErr) {
+        console.warn("[levels-save] 回滚失败", rollbackErr);
+      }
+      throw new SaveError(500, `写入失败：${err instanceof Error ? err.message : err}`, "write_failed");
+    }
+
+    if (backupPath) {
+      try {
+        await pruneBackups(backupDir, id);
+      } catch (err) {
+        console.warn("[levels-save] 清理旧备份失败", err);
+      }
+    }
+
+    sendJson(res, 200, {
+      ok: true,
+      id,
+      file: targetFile,
+      overwritten: exists,
+      backup: backupPath ? path.basename(backupPath) : null,
+    });
+  };
+
+  /**
+   * 删除 readOnly:false 的工坊关卡：引用保护 → 备份 → 移除 manifest 条目 → 删除文件。
+   */
+  const handleLevelDelete = async (
+    req: { socket: { remoteAddress?: string }; on: (e: string, cb: (c?: unknown) => void) => void },
+    res: { statusCode: number; setHeader: (k: string, v: string) => void; end: (b: string) => void },
+  ): Promise<void> => {
+    if (!allowRemote && !isLoopback(req)) {
+      throw new SaveError(403, "只允许本机（loopback）删除关卡；远程开发请显式开启开关", "remote_forbidden");
+    }
+
+    const raw = await readBody(req);
+    let body: DeleteRequestBody;
+    try {
+      body = JSON.parse(raw) as DeleteRequestBody;
+    } catch {
+      throw new SaveError(400, "请求体不是合法 JSON", "bad_json");
+    }
+    if (!body || typeof body !== "object") {
+      throw new SaveError(400, "请求体必须是 JSON 对象", "bad_json");
+    }
+
+    const id = typeof body.id === "string" ? body.id.trim() : "";
+    if (!ID_PATTERN.test(id)) {
+      throw new SaveError(
+        400,
+        "id 只允许 1–32 位小写字母、数字、- 或 _，且必须以字母或数字开头",
+        "bad_id",
+      );
+    }
+
+    const manifestPath = path.join(levelsDir, "manifest.json");
+    const { manifest, text: manifestText } = await readLevelManifest(levelsDir);
+    const entry = manifest.levels.find((m) => m && m.id === id);
+    if (!entry) {
+      throw new SaveError(404, `关卡「${id}」不存在`, "not_found");
+    }
+    if (entry.readOnly !== false) {
+      throw new SaveError(403, `「${id}」是内置只读关卡，不能删除`, "readonly");
+    }
+    const targetPath = resolveMapFile(levelsDir, entry.file);
+    if (!targetPath) {
+      throw new SaveError(500, `manifest 中的文件名「${entry.file}」非法`, "bad_manifest_file");
+    }
+
+    const refs = getLevelReferences(id);
+    if (refs.length > 0) {
+      throw new SaveError(
+        409,
+        `关卡「${id}」被${refs.map((ref) => ref.label).join("、")}引用，不能删除`,
+        "referenced",
+      );
+    }
+
+    const backupDir = path.join(levelsDir, ".bak");
+    let backupPath: string | null = null;
+    if (fs.existsSync(targetPath)) {
+      await fs.promises.mkdir(backupDir, { recursive: true });
+      const stamp = Date.now();
+      backupPath = path.join(backupDir, `${id}-${stamp}.json`);
+      await fs.promises.copyFile(targetPath, backupPath);
+    }
+
+    const nextManifest: LevelManifest = {
+      schemaVersion: LEVEL_SCHEMA_VERSION,
+      levels: manifest.levels.filter((m) => m && m.id !== id),
+    };
+    try {
+      await writeAtomic(manifestPath, `${JSON.stringify(nextManifest, null, 2)}\n`);
+      await fs.promises.rm(targetPath, { force: true });
+    } catch (err) {
+      try {
+        await writeAtomic(manifestPath, manifestText);
+      } catch (rollbackErr) {
+        console.warn("[levels-delete] manifest 回滚失败", rollbackErr);
+      }
+      throw new SaveError(500, `删除失败：${err instanceof Error ? err.message : err}`, "delete_failed");
+    }
+
+    if (backupPath) {
+      try {
+        await pruneBackups(backupDir, id);
+      } catch (err) {
+        console.warn("[levels-delete] 清理旧备份失败", err);
+      }
+    }
+
+    sendJson(res, 200, { ok: true, id, backup: backupPath ? path.basename(backupPath) : null });
+  };
+
   return {
     name: "workshop-save",
     apply: "serve",
     configResolved(config) {
       const publicDir = config.publicDir || path.join(config.root, "public");
       mapsDir = path.join(publicDir, "maps");
+      levelsDir = path.join(publicDir, "levels");
       const env = loadEnv(config.mode, config.root, "");
       allowRemote =
         env.VITE_WORKSHOP_ALLOW_REMOTE === "1" ||
@@ -473,44 +785,56 @@ export function workshopSavePlugin(): Plugin {
     configureServer(server) {
       // Vite 启动时扫描 public 目录得到 publicFiles 集合，之后才新建的文件不在集合里，
       // 内部静态中间件会跳过并交给 SPA fallback（返回 index.html）。
-      // 这里直接从磁盘读取 /maps/*.json，保证「保存后立刻可读」，不需要重启 dev server。
+      // 这里直接从磁盘读取 /maps/*.json 与 /levels/*.json，保证「保存后立刻可读」。
       // 只在 dev 生效；preview / build 没有这段中间件。
-      server.middlewares.use((req, res, next) => {
-        if (req.method !== "GET" && req.method !== "HEAD") {
-          next();
-          return;
-        }
-        const pathname = (req.url ?? "").split("?")[0];
-        if (!pathname.startsWith("/maps/")) {
-          next();
-          return;
-        }
-        let fileName: string;
-        try {
-          fileName = decodeURIComponent(pathname.slice("/maps/".length));
-        } catch {
-          next();
-          return;
-        }
-        if (fileName.includes("/") || !fileName.endsWith(".json")) {
-          next();
-          return;
-        }
-        const filePath = resolveMapFile(mapsDir, fileName);
-        if (!filePath || !fs.existsSync(filePath)) {
-          next();
-          return;
-        }
-        fs.promises
-          .readFile(filePath, "utf8")
-          .then((text) => {
-            res.statusCode = 200;
-            res.setHeader("Content-Type", "application/json; charset=utf-8");
-            res.setHeader("Cache-Control", "no-cache");
-            res.end(req.method === "HEAD" ? undefined : text);
-          })
-          .catch(() => next());
-      });
+      const serveJsonDir = (prefix: string, dir: string) => {
+        return (
+          req: { method?: string; url?: string },
+          res: {
+            statusCode: number;
+            setHeader: (k: string, v: string) => void;
+            end: (body?: string) => void;
+          },
+          next: () => void,
+        ): void => {
+          if (req.method !== "GET" && req.method !== "HEAD") {
+            next();
+            return;
+          }
+          const pathname = (req.url ?? "").split("?")[0];
+          if (!pathname.startsWith(prefix)) {
+            next();
+            return;
+          }
+          let fileName: string;
+          try {
+            fileName = decodeURIComponent(pathname.slice(prefix.length));
+          } catch {
+            next();
+            return;
+          }
+          if (fileName.includes("/") || !fileName.endsWith(".json")) {
+            next();
+            return;
+          }
+          const filePath = resolveMapFile(dir, fileName);
+          if (!filePath || !fs.existsSync(filePath)) {
+            next();
+            return;
+          }
+          fs.promises
+            .readFile(filePath, "utf8")
+            .then((text) => {
+              res.statusCode = 200;
+              res.setHeader("Content-Type", "application/json; charset=utf-8");
+              res.setHeader("Cache-Control", "no-cache");
+              res.end(req.method === "HEAD" ? undefined : text);
+            })
+            .catch(() => next());
+        };
+      };
+      server.middlewares.use(serveJsonDir("/maps/", mapsDir));
+      server.middlewares.use(serveJsonDir("/levels/", levelsDir));
 
       server.middlewares.use(SAVE_ROUTE, (req, res, next) => {
         if (req.method !== "POST") {
@@ -531,6 +855,32 @@ export function workshopSavePlugin(): Plugin {
           return;
         }
         void enqueue(() => handleDelete(req, res)).catch((err) => {
+          const status = err instanceof SaveError ? err.status : 500;
+          const code = err instanceof SaveError ? err.code : "internal";
+          const message = err instanceof Error ? err.message : String(err);
+          sendJson(res, status, { ok: false, code, message });
+        });
+      });
+
+      server.middlewares.use(LEVEL_SAVE_ROUTE, (req, res, next) => {
+        if (req.method !== "POST") {
+          next();
+          return;
+        }
+        void enqueue(() => handleLevelSave(req, res)).catch((err) => {
+          const status = err instanceof SaveError ? err.status : 500;
+          const code = err instanceof SaveError ? err.code : "internal";
+          const message = err instanceof Error ? err.message : String(err);
+          sendJson(res, status, { ok: false, code, message });
+        });
+      });
+
+      server.middlewares.use(LEVEL_DELETE_ROUTE, (req, res, next) => {
+        if (req.method !== "POST") {
+          next();
+          return;
+        }
+        void enqueue(() => handleLevelDelete(req, res)).catch((err) => {
           const status = err instanceof SaveError ? err.status : 500;
           const code = err instanceof SaveError ? err.code : "internal";
           const message = err instanceof Error ? err.message : String(err);

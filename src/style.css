@@ -2226,3 +2226,396 @@ body.training .screen canvas {
   background: #7c3aed;
   transition: width 0.2s linear;
 }
+
+/* ============================================================
+   关卡编辑器（0.6.0 开发者弹层）
+   ============================================================ */
+
+.le-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(4, 5, 10, 0.84);
+  backdrop-filter: blur(4px);
+}
+
+.le-overlay.hidden {
+  display: none;
+}
+
+.le-panel {
+  width: min(940px, 96vw);
+  height: min(88vh, 780px);
+  display: flex;
+  flex-direction: column;
+  background: #0b0d17;
+  border: 1px solid #2a3350;
+  border-radius: 14px;
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.65);
+  overflow: hidden;
+}
+
+.le-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  border-bottom: 1px solid #1d2438;
+}
+
+.le-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: #c7d2fe;
+  letter-spacing: 1px;
+}
+
+.le-id {
+  flex: 1;
+  min-width: 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  color: #64748b;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.le-close {
+  flex: none;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  font: inherit;
+  font-size: 14px;
+  color: #8b95a8;
+  background: transparent;
+  border: 1px solid #2a3350;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.le-close:hover {
+  color: #fff;
+  border-color: #4a5a80;
+}
+
+.le-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.le-general {
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.le-general label,
+.le-human-row label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: #8b95a8;
+}
+
+.le-general input,
+.le-general select,
+.le-body input,
+.le-body select {
+  padding: 5px 8px;
+  font: inherit;
+  font-size: 12px;
+  color: #dfe6f0;
+  background: #0f111c;
+  border: 1px solid #2f3a5a;
+  border-radius: 4px;
+}
+
+.le-general input:focus,
+.le-general select:focus,
+.le-body input:focus,
+.le-body select:focus {
+  outline: none;
+  border-color: #7c5cff;
+}
+
+.le-body input:disabled,
+.le-body select:disabled {
+  color: #6f7a90;
+  background: #0a0b12;
+  cursor: not-allowed;
+}
+
+.le-body input[type="number"] {
+  width: 72px;
+}
+
+.le-name input {
+  width: 220px;
+}
+
+.le-name,
+.le-general > label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: #a9b3c6;
+}
+
+.le-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.le-section h3 {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 700;
+  color: #c7d2fe;
+  letter-spacing: 1px;
+}
+
+.le-tip {
+  margin: 0;
+  font-size: 11px;
+  color: #7b8596;
+}
+
+.le-humans {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.le-human-row {
+  display: grid;
+  grid-template-columns: minmax(150px, 1.4fr) repeat(4, minmax(90px, 1fr));
+  gap: 10px;
+  align-items: center;
+  padding: 8px 10px;
+  background: #0c0e1b;
+  border: 1px solid #232b46;
+  border-radius: 8px;
+}
+
+.le-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: #e2e8f0;
+}
+
+.le-check input {
+  width: auto;
+  margin: 0;
+  accent-color: #7c3aed;
+}
+
+.le-waves {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.le-wave {
+  padding: 10px;
+  background: #0c0e1b;
+  border: 1px solid #232b46;
+  border-radius: 8px;
+}
+
+.le-wave-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+
+.le-wave-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: #93c5fd;
+}
+
+.le-interval {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: #8b95a8;
+}
+
+.le-interval input {
+  width: 72px;
+}
+
+.le-zombie-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.le-zombie-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.le-zombie-row select {
+  min-width: 120px;
+}
+
+.le-zombie-row label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: #8b95a8;
+}
+
+.le-mini {
+  padding: 4px 9px;
+  font: inherit;
+  font-size: 11px;
+  color: #a9b3c6;
+  background: #131827;
+  border: 1px solid #2f3a5a;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.le-mini:hover {
+  color: #fff;
+  border-color: #4a5a80;
+}
+
+.le-mini.danger {
+  color: #f0a0a0;
+  border-color: #52233a;
+}
+
+.le-mini.danger:hover {
+  color: #fca5a5;
+  border-color: #7f1d1d;
+}
+
+.le-mini:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.le-add-wave {
+  align-self: flex-start;
+  padding: 6px 12px;
+  font: inherit;
+  font-size: 12px;
+  color: #c7d2fe;
+  background: #151130;
+  border: 1px dashed #4a3f7a;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.le-add-wave:hover {
+  border-color: #a78bfa;
+}
+
+.le-foot {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 16px 12px;
+  border-top: 1px solid #1d2438;
+}
+
+.le-errors {
+  max-height: 70px;
+  overflow-y: auto;
+  font-size: 11px;
+  line-height: 1.5;
+  color: #f87171;
+}
+
+.le-errors.hidden,
+.le-toast.hidden {
+  display: none;
+}
+
+.le-toast {
+  font-size: 11px;
+  color: #4ade80;
+}
+
+.le-toast.bad {
+  color: #f87171;
+}
+
+.le-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.le-btn {
+  padding: 8px 16px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  color: #a9b3c6;
+  background: #131827;
+  border: 1px solid #2f3a5a;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.le-btn:hover {
+  color: #fff;
+  border-color: #4a5a80;
+}
+
+.le-btn.primary {
+  color: #fff;
+  background: linear-gradient(180deg, #6b46c1, #4c2d91);
+  border-color: #7c3aed;
+}
+
+.le-btn.primary:hover {
+  border-color: #a78bfa;
+  box-shadow: 0 0 18px rgba(139, 92, 246, 0.45);
+}
+
+.le-btn.danger {
+  color: #fca5a5;
+  background: #2a1018;
+  border-color: #7f1d1d;
+}
+
+.le-btn.danger:hover {
+  border-color: #b91c1c;
+}
+
+.le-btn.hidden {
+  display: none;
+}
+
+.le-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+

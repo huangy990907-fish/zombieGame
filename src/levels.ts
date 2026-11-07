@@ -121,3 +121,25 @@ export function getMapReferences(mapId: string): MapReference[] {
   }
   return refs;
 }
+
+export type LevelReferenceKind = "campaign" | "challenge";
+
+/** 关卡被哪些模式引用（删除关卡前的保护查询） */
+export interface LevelReference {
+  kind: LevelReferenceKind;
+  /** 引用方 id（模式 / 关卡链 id） */
+  id: string;
+  /** 给用户看的原因 */
+  label: string;
+}
+
+/** 未来闯关 / 挑战模式对关卡的引用登记点 */
+const EXTRA_LEVEL_REFERENCES: LevelReference[] = [];
+
+export function registerLevelReference(ref: LevelReference): void {
+  EXTRA_LEVEL_REFERENCES.push(ref);
+}
+
+export function getLevelReferences(levelId: string): LevelReference[] {
+  return EXTRA_LEVEL_REFERENCES.filter((ref) => ref.id === levelId);
+}

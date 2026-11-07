@@ -6,17 +6,17 @@
 
 浏览器 2D 关卡制自动对抗小游戏：玩家在关卡里的人类区放置不同武器的人类（各自有库存与恢复），抵御从门/窗涌入的丧尸；开发者可在选关页新建 / 编辑关卡。玩家不直接操控单位，通过放置、切行为模式与速度观察战局；「尸潮求生」则是单角色 Roguelike 生存，玩家自己移动、自动开火、吃经验升级，只计失败；另有独立训练场做单位与武器回归。技术栈 **PixiJS 8 + TypeScript 5.7 + Vite 6**，像素美术与音效全部内置于仓库，无外部 CDN / 在线美术依赖。
 
-当前版本 **0.7.1**。路由只有 6 个：`#/menu`（主菜单）、`#/levels`（选关与关卡编辑入口，`?level=<id>` 进关；`#/levels/edit?id=<id>` 是编辑器直达别名，映射到本路由且仅开发者模式可打开）、`#/play`（对局）、`#/survival`（尸潮求生，单角色 Roguelike 生存）、`#/training`（训练场）、`#/workshop`（工坊编辑器，仅开发者模式可见，玩家模式直达会被挡回主菜单）。
+当前版本 **0.8.0**。路由只有 6 个：`#/menu`（主菜单）、`#/levels`（选关与关卡编辑入口，`?level=<id>` 进关；`#/levels/edit?id=<id>` 是编辑器直达别名，映射到本路由且仅开发者模式可打开）、`#/play`（对局）、`#/survival`（尸潮求生，单角色 Roguelike 生存）、`#/training`（训练场）、`#/workshop`（工坊编辑器，仅开发者模式可见，玩家模式直达会被挡回主菜单）。
 
 ## 顶层目录职责
 
 | 目录 | 职责 | 关键约束 |
 |---|---|---|
-| `src/data/` | **唯一数值来源**：实体定义、地图、关卡、默认设置、滑块元数据 | 调平衡只改这里；玩家改动只存覆盖值，读取时合并 |
+| `src/data/` | **唯一数值来源**：实体定义、地图、关卡、地形、默认设置、滑块元数据 | 调平衡只改这里；玩家改动只存覆盖值，读取时合并 |
 | `public/maps/` | **地图运行时来源**：`manifest.json` + `<id>.json` 瓦片地图（内置图只读，另有 dev 期保存的工坊图） | 内置只读；加载失败回退 `src/data/maps/arena.ts` |
 | `public/levels/` | **关卡运行时来源**：`manifest.json` + `<id>.json`（内置 `level-1` 只读） | 关卡只引用 `mapId`，不复制地图数据；加载失败回退 `src/data/levels/level-1.ts` |
 | `src/core/` | 运行时状态与流程：`world.ts` 实体/空间索引/开口，`game.ts` 准备/放置/库存/波次/胜负，`storage.ts` 存档与逐关解锁，`devMode.ts` 开发者模式开关与密码校验 | `world` 只存状态和查询；行为不放这里 |
-| `src/systems/` | 行为与规则：`ai.ts` 人类/丧尸/感染/受击减速推进与追击模式分发，`collision.ts` 人类/丧尸/生成落点共用的阻挡判定，`combat.ts` 开火、命中与减速结算，`flowField.ts` BFS 寻路（支持显式多源），`regions.ts` 按体型的连通区域图与区域邻接边 | 新玩法规则优先落在这里 |
+| `src/systems/` | 行为与规则：`ai.ts` 人类/丧尸/感染/受击减速推进与追击模式分发（含草丛减速与索敌），`collision.ts` 人类/丧尸/生成落点共用的阻挡判定，`combat.ts` 开火、命中、减速与暴击结算，`flowField.ts` BFS 寻路（支持显式多源），`regions.ts` 按体型的连通区域图与区域邻接边 | 新玩法规则优先落在这里 |
 | `src/render/` | PixiJS 绘制：`renderer.ts` 场景/单位/粒子/倒地/准备区标记，`pixel.ts` 精灵与坐标换算 | 只读 World，不改数据 |
 | `src/art/` | 32×32 像素精灵数据：`sprites.ts` 单体，`composites.ts` 人类+武器烘焙，`preview.ts` 预览页 | 不 import 游戏其它模块 |
 | `src/audio/` | `events.ts` 事件/文件/限频，`manager.ts` 预加载与播放 | 音频文件在 `public/audio/`，必须登记授权 |
@@ -24,7 +24,7 @@
 | `src/survival/` | `session.ts` 单角色生存会话（输入移动、自动战斗、经验/升级、出怪、失败），`ui.ts` 选图/HUD/三选一/结算，`storage.ts` 最佳记录 | 复用 world/ai/combat/collision，不复制战斗逻辑 |
 | `src/levelEditor/` | `page.ts` 开发者关卡编辑器弹层，`devSave.ts` / `devDelete.ts` 开发态请求封装 | 只编辑 JSON，不直接改运行时数据 |
 | `src/workshop/` | `doc.ts` 瓦片文档与历史快照，`editor.ts` 2D 画布，`page.ts` 整页 UI，`devSave.ts` 开发态保存请求，`storage.ts` 草稿与试玩预览 | 只编辑 JSON，不直接改运行时 World |
-| `scripts/` | `workshop-save-plugin.ts`：地图 / 关卡「保存、删除」Vite dev 中间件（只读保护 / 名称唯一 / 备份 / manifest 登记与移除 / `/maps/*.json`、`/levels/*.json` 即时读取） | 只在 dev 注册；不进入构建产物 |
+| `scripts/` | `workshop-save-plugin.ts`：地图 / 关卡「保存、删除」Vite dev 中间件（只读保护 / 名称唯一 / 备份 / manifest 登记与移除 / `/maps/*.json`、`/levels/*.json` 即时读取）；`regression/run.mjs` + `suite.ts`：Node + esbuild 加载真实模块的回归脚本 | 保存插件只在 dev 注册、不进入构建产物；回归脚本只读仓库、不写盘 |
 | `src/ui/` | `hud.ts` 对局顶栏读数，`inventory.ts` 准备阶段库存卡片与开始按钮 | 只做展示 |
 | `src/utils/` | `math.ts` 数学工具，`spatialHash.ts` 空间哈希 | 无游戏语义 |
 
@@ -40,8 +40,11 @@
 | 新增武器 | `src/data/weapons/<id>.ts`、`src/data/weapons/index.ts`（注册 + `WEAPON_IDS` / `WEAPON_LIST`） | 精灵外观与训练场自动出现按「新增实体三件套」；`src/data/levels/schema.ts`（`LEVEL_WEAPON_ORDER`）、`src/data/settings/sliders.ts`（如要单独滑块）；电击枪类链式武器还要改 `src/systems/combat.ts`（独立 hitscan/链式，不复用 Bullet）与 `src/render/renderer.ts`（`renderArcs` 电弧特效） |
 | 新增地图 | `public/maps/<id>.json` + `public/maps/manifest.json`（瓦片 74×45 / 16px）、`src/data/maps/index.ts`（注册与加载） | `src/data/maps/schema.ts`（校验）、`src/data/maps/compile.ts`（编译）、`src/data/maps/arena.ts`（TS 兜底）、`src/levels.ts`（`LevelDef.mapId` 引用）、`src/render/renderer.ts`（`setMap()` 重建静态层） |
 | 新增音效 | `public/audio/<name>.mp3`、`src/audio/events.ts`（`SFX` + `SFX_MAP` + `SFX_THROTTLE` 三处） | 调用点（`src/systems/ai.ts` / `src/systems/combat.ts` / `src/core/game.ts` / `src/main.ts`）；授权台账按「新增实体三件套」第 4 步 |
+| 改地形（草丛 / 水池） | `src/data/terrain.ts`（数值）、`src/data/maps/schema.ts`（瓦片字符与校验）、`src/data/maps/compile.ts`（编译 `grassTiles` / `waterTiles` / `waterBlockers`）、`src/core/world.ts`（草地状态 / `grassEffectAt` / `igniteGrassAt` / `tickTerrain` / `blockers`） | `src/systems/ai.ts`（减速与索敌）、`src/systems/combat.ts`（喷火点燃）、`src/systems/flowField.ts` + `regions.ts`（水池阻挡）、`src/render/renderer.ts`（地表与草地层）、`src/workshop/` + `src/training/`（画笔）、`src/data/types.ts`（`MapDef` 字段） |
+| 改求生升级 / 双武器 | `src/data/survival/config.ts`（奖励池 / 上限 / 难度）、`src/survival/session.ts`（`ownedWeapons` / `extraProjectiles` / `crit` / `lifesteal` / `pickupMul` / `rollChoices` / `chooseWeapon`） | `src/core/world.ts`（`Human.weapon2/ammo2/fire2...` 与 `extraProjectiles/critChance/critMul`）、`src/systems/combat.ts`（`slotState` / `tryFire(...,slot)` / `updateFlame(...,slot)` / 暴击）、`src/systems/ai.ts`（副武器同帧开火）、`src/survival/ui.ts` + `index.html` + `src/style.css`（二段选武器与 HUD 芯片） |
+| 改回归脚本 | `scripts/regression/suite.ts`（场景与断言）、`scripts/regression/run.mjs`（esbuild 打包与退出码）、`package.json`（`regression` 脚本与 `esbuild` devDependency） | 新增场景时用 `scenario()` 注册并保持失败信息包含场景名；不要 import 会触碰 DOM / Pixi 的模块（`main.ts` / `renderer.ts` / `workshop/page.ts`） |
 | 改 AI 行为 | `src/systems/ai.ts`（含 `breach` / `direct` 分发） | `src/data/zombies/<id>.ts`（`pursuit`）、`src/data/types.ts`（`ZombiePursuitMode`）、`src/systems/regions.ts`（连通区域图）、`src/systems/flowField.ts`（寻路规则）、`src/core/world.ts`（区域 / 流场缓存与 `invalidateNavigation`）、`src/data/zombies/index.ts`（`WANDER_TUNING`）、`src/data/settings/runtime.ts` + `sliders.ts`（可调参数） |
-| 改尸潮求生数值 / 奖励池 | `src/data/survival/config.ts` | `src/survival/session.ts`（升级应用 `syncPlayerStats`）、`src/survival/ui.ts`（卡片文案） |
+| 改尸潮求生数值 / 奖励池 | `src/data/survival/config.ts` | `src/survival/session.ts`（升级应用 `syncPlayerStats` / `syncWeaponStats`）、`src/survival/ui.ts`（卡片文案与副武器芯片） |
 | 改尸潮求生流程 / 出怪 / 经验 | `src/survival/session.ts` | `src/data/survival/config.ts`、`src/core/world.ts`（`findFreeSpot` / `onKill`）、`src/main.ts`（ticker 与键盘输入） |
 | 改求生 HUD / 升级 / 结算界面 | `src/survival/ui.ts`、`index.html`、`src/style.css` | `src/main.ts`（路由、镜头、快捷键）、`src/survival/storage.ts`（记录展示） |
 | 改移动 / 碰撞判定 | `src/systems/collision.ts`（`isBlockedForBody` / `findFreePoint`） | `src/core/world.ts`（`solidAt` / `findFreeSpot`）、`src/systems/ai.ts`（人类逐轴移动）、`src/core/game.ts`（随机出生落点）、`src/training/session.ts`（点选生成）、`src/data/humans.ts`（`HUMAN_BODY_DIAMETER`） |
@@ -83,6 +86,7 @@ npm install
 npm run dev       # 开发服务器（默认 5173，可 --port 指定）
 npm run build     # tsc --noEmit + vite build，产物 dist/
 npm run preview   # 预览构建产物
+npm run regression # Node + esbuild 回归脚本（10 个场景，失败返回非零退出码）
 npx tsc --noEmit  # 单项类型检查
 ```
 
@@ -93,12 +97,14 @@ npx tsc --noEmit  # 单项类型检查
 - `#/survival` 冒烟：主菜单「尸潮求生」→ 选图卡片默认「空旷地」→ 开始求生 → HUD 血量 / 经验 / 计时 / 击杀正常 → `WASD` 移动且镜头跟随 → 击杀掉经验、靠近吸附、满经验弹出三选一 → 选择后继续 → 血量归零出现结算并能重开 / 回主菜单 → 无 console error。调数值后建议静置观察击杀 / 掉血节奏，再移动吃经验验证升级。
 - 开发者模式验收：玩家模式 `#/menu` 无「地图工坊」按钮；设置里输入 `VITE_DEV_PASSWORD`（默认 `zb9993`）后入口出现并可进 `#/workshop`；退出后入口消失，直达 `#/workshop` 被挡回主菜单、直达 `#/levels/edit?id=<id>` 被挡回 `#/levels` 并提示。开发者模式下 `#/levels` 全解锁并出现「新建 / 编辑 / 复制 / 删除」，内置教学关只能「复制」，`#/levels/edit?id=<id>` 可直接打开编辑器。密码放 `.env.local`，不要提交。
 - 关卡编辑器验收：新建关 → 填名称 → 保存 → 列表热刷新出现新关；重名被拦截；删除后 manifest 与列表恢复；`npm run build` 后 `dist` 搜不到 `__levels/save` / `__levels/delete` / `保存到项目（dev）` / `删除关卡`，`npm run preview` 下接口 404。
+- 改行为 / 数值后至少跑 `npm run regression`；新增回归场景用 `scenario()` 注册在 `scripts/regression/suite.ts`，不要 import 会触碰 DOM / Pixi 的模块。
 - 像素外观改动先看 `sprites.html`；单位尺寸由 `src/render/pixel.ts` 的 `VISUAL_SCALE = 1.5` 与 `Zombie.bodyDiameter`（= 2 × 碰撞半径）决定。
 
 ## 规则
 
-- 规则（碰撞与开口通行）：**开口净宽 < 单位身体直径即不可通行**（门 80、窗 16；普通 11 / 狂奔 9 / 胖子 22）。人类与丧尸共用 `systems/collision.ts` 的 `isBlockedForBody()`：墙体与地图边界永远阻挡，完好门窗一律阻挡，已破坏开口只有净宽 ≥ 身体直径才放行；人类身体直径 = `HUMAN_DEF.radius * 2 = 12`。阻挡矩形按**碰撞半径**（`bodyDiameter / 2`，即 `Zombie.radius` / `HUMAN_DEF.radius`）外扩，单位停在身体外缘贴墙；外扩只作用于实体阻挡，**不改变开口通行口径**（净宽仍与身体直径比较），所以普通丧尸仍能过 16px 破窗、胖子仍被挡。丧尸位置的地图边界夹取也按 `z.radius`。人类移动逐轴判定（撞墙只停该轴、保留沿墙滑动），`stuck` 恢复检测用 `solidAt(x, y, 0, 0)` 纯点判定，避免贴墙单位被半径判定误判为卡住而绕过碰撞；巡逻目标点、随机出生落点与训练场点选生成统一走 `World.findFreeSpot()` / `World.solidAt()`；训练场点击墙内或钻不过的开口不生成单位。新增水域等地形时只在 `collision.ts` 登记阻挡矩形。胖子只能走门，流场与移动碰撞都按该通用规则过滤，不是写死特例。`humanBounds` 只负责把人类夹在房间内，**不再替代墙体碰撞**；不能只靠夹取，否则含内部墙体的自定义地图（如 `my-map`）里人类会横穿内墙与门窗。
+- 规则（碰撞与开口通行）：**开口净宽 < 单位身体直径即不可通行**（门 80、窗 16；普通 11 / 狂奔 9 / 胖子 22）。人类与丧尸共用 `systems/collision.ts` 的 `isBlockedForBody()`：墙体与地图边界永远阻挡，完好门窗一律阻挡，已破坏开口只有净宽 ≥ 身体直径才放行；人类身体直径 = `HUMAN_DEF.radius * 2 = 12`。阻挡矩形按**碰撞半径**（`bodyDiameter / 2`，即 `Zombie.radius` / `HUMAN_DEF.radius`）外扩，单位停在身体外缘贴墙；外扩只作用于实体阻挡，**不改变开口通行口径**（净宽仍与身体直径比较），所以普通丧尸仍能过 16px 破窗、胖子仍被挡。丧尸位置的地图边界夹取也按 `z.radius`。人类移动逐轴判定（撞墙只停该轴、保留沿墙滑动），`stuck` 恢复检测用 `solidAt(x, y, 0, 0)` 纯点判定，避免贴墙单位被半径判定误判为卡住而绕过碰撞；巡逻目标点、随机出生落点与训练场点选生成统一走 `World.findFreeSpot()` / `World.solidAt()`；训练场点击墙内或钻不过的开口不生成单位。水池已在 `MapDef.waterBlockers` 登记阻挡矩形（不写入 `map.walls`，因此不挡子弹与视线）；新增其它地形时沿用同一套阻挡登记。胖子只能走门，流场与移动碰撞都按该通用规则过滤，不是写死特例。`humanBounds` 只负责把人类夹在房间内，**不再替代墙体碰撞**；不能只靠夹取，否则含内部墙体的自定义地图（如 `my-map`）里人类会横穿内墙与门窗。
 - 口径（尺寸）：`VISUAL_SCALE = 1.5` 只放大精灵绘制盒，**不是碰撞半径**；渲染盒宽 = 2r × `VISUAL_SCALE`（普通 16.5 / 狂奔 13.5 / 胖子 33），1.5 只补精灵透明留白，不要叠加到半径上；阻挡外扩用 `bodyDiameter / 2`。实测不透明外廓人类约 12.4、普通约 11.3、胖子约 24.8，与碰撞直径 12 / 11 / 22 基本一致，剩余差异 ≤ 1.4px。不要为了「看上去更贴墙」再把碰撞半径调大，否则 16px 窗的通行带（普通只剩约 5px）会被挤到不可通过。
+- 规则（地形瓦片）：地图瓦片字符在 `schema.ts` 的 `TILE_CHARS` 登记，当前为 `.` 空地 / `#` 墙 / `w` 窗 / `d` 门 / `g` 草丛 / `~` 水池；`compileTilesToMapDef()` 额外输出 `grassTiles` / `waterTiles` / `waterBlockers`。**水池只进 `waterBlockers` / `World.blockers` / 流场 / 连通区域图，绝不写入 `map.walls`**，否则 `computeBulletWalls()` 与 `sightBlocked()` 会误挡子弹与视线。草丛可通行：`World.grass` 逐格保存 `phase`（0 正常 / 1 燃烧 / 2 休眠 / 3 重生）与 `timer`，`grassEffectAt()` 返回 0..1 有效度，人类与丧尸移速按 `(1 - (1 - speedMul) * effect)` 折减，人类索敌同理按 `humanSightMul`；喷火覆盖草地格时 `igniteGrassAt()`，`tickTerrain(dt)` 推进「燃烧 1.5s → 休眠 10s → 渐隐重生 1s」。数值集中在 `src/data/terrain.ts`，工坊与训练场画笔通过 `applyTerrainMap()` 换图 / 改图。
 - 规则：**人类血量是真实生命值**（`HUMAN_DEF.hp = 100`，可被设置/训练场覆盖），丧尸每次撕咬按 `Zombie.damage` 扣血，`hp <= 0` 才设置 `turning`；turning 期间 `alive` 仍为 true（`livingHumans` 口径不变）。训练场 `invincible` 完全免疫掉血与异变。
 - 规则：**受击减速**由 `combat.ts` 的 `applyHitSlow` 写入 `slowMul/slowTimer`，`ai.ts` 每帧线性恢复并乘到 hunt/wander 移速；每点伤害 4%、最低 40%，0.6 秒恢复，不叠加只取最强并刷新计时；大体型（`bodyDiameter >= 20`）幅度减半、最低 70%；喷火每秒最多结算一次。受击反馈是 `flash > 0` 时渲染层加法混合提亮 0.08 秒。
 - 规则：**电击枪** `tesla` 是独立 hitscan（射线投影 + 目标半径 + 墙体/完好门窗视线），不复用 Bullet 扫掠；首个目标 96px 内无其他僵尸时 ×2.2，否则向最近可见僵尸逐只跳跃，最多 5 只（含首个），每跳衰减到 75%。参数集中在 `src/data/weapons/tesla.ts` 的 `tesla` 字段。电弧是 `EffectKind = "arc"` 的 8–12 段高频低振幅抖动曲线（`Effect.points`，两端精确落在枪口 / 目标上），线宽与亮度按每跳视觉强度（`Effect.strength`，跟随链式衰减）递减；命中处另画 `EffectKind = "ring"` 的扩散光环，单体加成的强白闪、电火花与轻微尺寸脉冲只作用在被击中的僵尸身上，不体现在电弧上。渲染在 `renderer.ts` 的 `renderArcs()`；训练场链式读数走 `World.onTeslaVolley` 钩子，独立于 DPS 表。
@@ -131,9 +137,10 @@ npx tsc --noEmit  # 单项类型检查
 - 规则（模式差异）：开发者专属按钮一律按 `isDevModeEnabled()` 条件渲染，玩家模式整组不渲染（不是禁用变灰）。`#/levels/edit?id=<id>` 由 router 映射到 `levels` 路由：未开开发者模式 `showMapNotice` 后 `router.go("levels")`，已开启则编辑（只读关转复制 / 未知 id 转新建）。`applyRoute` 离开 `levels` 时自动 `levelEditor.close()`，`syncDevModeUI` 关闭开发者模式时也会关闭编辑器。
 - 规则（工坊地图列表）：左栏 `#wsMapGroups` 常驻列表，分「内置地图（只读）」与「我的地图」，项只显示名称（内置图带只读标记）。`loadMapFromCatalog()` 切图前走 `confirmDiscard()`：`dirty` 在 `handleDocChange`、名称输入与门窗参数编辑时置位，切图 / 新建 / 复制 / 显式保存后清零。新建用 `createBlankDoc()`，复制用 `cloneDoc()`（内置图也可复制），副本名 `uniqueName(原名 + " 副本")` 且参与全局唯一校验；切图同时 `resetEditorState()` 清选中项与工具。
 - 规则（尸潮求生）：独立路由 `#/survival`，会话在 `src/survival/session.ts`，拥有自己的 `World`，不复用 `Game` / `TrainingSession`。进入后先选地图（`SurvivalUi.showSelect()`），默认 `open-field`；玩家模式可玩所有已注册地图，开发者模式额外显示「打开地图工坊」。`main.ts` 的 ticker 在 `survival` 路由下持续跑固定步长并 `renderer.setCamera(player.x, player.y, SURVIVAL.cameraZoom)`，离开路由时 `survival.stop()`、`renderer.setCamera(null)`、清空 `heldKeys`。
-- 规则（玩家单位）：单个人类，固定 `mg`，血量 / 移速沿用 `HUMAN_DEF`；`Human.manual = true` 让 `ai.ts` 跳过闲逛 / 归岗 / 进攻走位，直接按 `moveX/moveY` 走逐轴碰撞，并用身体半径夹在地图边界（`freeBounds`）。自动索敌与开火仍走 `updateHumans` → `nearestZombie` → `tryFire`，朝向跟随目标。只额外覆盖 `spreadOverride`（收窄散布）与 `damageTakenMul`（降承伤），不复制战斗逻辑。
-- 规则（经验与升级）：击杀经 `World.onKill` 掉经验球（`SURVIVAL.xp.dropChance`），玩家 48px 内吸附；`addXp` 满 `xpNeedFor(level)` 时 `pendingLevelUps++`，tick 末尾 `beginChoice()` 把状态切到 `choosing` 并暂停世界。`rollChoices()` 随机抽 3 个不重复项，武器满级时过滤武器项；选择后 `syncPlayerStats()` 重算 `dmgMul = attackMul × 武器倍率 × baseDamageMul`、`cdMul = fireRateMul × 武器冷却倍率`、`speedOverride`、`maxHp`。奖励可重复、永久累乘。
-- 规则（出怪与难度）：`spawnOne()` 只从可通行落点里抽（`World.findFreeSpot`），要求离玩家 ≥320px 且屏幕外（`|dx| > viewW/2 + 24 || |dy| > viewH/2 + 24`）；每 30 秒一档，出怪间隔与同屏上限按 `SURVIVAL.spawn` 推导；僵尸种类权重由玩家等级驱动（`difficulty`）。忽略地图的人类区 / 僵尸区语义。
+- 规则（玩家单位）：单个人类，初始武器 `mg`，最多同时持有 2 把（`SURVIVAL.maxWeapons`），血量 / 移速沿用 `HUMAN_DEF`；`Human.manual = true` 让 `ai.ts` 跳过闲逛 / 归岗 / 进攻走位，直接按 `moveX/moveY` 走逐轴碰撞，并用身体半径夹在地图边界（`freeBounds`）。自动索敌与开火仍走 `updateHumans` → `nearestZombie` → `tryFire`，朝向跟随目标。只额外覆盖 `spreadOverride`（收窄散布）与 `damageTakenMul`（降承伤），不复制战斗逻辑。
+- 规则（双武器与额外投射物）：副武器存 `Human.weapon2 / ammo2 / reload2 / fire2 / burst2`，与主武器各自独立计时；`tryFire(world,h,angle,slot)` 与 `updateFlame(world,h,dt,slot)` 的 `slot` 取 0/1，`slotState()` 返回读写闭包。`Human.extraProjectiles`（0..4）在 `tryFire` 内展开：机枪 / 火箭 `1+extra` 条弹道（角度间隔 0.05），霰弹 `pellets+extra` 颗，电击枪 `1+extra` 道弧线且每道独立 `findTeslaFirst`、起始角度抖动 ±0.09 弧度，链式仍受 5 跳上限。暴击由 `critRoll()` 读 `critChance / critMul`，在弹丸、电弧首目标与火焰每 tick 结算。升级池与上限集中在 `src/data/survival/config.ts`（`extraProjectileMax = 4`、`baseCritMul = 1.5`、`basePickupMul = 1`）。
+- 规则（经验与升级）：击杀经 `World.onKill` 掉经验球（`SURVIVAL.xp.dropChance`），玩家 `48 × pickupMul` 内吸附；`addXp` 满 `xpNeedFor(level)` 时 `pendingLevelUps++`，tick 末尾 `beginChoice()` 把状态切到 `choosing` 并暂停世界。`rollChoices()` 随机抽 3 个不重复项，武器满级 / 已持有 2 把时过滤武器项，`maxStacks` 已满时过滤（如额外投射物 4 层）。选择后 `syncPlayerStats()` 重算 `dmgMul = attackMul × 武器倍率 × baseDamageMul`、`cdMul = fireRateMul × 武器冷却倍率`、`speedOverride`、`maxHp`、`critChance / critMul / lifesteal / pickupMul`；「获得新武器」走二段选择 `chooseWeapon()` / `consumeChoice()`。奖励可重复、永久累乘。
+- 规则（出怪与难度）：`spawnOne()` 只从可通行落点里抽（`World.findFreeSpot`），要求离玩家 ≥320px 且屏幕外（`|dx| > viewW/2 + 24 || |dy| > viewH/2 + 24`）；每 30 秒一档，出怪间隔、同屏上限与僵尸血量倍率（每档 +8%，封顶 2.5 倍）按 `SURVIVAL.spawn` / `difficulty` 推导；僵尸种类权重由玩家等级驱动（`difficulty`）。忽略地图的人类区 / 僵尸区语义。
 - 规则（空地地图与校验）：`open-field` 是 74×45 全空地，`openings: []`。`validateMapJson()` 仅在「整张画布无墙且无任何门窗」时豁免「至少 1 扇门 / 至少 1 格墙体」，其余地图规则不变；`openingTuning()` 对空 openings 返回 `doorHp = 0`、`winHp = 0`、`winPassSpeed = 1` 兜底。
 - 规则（渲染与记录）：经验球通过 `RenderExtra.orbs` 传入 `Renderer.render()`，由新增的 `pickupLayer` 画呼吸光晕；`Renderer.setCamera()` 变换舞台并在渲染时按地图边界夹取。最佳记录 key 为 `zombieGame.survival.v1`，只存 `bestTime` / `bestLevel`。
 - 规则（快捷键与焦点）：survival 路由 `WASD` / 方向键写 `heldKeys`，`Space` 暂停 / 继续（同时识别 `code === "Space"` 与 `key === " "`），`R` 重开，`choosing` 时 `1–3` 选卡；点击「开始求生」与升级卡后 `document.activeElement.blur()`，并在 survival 路由对 `Space` keyup `preventDefault()`，避免残留焦点按钮被空格再次激活。
@@ -141,7 +148,8 @@ npx tsc --noEmit  # 单项类型检查
 ## 已知限制
 
 - 重开与重新进入完全清零；玩家被墙围住或经验球落到不可达区域时没有补救机制。
-- 求生模式没有对局内数值滑块；升级三选一不可刷新 / 跳过。
+- 求生模式没有对局内数值滑块；升级三选一不可刷新 / 跳过。双武器最多 2 把，副武器只显示在 HUD 芯片、不体现在角色精灵上；额外投射物最多 4 层，电击枪每层只多一道弧线且链式仍受 5 跳上限。
+- 地形只在地图瓦片层生效：草丛 / 水池需在地图 JSON 或工坊 / 训练场画出，正式对局不能运行时新增；草丛燃烧 / 休眠 / 重生计时全局统一（1.5 / 10 / 1 秒），没有逐格差异。水池按设计不挡子弹与视线，只阻挡单位与寻路。
 - 地图若没有人类区，出生点取地图中心，仍走 `findFreeSpot`。
 - 局内布局在窗口宽度 ≤ 900px 时库存面板改为底部横排；880×720 这类更小的窗口需要纵向滚动才能看到完整面板。
 - 工坊「未保存改动」以 `dirty` 标记为准（自上次载入 / 显式保存后是否有编辑），自动写入 localStorage 的草稿不算“已保存”；切图确认后草稿会被新图覆盖。
@@ -162,6 +170,6 @@ npx tsc --noEmit  # 单项类型检查
 - 工坊「保存到项目 / 删除地图」只在 `npm run dev` 可用：`npm run preview` / `dist` 没有接口和按钮；默认只接受 loopback，`npm run dev --host` 暴露给局域网后保存 / 删除会 403，除非显式设 `VITE_WORKSHOP_ALLOW_REMOTE=1`（此时任何能访问 dev server 的人都能写 / 删 `public/maps` 与 `public/levels`，仅限可信网络）。
 - 工坊保存只写 `public/maps/<id>.json` 与 manifest，**不创建关卡**；关卡编辑器保存只写 `public/levels/<id>.json` 与 manifest，**不创建新的模式入口**。新地图要进正式对局需给关卡 JSON 写 `mapId`。
 - 备份只在本机 `public/maps/.bak/` 与 `public/levels/.bak/`，每个 id 留最近 5 份且被 git 忽略；`vite.config.ts` 的 build-only 插件会在构建后删除 `dist` 内的 `.bak`。保存 / 删除都不 reload 当前训练会话，覆盖或删除当前训练图时要切走再切回（删除当前训练图会自动切回 `arena` 并重建 World）。
-- 没有自动化测试；`npm run build` 只保证类型与打包，行为正确性依赖浏览器实跑。
+- `npm run regression` 覆盖 10 个逻辑场景（开口通行 / 碰撞 / breach / 求生经验与目标 / JSON 校验 / 地形 / 双武器 / 额外投射物），但不覆盖渲染、输入与 DOM；`npm run build` 只保证类型与打包，行为正确性仍需浏览器实跑。
 - 美术只有朝上的单套帧，运行时按朝向旋转，任意角度会有轻微锯齿；特效/场景装饰仍由 Pixi 代码绘制。
 - 碰撞只按躯干圆处理：人类武器枪管、丧尸头饰等装饰不参与碰撞，贴墙时可能少量越入墙面；这是美术层表现，不影响移动与通行。

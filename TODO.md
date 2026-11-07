@@ -10,23 +10,11 @@
 - 精灵：`src/art/` 里的 32×32 像素精灵与全部动画帧，并在 `sprites.html` 核对 anchor / muzzle / footprintRadius。
 - 音效：`public/audio/` 文件 + `src/audio/events.ts` 三处登记 + `public/audio/CREDITS.md` 授权台账。
 - 文档：同步更新 `README.md`、`CHANGELOG.md`、`AGENTS.md`。
-- 验证：`npx tsc --noEmit`、`npm run build`，并在训练场 / 选关页实跑。
+- 验证：`npx tsc --noEmit`、`npm run build`、`npm run regression`，并在训练场 / 选关页实跑。
 
 ## 待办
 
 ### 高优先级
-
-#### 草丛（瓦片地形）
-
-- 状态：待办
-- 说明：新增可通行瓦片；人类索敌半径缩短、双方在草丛内略微减速；喷火灼烧 1–2 秒后草丛暂时失效并在一段时间后重生。玩家视角不变，僵尸索敌不受限。
-- 涉及：`src/data/maps/schema.ts`、`compile.ts`、`src/core/world.ts`、`src/systems/ai.ts`、`combat.ts`、`flowField.ts`、`render/renderer.ts`、`src/training/`。
-
-#### 水池（瓦片地形）
-
-- 状态：待办
-- 说明：新增不可通行瓦片（暂等同墙体），子弹与电击枪射线可穿过，不影响视野。
-- 涉及：`schema.ts`、`compile.ts`、`world.ts`、`collision.ts`、`combat.ts`、`flowField.ts`、`renderer.ts`。
 
 #### 多关卡扩展
 
@@ -38,13 +26,13 @@
 
 #### 桌面版打包（Electron）
 
-- 状态：后续做，不进当前版本（0.7.1）。
+- 状态：后续做，不进当前版本（0.8.0）。
 - 范围：只做「打完包能玩」，不包含地图工坊保存。
 - 要点：
   - 加 `electron` / `electron-builder` 两个 dev 依赖；主进程在 `127.0.0.1` 起临时静态服务指向 `dist`，再 `loadURL`——不能用 `file://`，否则 `fetch` 读取 `/maps/*.json`、`/levels/*.json` 会失败。
   - 游戏代码不改；开发者模式入口与 dev 保存接口在生产构建里本就剥离，桌面版保持不可用。
   - 打包产物 macOS 约 150–250 MB；未签名首次启动会被 Gatekeeper 拦截，正式分发需签名公证。
-  - 优先级建议：低到中，排在草丛 / 水池之后。
+  - 优先级建议：中，草丛 / 水池已落地，可作为下一个版本的主线。
 - 涉及：`package.json`、Electron 主进程与打包配置、`README.md`（构建说明）、`CHANGELOG.md`。
 
 ### 低优先级
@@ -52,7 +40,7 @@
 #### AI 生成音效
 
 - 状态：待办
-- 说明：引入 AI 音效生成路线（ElevenLabs 托管 MCP 或本地 Stable Audio），替换当前合成音色，优先僵尸吼叫与枪械；保留现有 CC0 素材作为降级。
+- 说明：在现有 18 个 CC0 实录基础上引入 AI 音效生成路线（ElevenLabs 托管 MCP 或本地 Stable Audio），优先僵尸吼叫与枪械；保留现有 CC0 素材作为降级。
 - 涉及：`public/audio/`、`src/audio/events.ts`、`manager.ts`、`CREDITS.md`。
 
 #### 音效随机变体
@@ -71,6 +59,10 @@
 
 ## 已完成
 
+- **0.8.0 地形系统**：新增草丛 / 水池瓦片与 `MapDef.grassTiles / waterTiles / waterBlockers`；草丛移速 ×0.8、人类索敌 ×0.5，喷火点燃 1.5 秒后效果失效，熄灭 10 秒后 1 秒渐隐重生；水池阻挡单位与寻路但不挡子弹与视线；工坊与训练场新增地形画笔与擦除。
+- **0.8.0 尸潮求生升级扩展**：新增「获得新武器」二段选择（最多同时持有 2 把，独立冷却与同帧开火）、额外投射物最多 4 层、暴击率 / 暴击伤害 / 击杀吸血 / 经验拾取范围，并上调出怪同屏上限与僵尸血量成长。
+- **0.8.0 回归脚本**：`scripts/regression/`（Node + esbuild 加载真实模块）与 `npm run regression`，10 个场景覆盖开口通行、人类碰撞、breach 破门、求生经验与目标、地图 / 关卡 JSON 校验、草丛与水池、双武器与额外投射物。
+- **0.8.0 音效替换**：`zombie-growl-fat` → freesound 643766 / SnowFightStudios，`weapon-tesla` → freesound 488664 / Nodgez，18 个音效全部为 CC0 实录（提交 `6d2279d`）。
 - **0.7.1 电击枪电弧视觉优化**：每跳改为 8–12 段高频低振幅抖动曲线、线宽 / 亮度逐跳递减，新增命中光环与起止闪点，单体加成只对被击中的僵尸叠加强白闪、电火花与轻微尺寸脉冲；数值与链式规则未动。
 - **0.7.0 尸潮求生**：单角色 Roguelike 生存（`#/survival`）、空旷地地图、WASD 移动与镜头跟随、自动索敌开火、经验吸附与三选一升级、时间 / 等级双难度曲线、HUD 与失败结算、最佳记录持久化。
 - **0.6.0 放置模式关卡制**：关卡 JSON + manifest 加载与回退、选关逐关解锁、准备阶段 / 放置 / 库存恢复 / 波次 / 胜负、大号库存面板与 HUD。

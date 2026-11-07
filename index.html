@@ -152,10 +152,14 @@
         <h2 class="levels-title">选择关卡</h2>
         <div class="levels-progress" id="levelsProgress"></div>
       </div>
-      <div class="levels-map">
-        <!-- 节点由 main.ts 按 LEVELS 动态生成 -->
-        <div class="map-line"></div>
-        <div id="levelsNodes" class="map-nodes"></div>
+      <div class="levels-list-wrap">
+        <div class="levels-toolbar">
+          <span class="levels-tip">通关一关解锁下一关</span>
+          <button class="levels-new hidden" id="btnLevelNew">＋ 新建关卡</button>
+        </div>
+        <div class="levels-list" id="levelsList">
+          <!-- 关卡列表由 main.ts 按 LEVELS 动态生成 -->
+        </div>
       </div>
       <div class="levels-detail" id="levelsDetail">
         <!-- 当前选中关卡的详情 + 开始按钮 -->

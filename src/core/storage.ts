@@ -342,19 +342,23 @@ export function clearProgress(): void {
   }
 }
 
-/** 记录通关一关：把它标记为 beaten，并解锁下一个关卡（按 LEVELS 数组顺序） */
-export function recordBeaten(levelId: string): Progress {
+/**
+ * 记录通关一关：把它标记为 beaten，并解锁下一关。
+ * `levelIds` 传入当前关卡清单顺序时按顺序解锁；省略时退回旧的 `level-N` 命名规则。
+ */
+export function recordBeaten(levelId: string, levelIds?: string[]): Progress {
   const p = loadProgress();
   if (!p.beaten.includes(levelId)) p.beaten.push(levelId);
 
-  // 尝试解锁 LEVELS 数组中紧跟它后面的那关
-  // 注意：这里不 import LEVELS（避免循环依赖），只按命名规则 level-N 推算下一关 id
-  const match = levelId.match(/^level-(\d+)$/);
-  if (match) {
-    const nextNum = Number(match[1]) + 1;
-    const nextId = `level-${nextNum}`;
-    if (!p.unlocked.includes(nextId)) p.unlocked.push(nextId);
+  let nextId: string | undefined;
+  if (levelIds) {
+    const i = levelIds.indexOf(levelId);
+    nextId = i >= 0 ? levelIds[i + 1] : undefined;
+  } else {
+    const match = levelId.match(/^level-(\d+)$/);
+    if (match) nextId = `level-${Number(match[1]) + 1}`;
   }
+  if (nextId && !p.unlocked.includes(nextId)) p.unlocked.push(nextId);
 
   saveProgress(p);
   return p;

@@ -148,9 +148,10 @@ async function boot(): Promise<void> {
 
   const menuOverlay = document.getElementById("menuOverlay") as HTMLElement;
   const levelsOverlay = document.getElementById("levelsOverlay") as HTMLElement;
-  const levelsNodesEl = document.getElementById("levelsNodes") as HTMLElement;
+  const levelsListEl = document.getElementById("levelsList") as HTMLElement;
   const levelsDetailEl = document.getElementById("levelsDetail") as HTMLElement;
   const levelsProgressEl = document.getElementById("levelsProgress") as HTMLElement;
+  const levelNewBtn = document.getElementById("btnLevelNew") as HTMLButtonElement;
 
   const resultOverlay = document.getElementById("resultOverlay") as HTMLElement;
   const resultCard = document.getElementById("resultCard") as HTMLElement;
@@ -277,41 +278,81 @@ async function boot(): Promise<void> {
   };
 
   // ============================================================
-  // 选关页：渲染节点 + 选中 + 开始
+  // 选关页：列表 + 解锁状态 + 开发者操作入口
   // ============================================================
+
+  /** 解锁规则：开发者模式全开；玩家模式第一关常开，通关上一关即解锁下一关（兼容旧存档的 unlocked 列表） */
+  const isLevelUnlocked = (index: number, id: string): boolean => {
+    if (isDevModeEnabled()) return true;
+    if (index === 0) return true;
+    if (progress.beaten.includes(LEVELS[index - 1]?.id)) return true;
+    return progress.unlocked.includes(id);
+  };
+
+  const levelZombieTotal = (lvl: LevelDef): number =>
+    lvl.waves.reduce((sum, w) => sum + w.zombies.reduce((s, g) => s + g.count, 0), 0);
 
   const refreshLevelsPage = (selectId?: string): void => {
     progress = loadProgress();
-    const total = LEVELS.length;
+    const dev = isDevModeEnabled();
     const beatenCount = LEVELS.filter((l) => progress.beaten.includes(l.id)).length;
-    levelsProgressEl.textContent = `已通关 ${beatenCount} / ${total}`;
+    levelsProgressEl.textContent = `已通关 ${beatenCount} / ${LEVELS.length}`;
+    levelNewBtn.classList.toggle("hidden", !dev);
 
-    // 动态生成节点 HTML
-    let nodesHtml = "";
-    let selectedId = selectId ?? currentLevel?.id ?? LEVELS[0]?.id;
-    for (const lvl of LEVELS) {
-      const unlocked = progress.unlocked.includes(lvl.id);
-      const beaten = progress.beaten.includes(lvl.id);
-      const selected = lvl.id === selectedId;
-      const cls = beaten ? "beaten" : unlocked ? "unlocked" : "locked";
-      const nodeLabel = beaten ? '<span class="check">✓</span>' : `<span class="node-num">${lvl.id.replace("level-", "")}</span>`;
-      const map = getMap(lvl.mapId);
-      nodesHtml += `<button class="level-node ${cls} ${selected ? "selected" : ""}"
-                            data-id="${lvl.id}"
-                            style="left:${lvl.nodeX}%; top:${lvl.nodeY}%;"
-                            ${unlocked ? "" : "disabled"}
-                            title="${escapeHtml(lvl.title)} · 地图 ${escapeHtml(map.name)}">
-        ${nodeLabel}
-        <span class="node-map">${escapeHtml(map.name)}</span>
-      </button>`;
+    // 选中项：显式指定 > 上次选中 > 第一个已解锁关卡
+    let selectedId = selectId ?? currentLevel?.id;
+    let selectedIndex = LEVELS.findIndex((l) => l.id === selectedId);
+    if (selectedIndex < 0) {
+      selectedIndex = LEVELS.findIndex((l, i) => isLevelUnlocked(i, l.id));
     }
-    levelsNodesEl.innerHTML = nodesHtml;
+    currentLevel = LEVELS[selectedIndex] ?? null;
 
-    // 绑定点击事件
-    const nodes = levelsNodesEl.querySelectorAll<HTMLElement>(".level-node");
-    nodes.forEach((node) => {
-      node.addEventListener("click", () => {
-        const id = node.dataset.id!;
+    let rows = "";
+    LEVELS.forEach((lvl, i) => {
+      const unlocked = isLevelUnlocked(i, lvl.id);
+      const beaten = progress.beaten.includes(lvl.id);
+      const map = getMap(lvl.mapId);
+      const cls = beaten ? "beaten" : unlocked ? "unlocked" : "locked";
+      const selected = i === selectedIndex;
+      const status = beaten
+        ? "✓ 已通关"
+        : unlocked
+          ? "可挑战"
+          : `🔒 通关「${LEVELS[i - 1]?.title ?? "上一关"}」后解锁`;
+      const actions = dev
+        ? `<div class="row-actions">
+             <button data-act="edit" data-id="${lvl.id}">编辑</button>
+             <button data-act="copy" data-id="${lvl.id}">复制</button>
+             <button data-act="delete" data-id="${lvl.id}">删除</button>
+           </div>`
+        : "";
+      rows += `<div class="level-row ${cls} ${selected ? "selected" : ""}"
+                    data-id="${lvl.id}" ${unlocked ? "" : 'data-locked="1"'}>
+        <div class="row-no">${beaten ? "✓" : i + 1}</div>
+        <div class="row-main">
+          <div class="row-name">${escapeHtml(lvl.title)}</div>
+          <div class="row-meta">${escapeHtml(map.name)} · ${lvl.waves.length} 波 · ${levelZombieTotal(lvl)} 只丧尸</div>
+        </div>
+        <div class="row-status">${status}</div>
+        ${actions}
+      </div>`;
+    });
+    levelsListEl.innerHTML = rows;
+
+    levelsListEl.querySelectorAll<HTMLElement>(".level-row").forEach((row) => {
+      row.addEventListener("click", (ev) => {
+        const target = ev.target as HTMLElement;
+        const actionBtn = target.closest<HTMLButtonElement>("[data-act]");
+        if (actionBtn) {
+          ev.stopPropagation();
+          showMapNotice("关卡编辑器将在下一阶段开放");
+          return;
+        }
+        if (row.dataset.locked === "1" && !isDevModeEnabled()) {
+          showMapNotice("该关卡尚未解锁：先通关上一关");
+          return;
+        }
+        const id = row.dataset.id!;
         const lvl = findLevel(id);
         if (!lvl) return;
         currentLevel = lvl;
@@ -322,15 +363,19 @@ async function boot(): Promise<void> {
     // 详情面板
     const selected = currentLevel;
     if (selected) {
-      const diffStars = "★".repeat(selected.difficulty) + "☆".repeat(5 - selected.difficulty);
-      const unlocked = progress.unlocked.includes(selected.id);
+      const idx = LEVELS.indexOf(selected);
+      const unlocked = isLevelUnlocked(idx, selected.id);
+      const beaten = progress.beaten.includes(selected.id);
       const map = getMap(selected.mapId);
+      const diffStars = "★".repeat(selected.difficulty) + "☆".repeat(5 - selected.difficulty);
+      const lockHint =
+        idx > 0 ? `通关「${LEVELS[idx - 1]?.title ?? "上一关"}」后解锁` : "首关默认解锁";
       levelsDetailEl.innerHTML = `
         <div class="detail-left">
-          <div class="detail-title">${selected.title}</div>
+          <div class="detail-title">${escapeHtml(selected.title)}${beaten ? ' <span style="color:#4ade80;font-size:12px">✓ 已通关</span>' : ""}</div>
           <div class="detail-diff">难度 ${diffStars}</div>
           <div class="detail-map">🗺 地图：${escapeHtml(map.name)}（${escapeHtml(map.id)}） · ${map.width}×${map.height}</div>
-          <div class="detail-desc">${selected.description}</div>
+          <div class="detail-desc">${selected.waves.length} 波 · ${levelZombieTotal(selected)} 只丧尸${unlocked ? "" : ` · ${lockHint}`}</div>
         </div>
         <button class="start-btn" id="btnLevelStart" ${unlocked ? "" : "disabled"}>
           ${unlocked ? `▶ 开始战斗 · ${escapeHtml(map.name)}` : "🔒 未解锁"}
@@ -338,14 +383,20 @@ async function boot(): Promise<void> {
       `;
       const startBtn = document.getElementById("btnLevelStart") as HTMLButtonElement | null;
       startBtn?.addEventListener("click", () => {
-        if (currentLevel && progress.unlocked.includes(currentLevel.id)) {
-          router.go("play");
-        }
+        if (!currentLevel) return;
+        const i = LEVELS.indexOf(currentLevel);
+        if (!isLevelUnlocked(i, currentLevel.id)) return;
+        sound.play(SFX.UI_CLICK);
+        router.go("play", { level: currentLevel.id });
       });
     } else {
       levelsDetailEl.innerHTML = `<div class="detail-left"><div class="detail-desc">请选择一个关卡</div></div>`;
     }
   };
+
+  levelNewBtn.addEventListener("click", () => {
+    showMapNotice("关卡编辑器将在下一阶段开放");
+  });
 
   // ============================================================
   // 路由切换 —— 显示哪个 overlay、显示顶栏/底部、是否驱动 game.tick
@@ -430,13 +481,28 @@ async function boot(): Promise<void> {
         refreshLevelsPage();
         sound.pause(); // 选关页静音
         break;
-      case "play":
+      case "play": {
         showOverlay(null);
         topbar.classList.remove("hidden");
         bottom.classList.remove("hidden");
-        // 显式启动当前关卡（currentLevel 在选关页点节点时已设好）
-        if (!currentLevel) {
-          currentLevel = findLevel("level-1") ?? null;
+        // #/play?level=<id> 指定关卡；未知 / 未解锁回退列表并提示
+        const requestedId = router.getQuery("level");
+        if (requestedId) {
+          const idx = LEVELS.findIndex((l) => l.id === requestedId);
+          const lvl = idx >= 0 ? LEVELS[idx] : undefined;
+          if (!lvl) {
+            showMapNotice(`关卡「${requestedId}」不存在，已返回选关`);
+            router.go("levels");
+            break;
+          }
+          if (!isLevelUnlocked(idx, lvl.id)) {
+            showMapNotice(`关卡「${lvl.title}」尚未解锁：先通关上一关`);
+            router.go("levels");
+            break;
+          }
+          currentLevel = lvl;
+        } else if (!currentLevel) {
+          currentLevel = findLevel("level-1") ?? LEVELS[0] ?? null;
         }
         if (currentLevel) {
           game.start(currentLevel.id, currentLevel.settings);
@@ -447,6 +513,7 @@ async function boot(): Promise<void> {
         refreshPanelValues();
         sound.resumeAudio(); // 进入战斗场景恢复声音（AudioContext resume 在这里发生）
         break;
+      }
       case "training":
         showOverlay(null);
         topbar.classList.add("hidden");
@@ -493,9 +560,9 @@ async function boot(): Promise<void> {
     if (game.phase !== "victory" && game.phase !== "defeat") return;
     if (resultOverlay.classList.contains("active")) return; // 已经弹过了
 
-    // 胜利 → 记录进度
+    // 胜利 → 记录进度（按当前关卡清单顺序解锁下一关）
     if (game.phase === "victory" && game.levelId) {
-      recordBeaten(game.levelId);
+      recordBeaten(game.levelId, LEVELS.map((l) => l.id));
       progress = loadProgress();
     }
 
@@ -637,12 +704,11 @@ async function boot(): Promise<void> {
     updateMuteIcon();
   };
 
-  // 放置抵抗：直接进入现有 #/play，从第一关正常开局
+  // 放置抵抗：先进入选关列表，由玩家选择已解锁关卡
   placementBtn.onclick = () => {
     sound.resume();
     sound.play(SFX.UI_CLICK);
-    currentLevel = findLevel("level-1") ?? null;
-    router.go("play");
+    router.go("levels");
   };
   // 闯关模式：只弹占位说明，不做成可点进去的空页面
   challengeBtn.onclick = () => {
@@ -707,6 +773,8 @@ async function boot(): Promise<void> {
     devModeFeedbackEl.classList.toggle("ok", ok);
     // 关掉开发者模式时若还停在工坊页，立刻回到主菜单
     if (!on && router.get() === "workshop") router.go("menu");
+    // 开发者模式切换会改变选关列表的可玩范围与操作按钮
+    if (router.get() === "levels") refreshLevelsPage();
   };
 
   const tryEnableDevMode = (): void => {

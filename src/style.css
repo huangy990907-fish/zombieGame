@@ -718,101 +718,159 @@ body {
   color: #7b8596;
 }
 
-.levels-map {
-  position: relative;
+.levels-list-wrap {
   width: 100%;
   max-width: 1000px;
-  height: 180px;
-  margin-bottom: 30px;
+  margin-bottom: 20px;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
 
-.map-line {
-  position: absolute;
-  top: 50%;
-  left: 5%;
-  right: 5%;
-  height: 2px;
-  background: linear-gradient(90deg, #2f3a5a, #1f2638);
-  transform: translateY(-50%);
-}
-
-.map-nodes {
-  position: absolute;
-  inset: 0;
-}
-
-.level-node {
-  position: absolute;
-  transform: translate(-50%, -50%);
-  width: 56px;
-  height: 56px;
-  border-radius: 50%;
+.levels-toolbar {
   display: flex;
   align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  transition: all 0.2s;
-  font: inherit;
-  z-index: 2;
+  justify-content: space-between;
+  margin-bottom: 10px;
 }
 
-.level-node .node-num {
-  font-size: 18px;
-  font-weight: 700;
-}
-
-.level-node .node-map {
-  position: absolute;
-  top: 58px;
-  left: 50%;
-  transform: translateX(-50%);
-  font-size: 10px;
+.levels-tip {
+  font-size: 11px;
+  color: #7b8596;
   letter-spacing: 0.5px;
-  color: #7dd3fc;
-  white-space: nowrap;
-  pointer-events: none;
 }
 
-.level-node.locked {
-  background: #151728;
-  border: 2px solid #2f3a5a;
-  color: #3a4556;
+.levels-new {
+  background: linear-gradient(180deg, #6b46c1, #553c9a);
+  border: 1px solid #7c3aed;
+  border-radius: 6px;
+  padding: 7px 16px;
+  color: #fff;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.levels-new:hover {
+  border-color: #a78bfa;
+  box-shadow: 0 4px 16px rgba(139, 92, 246, 0.35);
+}
+
+.levels-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.level-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  background: #0a0a14;
+  border: 1px solid #1f2638;
+  border-radius: 8px;
+  padding: 12px 16px;
+  color: #9aa6b8;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.level-row:hover {
+  border-color: #3b82f6;
+}
+
+.level-row.selected {
+  border-color: #7c3aed;
+  background: #12102a;
+}
+
+.level-row.beaten {
+  border-color: #1f5c3a;
+}
+
+.level-row.locked {
+  opacity: 0.6;
   cursor: not-allowed;
 }
 
-.level-node.locked .node-num {
-  font-size: 20px;
-}
-
-.level-node.unlocked {
-  background: linear-gradient(180deg, #1e3a5f, #0f1f3a);
-  border: 2px solid #3b82f6;
+.level-row .row-no {
+  width: 34px;
+  height: 34px;
+  flex: none;
+  border-radius: 50%;
+  border: 1px solid #2f3a5a;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  font-weight: 700;
   color: #93c5fd;
 }
 
-.level-node.unlocked:hover,
-.level-node.unlocked.selected {
-  border-color: #7fb4ff;
-  color: #fff;
-  box-shadow: 0 0 24px rgba(59, 130, 246, 0.5);
-  transform: translate(-50%, -50%) scale(1.12);
-}
-
-.level-node.beaten {
-  background: linear-gradient(180deg, #1a3d2e, #0f2318);
-  border: 2px solid #22c55e;
+.level-row.beaten .row-no {
+  border-color: #22c55e;
   color: #4ade80;
 }
 
-.level-node.beaten:hover,
-.level-node.beaten.selected {
-  border-color: #86efac;
-  box-shadow: 0 0 24px rgba(34, 197, 94, 0.5);
-  transform: translate(-50%, -50%) scale(1.08);
+.level-row.locked .row-no {
+  color: #3a4556;
+  border-color: #2f3a5a;
 }
 
-.level-node .check {
-  font-size: 22px;
+.level-row .row-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.level-row .row-name {
+  font-size: 15px;
+  font-weight: 700;
+  color: #eaf1ff;
+  margin-bottom: 3px;
+}
+
+.level-row .row-meta {
+  font-size: 11px;
+  color: #7b8596;
+}
+
+.level-row .row-status {
+  flex: none;
+  font-size: 11px;
+  color: #4ade80;
+  letter-spacing: 0.5px;
+}
+
+.level-row.locked .row-status {
+  color: #f59e0b;
+}
+
+.level-row .row-actions {
+  flex: none;
+  display: flex;
+  gap: 6px;
+}
+
+.level-row .row-actions button {
+  background: #151728;
+  border: 1px solid #2f3a5a;
+  border-radius: 4px;
+  color: #9aa6b8;
+  font: inherit;
+  font-size: 11px;
+  padding: 4px 9px;
+  cursor: pointer;
+}
+
+.level-row .row-actions button:hover {
+  color: #fff;
+  border-color: #7c3aed;
 }
 
 .levels-detail {

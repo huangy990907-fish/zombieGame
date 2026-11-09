@@ -1,6 +1,6 @@
 # 音效授权台账（public/audio）
 
-本目录 26 个 mp3 均来自 **CC0 实录素材**（检索时用 `license:"Creative Commons 0"` 过滤，逐条核对 API 返回的 license 字段），不再包含程序化合成或自制派生文件。`zombie-growl-fat.mp3` 与 `weapon-tesla.mp3` 在 0.4.2 / 0.4.3 曾是派生成品，现已各自替换为独立的 CC0 实录；历史派生关系见 CHANGELOG 对应版本，不代表当前来源。
+本目录 27 个 mp3 均来自 **CC0 实录素材**（检索时用 `license:"Creative Commons 0"` 过滤，逐条核对 API 返回的 license 字段），不再包含程序化合成或自制派生文件。`zombie-growl-fat.mp3` 与 `weapon-tesla.mp3` 在 0.4.2 / 0.4.3 曾是派生成品，现已各自替换为独立的 CC0 实录；历史派生关系见 CHANGELOG 对应版本，不代表当前来源。
 
 - 许可证：**CC0 1.0（Creative Commons Zero）**，可复制、修改、商用，无需署名。
   官方文本：<https://creativecommons.org/publicdomain/zero/1.0/>
@@ -13,6 +13,7 @@
 | `weapon-mg.mp3` | 0.10s | 2.1 KB | 162396 | M16 Single Shot 3.flac | qubodup | CC0 1.0 | https://freesound.org/s/162396/ | 真实 M16 单发，取前 60ms 干声瞬态，15ms 淡出 |
 | `weapon-flame.mp3` | 0.13s | 2.5 KB | 739469 | WD-40 quarter Full - Flame thrower 3 | Sadiquecat | CC0 1.0 | https://freesound.org/s/739469/ | 真实喷火/火炬声，截取 0.08–0.18s 稳定段，100ms 级 |
 | `weapon-shotgun.mp3` | 0.34s | 5.8 KB | 702672 | Remington 870 | areniporgen | CC0 1.0 | https://freesound.org/s/702672/ | 真实 12 号霰弹枪近距录音，保留 0.30s 冲击主体 |
+| `weapon-sniper.mp3` | 0.57s | 9.4 KB | 855608 | Sniper Shot in Field 3 (M2010 Enhanced Sniper Rifle ESR) | qubodup | CC0 1.0 | https://freesound.org/s/855608/ | 美军狙击锦标赛实拍视频提取的 M2010 真实单发，野外环境自带自然尾音；截取源文件 0.00–0.53s（0.53s 内容），首 5ms 淡入 / 末 120ms 淡出；mean 对齐 `weapon-shotgun` 的 -19.6dB（实测 -19.5），peak -3.2dB；44.1kHz mono 128kbps |
 | `weapon-rocket.mp3` | 0.47s | 7.8 KB | 521377 | Rocket Launch | Jarusca | CC0 1.0 | https://freesound.org/s/521377/ | 游戏用火箭发射声，保留出膛 + 尾焰 0.44s |
 | `weapon-tesla.mp3` | 0.16s | 2.9 KB | 488664 | Shock_Three.wav | Nodgez | CC0 1.0 | https://freesound.org/s/488664/ | 截取源文件 0.60–0.72s 的单次放电（0.12s 内容），保留尖锐起音，首 2ms 淡入 / 末 20ms 淡出；响度对齐旧文件（mean -27.8dB / peak -8.9dB，实测 -28.2 / -9.2）；44.1kHz mono 128kbps。此前的 0.4.3 派生关系（曾由 `zombie-growl-fat.mp3` / 754441 升调得到）**已替换**，历史来源见 CHANGELOG 0.4.3 |
 | `weapon-explosion.mp3` | 0.57s | 9.4 KB | 67469 | Fragmentation Grenade Explosion Military M67 1.flac | qubodup | CC0 1.0 | https://freesound.org/s/67469/ | 真实 M67 破片手雷爆炸，完整 0.54s，无长尾 |
@@ -41,11 +42,11 @@
 
 - 所有条目均为 **CC0 1.0**，API 返回的 `license` 字段均为 `http://creativecommons.org/publicdomain/zero/1.0/`；未使用 CC-BY、NC 或来源不明的素材。
 - 使用的是 freesound 官方 preview-hq-mp3 预览文件（由 CC0 原始素材转码），版权状态与原始素材一致。
-- 合计 **26 个文件、约 398 KB（407,807 字节）**；单文件最大 63.7 KB（`defeat.mp3`），均小于 100 KB，总量远低于 1.5 MB。
+- 合计 **27 个文件、约 408 KB（417,464 字节）**；单文件最大 63.7 KB（`defeat.mp3`），均小于 100 KB，总量远低于 1.5 MB。
 - `zombie-growl-fat.mp3` 与 `weapon-tesla.mp3` 现为独立 CC0 实录（freesound 643766 / 488664）；0.4.2 / 0.4.3 的旧派生关系已废弃，历史记录见 CHANGELOG 对应版本，不代表当前来源。
 
 ## 备注
 
 - `weapon-reload`、`human-hurt` 两个事件在 [events.ts](file:///Users/huangyu/agentSpace/trae/zombieGame/src/audio/events.ts) 已声明，但游戏代码仍无调用点；文件已备好，接线后即可发声（本次未改游戏逻辑）。
-- 文件名统一按 `src/audio/events.ts` 的 `SFX_MAP` 命名规则（小写、连字符、`.mp3`）。以下 8 个文件尚待开发会话在 `events.ts` 登记事件，登记后即随预加载生效：`zombie-growl-leaper`、`zombie-leap`、`zombie-growl-corroder`、`zombie-spit`、`zombie-growl-matriarch`、`zombie-spawn`、`zombie-matriarch-death`、`zombie-scream`；本次未改该文件。
-- 本次没有“未替换”项：26 个文件全部来自 CC0 实录；两条历史派生物（`zombie-growl-fat`、`weapon-tesla`）已替换为独立来源。
+- 文件名统一按 `src/audio/events.ts` 的 `SFX_MAP` 命名规则（小写、连字符、`.mp3`）。以下 9 个文件尚待开发会话在 `events.ts` 登记事件，登记后即随预加载生效：`zombie-growl-leaper`、`zombie-leap`、`zombie-growl-corroder`、`zombie-spit`、`zombie-growl-matriarch`、`zombie-spawn`、`zombie-matriarch-death`、`zombie-scream`、`weapon-sniper`；本次未改该文件。
+- 本次没有“未替换”项：27 个文件全部来自 CC0 实录；两条历史派生物（`zombie-growl-fat`、`weapon-tesla`）已替换为独立来源。

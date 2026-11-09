@@ -217,6 +217,89 @@ scenario("breach 破门顺序：同血量选近门，血量悬殊选省时门，
   assert(!z2.stranded, "破口后不应进入无解漫游");
 });
 
+scenario("breach 各自最优：分头选门，破口后远处僵尸不盲目改道", () => {
+  const world = new World(roomMap(450, 450));
+  world.spawnHuman(500, 380, "mg");
+  const near = world.spawnZombie(170, 380, ZOMBIE_IDS.normal);
+  const far = world.spawnZombie(830, 380, ZOMBIE_IDS.normal);
+  near.retarget = 0;
+  far.retarget = 0;
+  world.rebuildGrids();
+  updateZombies(world, 1 / 60);
+
+  // 两只僵尸各在自己手边的门口，代价接近时不应该统一选同一扇门
+  assert(near.goalOpening === "door-left", `左侧僵尸应选 door-left，实际 ${near.goalOpening}`);
+  assert(far.goalOpening === "door-right", `右侧僵尸应选 door-right，实际 ${far.goalOpening}`);
+
+  // 左门被啃破：贴着破口的僵尸改走破口，远处的继续啃自己手边的门
+  world.opening("door-left")!.broken = true;
+  world.invalidateNavigation();
+  near.retarget = 0;
+  far.retarget = 0;
+  updateZombies(world, 1 / 60);
+  assert(near.goalOpening === null, `破口就在脚边，应改为直接追人，实际 ${near.goalOpening}`);
+  assert(
+    far.goalOpening === "door-right",
+    `远处僵尸不应放弃手边的门去挤破口，实际 ${far.goalOpening}`,
+  );
+});
+
+scenario("人类躲毒液：离开毒池、毒散后归岗并恢复射击", () => {
+  const world = new World(mapDef({ id: "t-human-poison" }));
+  const h = world.spawnHuman(400, 300, "mg");
+  h.post = 0;
+  world.posts.push({ x: 400, y: 300, ox: 400, oy: 700 });
+  const z = world.spawnZombie(600, 300, ZOMBIE_IDS.normal);
+  z.speed = 0;
+  z.hp = 1e9;
+  // 脚下铺一团 4 秒的腐蚀毒液
+  world.addPoison(400, 300, 40, 4, 5, 0.5);
+  world.rebuildGrids();
+
+  let leftPoison = false;
+  for (let i = 0; i < 600; i++) {
+    world.rebuildGrids();
+    updateHumans(world, 1 / 60);
+    world.tickTerrain(1 / 60);
+    const d = Math.hypot(h.x - 400, h.y - 300);
+    if (world.poison.length > 0 && d > 40) leftPoison = true;
+  }
+
+  assert(h.alive, "人类不应死在毒液里");
+  assert(leftPoison, "脚下有毒时应离开毒液范围");
+  assert(world.bullets.length > 0, "躲开毒液后应恢复射击");
+  const back = Math.hypot(h.x - 400, h.y - 300);
+  assert(back < 14, `毒液散掉后应回到岗位点，实际偏移 ${back.toFixed(1)}`);
+});
+
+scenario("人类两种模式：防守守点、进攻推进接敌", () => {
+  const world = new World(mapDef({ id: "t-human-mode" }));
+  const h = world.spawnHuman(300, 400, "mg");
+  h.post = 0;
+  world.posts.push({ x: 300, y: 400, ox: 300, oy: 700 });
+  const z = world.spawnZombie(300, 100, ZOMBIE_IDS.normal);
+  z.speed = 0;
+  z.hp = 1e9;
+  world.rebuildGrids();
+
+  world.mode = "defend";
+  for (let i = 0; i < 120; i++) {
+    world.rebuildGrids();
+    updateHumans(world, 1 / 60);
+  }
+  const stay = Math.hypot(h.x - 300, h.y - 400);
+  assert(stay < 8, `防守模式应基本守点，实际偏移 ${stay.toFixed(1)}`);
+
+  const before = Math.hypot(h.x - z.x, h.y - z.y);
+  world.mode = "attack";
+  for (let i = 0; i < 120; i++) {
+    world.rebuildGrids();
+    updateHumans(world, 1 / 60);
+  }
+  const after = Math.hypot(h.x - z.x, h.y - z.y);
+  assert(after < before - 20, `进攻模式应推进到射程内：${before.toFixed(1)} -> ${after.toFixed(1)}`);
+});
+
 scenario("求生经验拾取：击杀掉球 → 靠近吸附 → 经验增加", () => {
   registerRuntimeMap(compileTilesToMapDef(readJson("public/maps/open-field.json")));
   const session = new SurvivalSession();

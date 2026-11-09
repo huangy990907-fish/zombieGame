@@ -104,6 +104,11 @@ export interface Human {
   wy: number;
   /** 闲逛目标点的刷新计时 */
   wTimer: number;
+  /** 躲毒液：选定的安全落点（不在毒液范围内、可站立） */
+  safeX: number;
+  safeY: number;
+  /** 躲毒液：安全落点的重算倒计时 */
+  safeTimer: number;
   /**
    * 防守岗哨下标（world.posts 的下标），-1 表示未分岗。
    * 防守模式下有岗的人站桩守开口，没岗的自由交战。
@@ -184,6 +189,12 @@ export interface Zombie {
    * null 表示本区有人类、直接追人，或处在无解漫游状态。
    */
   goalOpening: string | null;
+  /**
+   * 选定 goalOpening 时，破开它之后仍需付出的等效距离（像素）。
+   * 换目标时用「到门口的距离 + 剩余破拆时间折算 + 这段后续距离」
+   * 和别的候选路线比较，避免刚破一扇门就全场改道。
+   */
+  goalOnward: number;
   /** breach 追击：本区没有活人且找不到破口路径时，退化为漫游，不贴墙顶门 */
   stranded: boolean;
   /** 漫游朝向（弧度）；仅 mode === "wander" 时由行为层推进 */
@@ -783,6 +794,9 @@ export class World {
       wx: x,
       wy: y,
       wTimer: 0,
+      safeX: x,
+      safeY: y,
+      safeTimer: 0,
       post: -1,
       alive: true,
     };
@@ -822,6 +836,7 @@ export class World {
       ty: y,
       mode: "hunt",
       goalOpening: null,
+      goalOnward: 0,
       stranded: false,
       wanderAngle: randRange(-Math.PI, Math.PI),
       wanderTimer: 0,

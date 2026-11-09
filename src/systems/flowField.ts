@@ -193,6 +193,20 @@ export class FlowField {
     return this;
   }
 
+  /**
+   * 该点到最近源（开口 / 人类）的网格路径长度（像素）。
+   * 走不到（被墙隔断、落在墙里或没有源）返回 Infinity。
+   * 与 sample() 共用同一张距离场，查询 O(1)。
+   */
+  distanceAt(x: number, y: number): number {
+    const gx = Math.floor(x / CELL);
+    const gy = Math.floor(y / CELL);
+    if (gx < 0 || gy < 0 || gx >= this.cols || gy >= this.rows) return Infinity;
+    const i = gy * this.cols + gx;
+    if (this.blocked[i] || this.dist[i] === UNREACHABLE) return Infinity;
+    return this.dist[i] * CELL;
+  }
+
   /** 兜底：直线朝最近的开口中心走；没有源就原地不动 */
   private fallback(x: number, y: number): FlowField {
     if (this.sources.length === 0) {

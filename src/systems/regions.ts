@@ -45,10 +45,19 @@ export class RegionMap {
   /** 每个连通域的格子下标（-1 = 墙体 / 不可穿越边界） */
   private readonly region: Int16Array;
   private readonly adjacency: number[][];
+  /** 开口 id -> 矩形，区域内距离查询时用它定位“门口”的起始格 */
+  private readonly openingRects = new Map<string, Rect>();
+  /**
+   * 区域内距离场缓存，key = `${连通域}:${开口 id}`。
+   * 值为“从该开口门口走到这一格”的网格步数（-1 = 走不到），
+   * 只在开口破碎 / 换图重建 RegionMap 时一起丢弃。
+   */
+  private readonly distFields = new Map<string, Int32Array>();
 
   constructor(map: MapDef, openings: readonly OpeningState[], bodyDiameter: number) {
     this.cols = Math.ceil(map.width / CELL);
     this.rows = Math.ceil(map.height / CELL);
+    for (const o of openings) this.openingRects.set(o.id, o.rect);
     const cells = this.cols * this.rows;
     const blocked = new Uint8Array(cells);
 
@@ -180,6 +189,105 @@ export class RegionMap {
   /** 指定连通域的全部邻接边下标 */
   edgesOf(region: number): readonly number[] {
     return this.adjacency[region] ?? EMPTY_EDGES;
+  }
+
+  /**
+   * 在某个连通域内，从某扇开口门口走到 (x, y) 的路径长度（像素）。
+   * 走不到（不在同一连通域、落在墙体里）返回 Infinity。
+   */
+  distanceFrom(regionIndex: number, openingId: string, x: number, y: number): number {
+    const field = this.fieldFrom(regionIndex, openingId);
+    if (!field) return Infinity;
+    const gx = Math.floor(x / CELL);
+    const gy = Math.floor(y / CELL);
+    if (gx < 0 || gy < 0 || gx >= this.cols || gy >= this.rows) return Infinity;
+    const v = field[gy * this.cols + gx];
+    return v < 0 ? Infinity : v * CELL;
+  }
+
+  /**
+   * 在某个连通域内，从 fromOpeningId 的门口走到 toOpeningId 的门口的距离（像素）。
+   * 目标门口本身是阻挡格，所以取它外圈属于本连通域的最近一格。
+   */
+  distanceToOpening(regionIndex: number, fromOpeningId: string, toOpeningId: string): number {
+    const field = this.fieldFrom(regionIndex, fromOpeningId);
+    const rect = this.openingRects.get(toOpeningId);
+    if (!field || !rect) return Infinity;
+    return this.ringMin(field, rect, regionIndex);
+  }
+
+  /** 懒构建 / 复用“以某扇开口门口为源、限制在单个连通域内”的 BFS 距离场 */
+  private fieldFrom(regionIndex: number, openingId: string): Int32Array | null {
+    const key = `${regionIndex}:${openingId}`;
+    const hit = this.distFields.get(key);
+    if (hit) return hit;
+    const rect = this.openingRects.get(openingId);
+    if (!rect) return null;
+
+    const cells = this.cols * this.rows;
+    const field = new Int32Array(cells).fill(-1);
+    const queue = new Int32Array(cells);
+    let head = 0;
+    let tail = 0;
+    const gx0 = Math.floor(rect.x / CELL);
+    const gy0 = Math.floor(rect.y / CELL);
+    const gx1 = Math.floor((rect.x + rect.w - 1) / CELL);
+    const gy1 = Math.floor((rect.y + rect.h - 1) / CELL);
+
+    // 起点：开口外圈一圈、属于本连通域的格子（门口）
+    for (let gy = gy0 - 1; gy <= gy1 + 1; gy++) {
+      for (let gx = gx0 - 1; gx <= gx1 + 1; gx++) {
+        if (gx >= gx0 && gx <= gx1 && gy >= gy0 && gy <= gy1) continue;
+        if (gx < 0 || gy < 0 || gx >= this.cols || gy >= this.rows) continue;
+        const i = gy * this.cols + gx;
+        if (this.region[i] !== regionIndex || field[i] >= 0) continue;
+        field[i] = 0;
+        queue[tail++] = i;
+      }
+    }
+
+    while (head < tail) {
+      const cur = queue[head++];
+      const gy = Math.floor(cur / this.cols);
+      const gx = cur - gy * this.cols;
+      const next = field[cur] + 1;
+      if (gx > 0 && this.flood(cur - 1, regionIndex, next, field)) queue[tail++] = cur - 1;
+      if (gx < this.cols - 1 && this.flood(cur + 1, regionIndex, next, field)) queue[tail++] = cur + 1;
+      if (gy > 0 && this.flood(cur - this.cols, regionIndex, next, field)) queue[tail++] = cur - this.cols;
+      if (gy < this.rows - 1 && this.flood(cur + this.cols, regionIndex, next, field)) {
+        queue[tail++] = cur + this.cols;
+      }
+    }
+
+    this.distFields.set(key, field);
+    return field;
+  }
+
+  /** BFS 扩散一格：同连通域且未访问才写距离并返回 true（由调用方入队） */
+  private flood(index: number, regionIndex: number, next: number, field: Int32Array): boolean {
+    if (this.region[index] !== regionIndex || field[index] >= 0) return false;
+    field[index] = next;
+    return true;
+  }
+
+  /** 目标矩形外圈中，属于指定连通域的格子里最小的距离值 */
+  private ringMin(field: Int32Array, rect: Rect, regionIndex: number): number {
+    const gx0 = Math.floor(rect.x / CELL);
+    const gy0 = Math.floor(rect.y / CELL);
+    const gx1 = Math.floor((rect.x + rect.w - 1) / CELL);
+    const gy1 = Math.floor((rect.y + rect.h - 1) / CELL);
+    let best = Infinity;
+    for (let gy = gy0 - 1; gy <= gy1 + 1; gy++) {
+      for (let gx = gx0 - 1; gx <= gx1 + 1; gx++) {
+        if (gx >= gx0 && gx <= gx1 && gy >= gy0 && gy <= gy1) continue;
+        if (gx < 0 || gy < 0 || gx >= this.cols || gy >= this.rows) continue;
+        const i = gy * this.cols + gx;
+        if (this.region[i] !== regionIndex) continue;
+        const v = field[i];
+        if (v >= 0 && v * CELL < best) best = v * CELL;
+      }
+    }
+    return best;
   }
 
   private addEdge(openingId: string, rect: Rect, a: number, b: number): void {

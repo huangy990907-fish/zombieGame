@@ -2,14 +2,17 @@
  * AI 系统 —— 人类与丧尸的每帧行为更新。
  *
  * 人类（两种行为模式，由 world.mode 切换）：
- *   defend：有岗的人站桩守开口，只打看得见且在射程内的丧尸，不追击；
+ *   defend：有岗的人站岗点不动，只打看得见且在射程内的丧尸，不追击；
+ *           僵尸逼近 60px 或岗位点被占时后撤，脱身归岗；
  *           没岗的人按 attack 逻辑自由交战
- *   attack：索敌后主动接敌，保持距离走位开火
- *   被咬后原地停下、仍可还击，倒计时结束倒戈成丧尸
+ *   attack：索敌后主动推进到射程内，站定开火；贴太近才后撤
+ *   两种模式都会主动躲开脚下的腐蚀毒液；被咬后原地停下、仍可还击，
+ *   倒计时结束倒戈成丧尸
  * 丧尸：按类型的追击模式（默认 breach）决策 ——
- *   breach：本连通区域有人就直追（沿活人流场绕墙），没人则在区域邻接图上
- *           用破拆耗时最短路选第一扇可破坏且自己钻得过的开口，逐层破入；
- *           没有可达路径就漫游，不贴墙顶门（direct 模式保留旧的全局直追）。
+ *   breach：每只僵尸以自身位置为起点独立比较「不破门直追」与「破门窗」两条
+ *           候选（区域内绕墙距离 + 剩余破拆耗时），已破开口只算可走地形；
+ *           已有目标时新路线便宜 30% 以上才改道，没有可达路径就漫游，
+ *           不贴墙顶门（direct 模式保留旧的全局直追）。
  *   贴近完好开口时按撕咬节奏啃，破口后涌入（穿窗会被窗檐减速）；
  *   贴近人类就咬，血量归零后进入异变倒计时。
  */
@@ -116,6 +119,47 @@ function releasePin(h: Human, pinner?: Zombie | null): void {
   h.pinTimer = 0;
   h.pinBy = null;
   if (pinner) pinner.pinTargetId = null;
+}
+
+/**
+ * 躲毒液：以脚下为圆心向外找一圈“可站立且不在毒液里”的落点。
+ * 每个人的起始角度按 id 错开，避免同一位置的人全挤向同一个方向。
+ * 周围全被毒液覆盖时，退化为朝最近毒团的外侧走。
+ */
+function findPoisonEscape(
+  world: World,
+  h: Human,
+  bounds: { x0: number; y0: number; x1: number; y1: number },
+): { x: number; y: number } | null {
+  const start = h.id * 0.37;
+  for (let ring = 1; ring <= 5; ring++) {
+    const radius = ring * 24;
+    for (let i = 0; i < 12; i++) {
+      const ang = start + (i / 12) * Math.PI * 2;
+      const x = h.x + Math.cos(ang) * radius;
+      const y = h.y + Math.sin(ang) * radius;
+      if (x < bounds.x0 || x > bounds.x1 || y < bounds.y0 || y > bounds.y1) continue;
+      if (world.solidAt(x, y, 0, HUMAN_BODY_DIAMETER)) continue;
+      if (world.poisonEffectAt(x, y)) continue;
+      return { x, y };
+    }
+  }
+  let bx = 0;
+  let by = 0;
+  let bd = Infinity;
+  for (const p of world.poison) {
+    const d = Math.hypot(p.x - h.x, p.y - h.y);
+    if (d < bd) {
+      bd = d;
+      bx = p.x;
+      by = p.y;
+    }
+  }
+  if (!Number.isFinite(bd)) return null;
+  const dx = h.x - bx;
+  const dy = h.y - by;
+  const d = Math.hypot(dx, dy) || 1;
+  return { x: h.x + (dx / d) * 80, y: h.y + (dy / d) * 80 };
 }
 
 export function updateHumans(world: World, dt: number): void {
@@ -261,18 +305,13 @@ export function updateHumans(world: World, dt: number): void {
       }
 
       if (!posted) {
-        // 进攻走位：太近后撤 / 太远推进 / 合适距离侧向绕圈
-        if (dist < def.range * 0.45) {
-          dx = -Math.cos(ang);
-          dy = -Math.sin(ang);
-        } else if (dist > def.range * 0.9) {
+        // 进攻走位：够不着就推进到射程内，贴太近才后撤；进了射程就站定开火
+        if (dist > def.range * 0.85) {
           dx = Math.cos(ang);
           dy = Math.sin(ang);
-        } else {
-          const s = h.id % 2 === 0 ? 1 : -1;
-          dx = -Math.sin(ang) * s;
-          dy = Math.cos(ang) * s;
-          speedFactor = 0.6;
+        } else if (dist < def.range * 0.4) {
+          dx = -Math.cos(ang);
+          dy = -Math.sin(ang);
         }
       }
       // 防守模式不动：走位交给下面的“归岗 / 拒止”逻辑
@@ -313,16 +352,37 @@ export function updateHumans(world: World, dt: number): void {
     }
 
     if (posted) {
+      // 岗位点被僵尸占住：先离开站点，否则站着被啃穿
+      const p = world.posts[h.post];
+      world.zombieGrid.query(p.x, p.y, 48, queryZ);
+      let awayX = 0;
+      let awayY = 0;
+      let postTaken = false;
+      for (let k = 0; k < queryZ.length; k++) {
+        const o = queryZ[k];
+        if (!o.alive) continue;
+        postTaken = true;
+        const ox = h.x - o.x;
+        const oy = h.y - o.y;
+        const od = Math.hypot(ox, oy) || 1;
+        awayX += ox / od;
+        awayY += oy / od;
+      }
       // 贴身拒止：有僵尸逼近到 60px 内就全速后撤拉开距离（仍不追击），
       // 站着不动只会被当场啃掉，防线瞬间雪崩；
       // 人类 54 的速度比普通丧尸 50 略快，能保持且战且退
-      if (threatDist < 60) {
-        dx = -Math.cos(threatAng);
-        dy = -Math.sin(threatAng);
+      if (threatDist < 60 || postTaken) {
+        if (postTaken) {
+          const len = Math.hypot(awayX, awayY) || 1;
+          dx = awayX / len;
+          dy = awayY / len;
+        } else {
+          dx = -Math.cos(threatAng);
+          dy = -Math.sin(threatAng);
+        }
         speedFactor = 1;
       } else {
         // 否则归岗：离岗哨点超过 6px 就走回去，到位站桩
-        const p = world.posts[h.post];
         const dpx = p.x - h.x;
         const dpy = p.y - h.y;
         const dp = Math.hypot(dpx, dpy);
@@ -342,6 +402,35 @@ export function updateHumans(world: World, dt: number): void {
       dx = h.moveX ?? 0;
       dy = h.moveY ?? 0;
       speedFactor = 1;
+    }
+
+    /*
+     * 躲毒液：脚下有腐蚀毒液时优先离开（防守 / 进攻都生效）。
+     * 只在真正站在毒液里才触发 —— 躲开立刻恢复原行为（归岗 / 进攻 / 站桩射击），
+     * 不会变成“到处乱跑不射击”。
+     */
+    if (!h.manual && !pinned && h.turning <= 0 && world.poisonEffectAt(h.x, h.y)) {
+      h.safeTimer -= dt;
+      const stale =
+        h.safeTimer <= 0 ||
+        dist2(h.x, h.y, h.safeX, h.safeY) < 36 ||
+        world.poisonEffectAt(h.safeX, h.safeY) !== null;
+      if (stale) {
+        const spot = findPoisonEscape(world, h, moveBounds);
+        if (spot) {
+          h.safeX = spot.x;
+          h.safeY = spot.y;
+        }
+        h.safeTimer = 0.4;
+      }
+      const sdx = h.safeX - h.x;
+      const sdy = h.safeY - h.y;
+      const sd = Math.hypot(sdx, sdy);
+      if (sd > 2) {
+        dx = sdx / sd;
+        dy = sdy / sd;
+        speedFactor = 1;
+      }
     }
 
     // 被咬后原地不动
@@ -472,8 +561,6 @@ function retargetDirect(world: World, z: Zombie): void {
 const navScratch = {
   n: 0,
   dist: new Float64Array(0),
-  ex: new Float64Array(0),
-  ey: new Float64Array(0),
   visited: new Uint8Array(0),
   prevRegion: new Int32Array(0),
   prevEdge: new Int32Array(0),
@@ -483,8 +570,6 @@ function ensureNavScratch(n: number): void {
   if (navScratch.n >= n) return;
   navScratch.n = n;
   navScratch.dist = new Float64Array(n);
-  navScratch.ex = new Float64Array(n);
-  navScratch.ey = new Float64Array(n);
   navScratch.visited = new Uint8Array(n);
   navScratch.prevRegion = new Int32Array(n);
   navScratch.prevEdge = new Int32Array(n);
@@ -493,6 +578,7 @@ function ensureNavScratch(n: number): void {
 /** 无路可走：不贴墙顶门，退化为原有漫游（慢晃 + 偶尔停） */
 function setStranded(z: Zombie): void {
   z.goalOpening = null;
+  z.goalOnward = 0;
   if (z.stranded) return;
   z.stranded = true;
   z.wanderRest = false;
@@ -501,145 +587,215 @@ function setStranded(z: Zombie): void {
 }
 
 /**
- * breach 索敌：
- * 1) 本连通区域有活人 -> 直追最近的同区活人，不主动破门窗；
- * 2) 本区没人 -> 在区域邻接图上跑 Dijkstra（边权 = 走到开口的距离 +
- *    破开耗时折算的等效距离），在所有“有活人的区域”里选最快到达的一个，
- *    取最短路上的第一扇开口作为当前破拆目标；
- * 3) 没有任何可达路径 -> 漫游。
+ * 换目标阈值：新路线代价低于当前目标的 70%（省 30% 以上）才改主意。
+ * 正在啃的门本身会随血量下降越来越便宜，所以「手边那扇」通常留得住。
+ */
+const GOAL_SWITCH_RATIO = 0.7;
+
+/**
+ * 破开一扇开口折算成多远（像素）：剩余血量 / 每口伤害 × 啃咬间隔 × 自己的移速。
+ * 用剩余 hp 而不是 maxHp —— 已经啃过半的门对这只僵尸更便宜。
+ */
+function breakCostPx(z: Zombie, op: Opening, biteDamage: number, biteCycle: number): number {
+  const bites = Math.ceil(Math.max(1, op.hp) / biteDamage);
+  return bites * biteCycle * z.speed;
+}
+
+/**
+ * breach 索敌 —— 每只僵尸以自己的位置为起点独立算最优路线。
+ *
+ * 候选一：不破任何东西直接过去（同连通域内沿寻路距离，不是直线穿墙）；
+ * 候选二：破门窗。以自己所在连通域为起点在区域邻接图上跑 Dijkstra，
+ *         边权 = 区域内走到门口的距离 + 破拆耗时折算的距离 + 后续接近；
+ *         已破开的开口在连通图里只是可走地形，会自然成为候选路径之一。
+ *
+ * 两个候选里取便宜的那个；但若当前已有目标（或正在直追），只有新路线
+ * 便宜 30% 以上才切换，避免一扇门刚破就全场改道、蜂拥同一入口。
  *
  * 只在索敌节拍（0.3~0.6 秒）调用，每帧不跑图；区域图本身按体型缓存，
  * 只在开口破碎时失效重建。
  */
 function pursueBreach(world: World, z: Zombie, region: RegionMap): void {
   const myRegion = regionOf(region, z.x, z.y);
-  z.goalOpening = null;
-
-  // 1) 同区活人优先：直接追人，不破门窗
-  let local: Human | null = null;
-  let localD = Infinity;
   const humans = world.humans;
-  for (let i = 0; i < humans.length; i++) {
-    const h = humans[i];
-    if (!h.alive) continue;
-    if (regionOf(region, h.x, h.y) !== myRegion) continue;
-    const d = (h.x - z.x) * (h.x - z.x) + (h.y - z.y) * (h.y - z.y);
-    if (d < localD) {
-      localD = d;
-      local = h;
-    }
-  }
-  if (local) {
-    z.stranded = false;
-    z.tx = local.x;
-    z.ty = local.y;
-    return;
-  }
-
-  if (myRegion < 0 || region.count === 0) {
-    setStranded(z);
-    return;
-  }
-
   const tune = openingTuning(world.map);
   const def = effectiveZombie(z.kind);
   const biteCycle = (z.biteCycle ?? def.bite) * tune.buildBiteSlow;
   const biteDamage = Math.max(1, tune.buildBiteDamage);
 
-  ensureNavScratch(region.count);
-  const { dist, ex, ey, visited, prevRegion, prevEdge } = navScratch;
-  dist.fill(Infinity, 0, region.count);
-  visited.fill(0, 0, region.count);
-  prevRegion.fill(-1, 0, region.count);
-  prevEdge.fill(-1, 0, region.count);
-  dist[myRegion] = 0;
-  ex[myRegion] = z.x;
-  ey[myRegion] = z.y;
-
-  // 区域数很小（通常个位数），O(n²) 选点足够，省掉优先队列
-  for (let iter = 0; iter < region.count; iter++) {
-    let u = -1;
-    let best = Infinity;
-    for (let i = 0; i < region.count; i++) {
-      if (!visited[i] && dist[i] < best) {
-        best = dist[i];
-        u = i;
-      }
-    }
-    if (u < 0) break;
-    visited[u] = 1;
-    const list = region.edgesOf(u);
-    for (let k = 0; k < list.length; k++) {
-      const e = region.edges[list[k]];
-      const op = world.opening(e.openingId);
-      if (!op || op.broken) continue;
-      if (openingNetWidth(op.rect) < z.bodyDiameter) continue;
-      const other = e.from === u ? e.to : e.from;
-      const travel = Math.hypot(e.x - ex[u], e.y - ey[u]);
-      // 破拆耗时折算成“以自己移速能走多远”：越省时的开口边权越低
-      const bites = Math.ceil(op.maxHp / biteDamage);
-      const breakDist = bites * biteCycle * z.speed;
-      const nd = dist[u] + travel + breakDist;
-      if (nd < dist[other]) {
-        dist[other] = nd;
-        prevRegion[other] = u;
-        prevEdge[other] = list[k];
-        ex[other] = e.x;
-        ey[other] = e.y;
+  // 候选一：同连通域内直接追人。humanFlowFor 的障碍是墙体与过不去的开口，
+  // 所以它给出的距离天然被限制在“不破门能到”的范围内，不会穿墙抄近路。
+  const directFlow = world.humanFlowFor(z.bodyDiameter);
+  const directCost = directFlow ? directFlow.distanceAt(z.x, z.y) : Infinity;
+  let directTarget: Human | null = null;
+  if (Number.isFinite(directCost)) {
+    let bestD = Infinity;
+    for (let i = 0; i < humans.length; i++) {
+      const h = humans[i];
+      if (!h.alive) continue;
+      if (regionOf(region, h.x, h.y) !== myRegion) continue;
+      const d = dist2(z.x, z.y, h.x, h.y);
+      if (d < bestD) {
+        bestD = d;
+        directTarget = h;
       }
     }
   }
 
-  // 2) 在所有“有活人的可达区域”里选最快到达的一个（含最后一段接近距离）
-  let goalRegion = -1;
-  let goalHuman: Human | null = null;
-  let goalCost = Infinity;
-  for (let i = 0; i < humans.length; i++) {
-    const h = humans[i];
-    if (!h.alive) continue;
-    const hr = regionOf(region, h.x, h.y);
-    if (hr < 0 || dist[hr] === Infinity) continue;
-    const cost = dist[hr] + Math.hypot(h.x - ex[hr], h.y - ey[hr]);
-    if (cost < goalCost) {
-      goalCost = cost;
-      goalRegion = hr;
-      goalHuman = h;
+  // 候选二：破门路线
+  let doorCost = Infinity;
+  let doorGoal: string | null = null;
+  let doorOnward = 0;
+  let doorX = 0;
+  let doorY = 0;
+
+  if (myRegion >= 0 && region.count > 0) {
+    ensureNavScratch(region.count);
+    const { dist, visited, prevRegion, prevEdge } = navScratch;
+    dist.fill(Infinity, 0, region.count);
+    visited.fill(0, 0, region.count);
+    prevRegion.fill(-1, 0, region.count);
+    prevEdge.fill(-1, 0, region.count);
+    dist[myRegion] = 0;
+
+    // 区域数很小（通常个位数），O(n²) 选点足够，省掉优先队列
+    for (let iter = 0; iter < region.count; iter++) {
+      let u = -1;
+      let best = Infinity;
+      for (let i = 0; i < region.count; i++) {
+        if (!visited[i] && dist[i] < best) {
+          best = dist[i];
+          u = i;
+        }
+      }
+      if (u < 0) break;
+      visited[u] = 1;
+      // 进入 u 时经过哪扇门：区域内距离以那扇门为起点量，避免直线穿墙
+      const entryEdge = prevEdge[u] >= 0 ? region.edges[prevEdge[u]] : null;
+      const list = region.edgesOf(u);
+      for (let k = 0; k < list.length; k++) {
+        const e = region.edges[list[k]];
+        const op = world.opening(e.openingId);
+        if (!op || op.broken) continue;
+        if (openingNetWidth(op.rect) < z.bodyDiameter) continue;
+        const other = e.from === u ? e.to : e.from;
+        const travel = entryEdge
+          ? region.distanceToOpening(u, entryEdge.openingId, e.openingId)
+          : region.distanceFrom(u, e.openingId, z.x, z.y);
+        if (!Number.isFinite(travel)) continue;
+        const nd = dist[u] + travel + breakCostPx(z, op, biteDamage, biteCycle);
+        if (nd < dist[other]) {
+          dist[other] = nd;
+          prevRegion[other] = u;
+          prevEdge[other] = list[k];
+        }
+      }
+    }
+
+    // 在所有“有活人的区域”里选最便宜的一条，并回溯出要走的第一扇门
+    for (let i = 0; i < humans.length; i++) {
+      const h = humans[i];
+      if (!h.alive) continue;
+      const hr = regionOf(region, h.x, h.y);
+      // 同连通域的人由候选一负责比较，这里只算需要破门的
+      if (hr < 0 || hr === myRegion) continue;
+      if (!Number.isFinite(dist[hr])) continue;
+      const entryIdx = prevEdge[hr];
+      if (entryIdx < 0) continue;
+      const tail = region.distanceFrom(hr, region.edges[entryIdx].openingId, h.x, h.y);
+      if (!Number.isFinite(tail)) continue;
+      const cost = dist[hr] + tail;
+      if (cost >= doorCost) continue;
+
+      let r = hr;
+      while (prevRegion[r] !== myRegion) {
+        const p = prevRegion[r];
+        if (p < 0) break;
+        r = p;
+      }
+      const firstIdx = r >= 0 ? prevEdge[r] : -1;
+      if (firstIdx < 0) continue;
+      const first = region.edges[firstIdx];
+      const firstOp = world.opening(first.openingId);
+      if (!firstOp) continue;
+
+      const travel0 = region.distanceFrom(myRegion, first.openingId, z.x, z.y);
+      const break0 = breakCostPx(z, firstOp, biteDamage, biteCycle);
+      doorCost = cost;
+      doorGoal = first.openingId;
+      doorOnward = Math.max(0, cost - (Number.isFinite(travel0) ? travel0 : 0) - break0);
+      doorX = first.x;
+      doorY = first.y;
     }
   }
 
-  if (!goalHuman || goalRegion < 0) {
-    setStranded(z);
-    return;
+  // 当前目标的代价（按此刻的剩余距离 + 剩余破拆时间重算）
+  let currentGoal = z.goalOpening;
+  let currentCost = Infinity;
+  if (currentGoal !== null) {
+    const op = world.opening(currentGoal);
+    if (!op || op.broken || openingNetWidth(op.rect) < z.bodyDiameter) {
+      // 目标已经不存在（被别人啃破 / 自己钻不过）：立刻重选
+      currentGoal = null;
+      z.goalOpening = null;
+      z.goalOnward = 0;
+    } else {
+      const toGoal =
+        myRegion >= 0 ? region.distanceFrom(myRegion, currentGoal, z.x, z.y) : Infinity;
+      currentCost = Number.isFinite(toGoal)
+        ? toGoal + breakCostPx(z, op, biteDamage, biteCycle) + Math.max(0, z.goalOnward)
+        : Infinity;
+    }
+  } else {
+    // 正在直追：不破门的距离就是当前代价
+    currentCost = directCost;
   }
 
-  // 目标就在本区（理论上已被同区分支拦下，这里兜底直接追人）
-  if (goalRegion === myRegion) {
-    z.stranded = false;
-    z.tx = goalHuman.x;
-    z.ty = goalHuman.y;
-    return;
-  }
+  const directBetter = directCost <= doorCost;
+  const newCost = directBetter ? directCost : doorCost;
 
-  // 回溯最短路，找出从本区出发要破的第一扇开口
-  let r = goalRegion;
-  while (prevRegion[r] !== myRegion) {
-    const p = prevRegion[r];
-    if (p < 0) {
-      setStranded(z);
+  // 当前目标失效，或新路线明显更便宜（省 30% 以上）才切换
+  if (!Number.isFinite(currentCost) || newCost < currentCost * GOAL_SWITCH_RATIO) {
+    if (directBetter && Number.isFinite(directCost)) {
+      z.goalOpening = null;
+      z.goalOnward = 0;
+      z.stranded = false;
+      if (directTarget) {
+        z.tx = directTarget.x;
+        z.ty = directTarget.y;
+      }
       return;
     }
-    r = p;
+    if (doorGoal !== null && Number.isFinite(doorCost)) {
+      z.goalOpening = doorGoal;
+      z.goalOnward = doorOnward;
+      z.stranded = false;
+      z.tx = doorX;
+      z.ty = doorY;
+      return;
+    }
   }
-  const edgeIndex = prevEdge[r];
-  if (edgeIndex < 0) {
-    setStranded(z);
+
+  // 维持当前选择：只刷新兜底坐标，让“保持”也有新鲜的目标信息
+  if (z.goalOpening !== null) {
+    z.stranded = false;
+    if (doorGoal === z.goalOpening) z.goalOnward = doorOnward;
+    const op = world.opening(z.goalOpening);
+    if (op) {
+      z.tx = op.rect.x + op.rect.w * 0.5;
+      z.ty = op.rect.y + op.rect.h * 0.5;
+    }
     return;
   }
-  const edge = region.edges[edgeIndex];
-  z.stranded = false;
-  z.goalOpening = edge.openingId;
-  z.tx = edge.x;
-  z.ty = edge.y;
+  if (Number.isFinite(directCost)) {
+    z.stranded = false;
+    if (directTarget) {
+      z.tx = directTarget.x;
+      z.ty = directTarget.y;
+    }
+    return;
+  }
+  setStranded(z);
 }
 
 /** 索敌分发：按僵尸类型的追击模式决定目标；顺带播一次全局限频的咆哮 */

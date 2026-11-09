@@ -9,9 +9,16 @@
  */
 import { HUMAN_DEF } from "../data/humans";
 import { resolveMap, type MapDef } from "../data/maps";
-import { effectiveHuman, effectiveWeapon } from "../data/settings/runtime";
-import { SURVIVAL, SURVIVAL_XP_BY_KIND, xpNeedFor, type SurvivalUpgradeDef } from "../data/survival/config";
-import { WEAPON_LIST } from "../data/weapons";
+import { effectiveHuman, effectiveWeapon, setZombieModeOverrides } from "../data/settings/runtime";
+import {
+  SURVIVAL,
+  SURVIVAL_WEAPON_POOL,
+  SURVIVAL_XP_BY_KIND,
+  SURVIVAL_ZOMBIE_OVERRIDES,
+  SURVIVAL_ZOMBIE_WEIGHTS,
+  xpNeedFor,
+  type SurvivalUpgradeDef,
+} from "../data/survival/config";
 import { ZOMBIE_IDS, getZombieDef, zombieBodyDiameter } from "../data/zombies";
 import type { SpawnRegion } from "../data/types";
 import { createWorld, type Human, type World, type Zombie } from "../core/world";
@@ -111,6 +118,8 @@ export class SurvivalSession {
 
   /** 开始 / 重开一局；记录不重置 */
   start(mapOrId?: string): void {
+    // 求生有独立平衡：进入模式即启用覆盖表，离开时由 stop() 清空
+    setZombieModeOverrides(SURVIVAL_ZOMBIE_OVERRIDES);
     this.map = resolveMap(mapOrId ?? this.map.id).map;
     this.world = createWorld(this.map);
     this.elapsed = 0;
@@ -161,13 +170,14 @@ export class SurvivalSession {
     this.start(this.map.id);
   }
 
-  /** 离开路由：停止推进，保留最后画面做背景 */
+  /** 离开路由：停止推进，保留最后画面做背景；同时撤销求生专属数值覆盖 */
   stop(): void {
     this.state = "idle";
     this.inputX = 0;
     this.inputY = 0;
     this.choices = [];
     this.pendingLevelUps = 0;
+    setZombieModeOverrides(null);
   }
 
   /** WASD / 方向键输入（-1..1），由入口每帧写入 */
@@ -313,7 +323,7 @@ export class SurvivalSession {
   /** 未持有武器随机排序；抽到「获得新武器」时展示 */
   private rollWeaponPicks(): string[] {
     if (!this.canTakeWeapon) return [];
-    const pool = WEAPON_LIST.map((w) => w.id).filter((id) => !this.ownedWeapons.includes(id));
+    const pool = SURVIVAL_WEAPON_POOL.filter((id) => !this.ownedWeapons.includes(id));
     for (let i = pool.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));
       [pool[i], pool[j]] = [pool[j], pool[i]];
@@ -520,17 +530,16 @@ export class SurvivalSession {
   }
 
   private rollKind(): string {
-    const d = SURVIVAL.difficulty;
-    const options: Array<{ kind: string; weight: number }> = [
-      { kind: ZOMBIE_IDS.normal, weight: d.normalWeight },
-      { kind: ZOMBIE_IDS.runner, weight: d.runnerBase + d.runnerPerLevel * (this.level - 1) },
-    ];
-    if (this.level >= d.fatStartLevel) {
+    // 权重表集中在 data/survival/config.ts：权重随玩家等级线性增长，未到起始等级不出现
+    const options: Array<{ kind: string; weight: number }> = [];
+    for (const row of SURVIVAL_ZOMBIE_WEIGHTS) {
+      if (this.level < row.startLevel) continue;
       options.push({
-        kind: ZOMBIE_IDS.fat,
-        weight: d.fatBase + d.fatPerLevel * (this.level - d.fatStartLevel),
+        kind: row.kind,
+        weight: row.base + row.perLevel * (this.level - row.startLevel),
       });
     }
+    if (options.length === 0) return getZombieDef(ZOMBIE_IDS.normal).id;
     let total = 0;
     for (const o of options) total += o.weight;
     let roll = Math.random() * total;
@@ -538,7 +547,7 @@ export class SurvivalSession {
       roll -= o.weight;
       if (roll < 0) return o.kind;
     }
-    return ZOMBIE_IDS.normal;
+    return options[options.length - 1].kind;
   }
 
   private finish(): void {

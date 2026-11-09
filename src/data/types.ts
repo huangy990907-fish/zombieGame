@@ -172,6 +172,24 @@ export interface ZombieTunables {
   damage: number;
 }
 
+/**
+ * 按模式的僵尸数值覆盖：只写与其它模式不同的字段，缺失字段回退基础定义。
+ * 用于「求生」这类独立平衡的模式，避免把单模式数值写进基础实体定义文件。
+ */
+export interface ZombieModeOverride {
+  hp?: number;
+  speed?: number;
+  bite?: number;
+  damage?: number;
+  /** 只覆盖飞扑参数里需要按模式调整的项（如压制时长 / DPS） */
+  leap?: Partial<ZombieLeapConfig>;
+  /** 只覆盖吐毒参数里需要按模式调整的项（如毒液 DPS） */
+  spit?: Partial<ZombieSpitConfig>;
+}
+
+/** 一套模式覆盖表：僵尸 id -> 该模式下不同的字段；新增模式只需再加一份表 */
+export type ZombieModeOverrideTable = Record<string, ZombieModeOverride>;
+
 export interface HumanDef {
   /** 代码里唯一使用的身份 */
   id: string;

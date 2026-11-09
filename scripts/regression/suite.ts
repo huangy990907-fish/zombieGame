@@ -9,9 +9,14 @@ import { join } from "node:path";
 import type { MapDef, OpeningDef, Rect, SpawnRegion } from "../../src/data/types";
 import { HUMAN_DEF } from "../../src/data/humans";
 import { TERRAIN } from "../../src/data/terrain";
-import { WEAPON_LIST } from "../../src/data/weapons";
+import { WEAPON_IDS, WEAPON_LIST } from "../../src/data/weapons";
 import { ZOMBIE_IDS } from "../../src/data/zombies";
-import { effectiveWeapon, effectiveZombie } from "../../src/data/settings/runtime";
+import { effectiveWeapon, effectiveZombie, setZombieModeOverrides } from "../../src/data/settings/runtime";
+import {
+  SURVIVAL_WEAPON_POOL,
+  SURVIVAL_ZOMBIE_OVERRIDES,
+  SURVIVAL_ZOMBIE_WEIGHTS,
+} from "../../src/data/survival/config";
 import { compileTilesToMapDef } from "../../src/data/maps/compile";
 import { validateMapJson } from "../../src/data/maps/schema";
 import { validateLevelJson } from "../../src/data/levels/schema";
@@ -232,6 +237,7 @@ scenario("求生经验拾取：击杀掉球 → 靠近吸附 → 经验增加", 
   for (let i = 0; i < 40 && session.xp === before; i++) session.tick(0.05);
   assert(session.xp > before, "经验球应被吸附拾取并增加经验");
   assert(session.orbsForRender().length === 0, "拾取后经验球应从场上移除");
+  session.stop(); // 离开求生模式：撤销模式覆盖表，避免污染后续场景
 });
 
 scenario("求生目标切换：最近目标死亡后立即改锁下一个", () => {
@@ -251,6 +257,7 @@ scenario("求生目标切换：最近目标死亡后立即改锁下一个", () =
   near.hp = 0;
   session.tick(0.05);
   assert(player!.target === far, "最近目标死亡后应切换到下一只存活丧尸");
+  session.stop(); // 离开求生模式：撤销模式覆盖表，避免污染后续场景
 });
 
 scenario("地图与关卡 JSON 校验：内置数据全部合法，非法数据被拦截", () => {
@@ -589,6 +596,40 @@ scenario("腐蚀者：射程内吐毒，死亡在尸体位置留下大毒团", (
       Math.abs(dead!.remaining - spit.deathDuration) < 1e-6,
     "死亡毒液的半径 / 持续时间应与定义文件一致",
   );
+});
+
+scenario("求生池守卫：所有僵尸 / 武器均已登记，模式覆盖表只在求生生效", () => {
+  // 新增僵尸漏登记出怪权重表、或新增武器漏登记武器池，这里直接失败
+  for (const id of Object.values(ZOMBIE_IDS)) {
+    assert(
+      SURVIVAL_ZOMBIE_WEIGHTS.some((row) => row.kind === id),
+      `僵尸 ${id} 未登记求生出怪权重表`,
+    );
+  }
+  for (const id of Object.values(WEAPON_IDS)) {
+    assert(SURVIVAL_WEAPON_POOL.includes(id), `武器 ${id} 未登记求生武器池`);
+  }
+
+  // 覆盖表：求生飞扑者压制 1.5 秒 / 4 DPS，腐蚀者毒液 4 DPS；切回基础模式回退定义值
+  setZombieModeOverrides(SURVIVAL_ZOMBIE_OVERRIDES);
+  try {
+    const leap = effectiveZombie(ZOMBIE_IDS.leaper).leap!;
+    assert(
+      leap.pinDuration === 1.5 && leap.pinDps === 4,
+      `求生飞扑者压制应为 1.5 秒 / 4 DPS，实际 ${leap.pinDuration} / ${leap.pinDps}`,
+    );
+    const spit = effectiveZombie(ZOMBIE_IDS.corroder).spit!;
+    assert(spit.dps === 4, `求生腐蚀者毒液应为 4 DPS，实际 ${spit.dps}`);
+    assert(leap.chargeTime === 0.8, `覆盖表不应改写未覆盖的蓄力时长，实际 ${leap.chargeTime}`);
+  } finally {
+    setZombieModeOverrides(null);
+  }
+  const leapBase = effectiveZombie(ZOMBIE_IDS.leaper).leap!;
+  assert(
+    leapBase.pinDuration === 3 && leapBase.pinDps === 8,
+    `基础模式应回退 3 秒 / 8 DPS，实际 ${leapBase.pinDuration} / ${leapBase.pinDps}`,
+  );
+  assert(effectiveZombie(ZOMBIE_IDS.corroder).spit!.dps === 6, "基础模式毒液应回退 6 DPS");
 });
 
 // ============================================================

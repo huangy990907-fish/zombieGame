@@ -21,6 +21,7 @@ import type {
   WeaponDef,
   WeaponTunables,
   ZombieDef,
+  ZombieModeOverrideTable,
   ZombieTunables,
 } from "../types";
 import { DEFAULT_BASE_SETTINGS } from "./defaults";
@@ -60,6 +61,11 @@ let activeMap: MapDef = DEFAULT_MAP;
 /** 合并后的实体定义缓存，避免每帧为每只单位重复创建对象 */
 let humanCache: HumanDef | null = null;
 const zombieCache = new Map<string, ZombieDef>();
+/**
+ * 当前生效的按模式僵尸覆盖表。模式自己持有数据（如求生 config），
+ * 进入该模式时启用、离开时清空，这里只负责合并与缓存失效。
+ */
+let modeZombieOverrides: ZombieModeOverrideTable = {};
 const weaponCache = new Map<string, WeaponDef>();
 let openingCache: { map: MapDef; value: OpeningTuning } | null = null;
 
@@ -176,19 +182,34 @@ export function openingInstance(def: OpeningDef): { maxHp: number; passSpeed: nu
   return { maxHp, passSpeed };
 }
 
-/** 合并过覆盖值的僵尸定义（unknown id 回落 normal） */
+/**
+ * 启用 / 清空一套按模式的僵尸数值覆盖。
+ * 传 null 即回到基础定义；模式数据仍住在各自 config 里，这里不存任何模式专有数值。
+ */
+export function setZombieModeOverrides(table: ZombieModeOverrideTable | null): void {
+  modeZombieOverrides = table ?? {};
+  invalidate();
+}
+
+/**
+ * 合并过覆盖值的僵尸定义（unknown id 回落 normal）。
+ * 优先级：玩家覆盖值 > 当前模式覆盖表 > 基础定义；嵌套的 leap / spit 只在定义已存在时合并。
+ */
 export function effectiveZombie(id: string): ZombieDef {
   const def = getZombieDef(id);
   const hit = zombieCache.get(def.id);
   if (hit) return hit;
   const o = overrides.zombie?.types?.[def.id];
+  const mo = modeZombieOverrides[def.id];
   const value: ZombieDef = {
     ...def,
-    hp: o?.hp ?? def.hp,
-    speed: o?.speed ?? def.speed,
-    bite: o?.bite ?? def.bite,
-    damage: o?.damage ?? def.damage,
+    hp: o?.hp ?? mo?.hp ?? def.hp,
+    speed: o?.speed ?? mo?.speed ?? def.speed,
+    bite: o?.bite ?? mo?.bite ?? def.bite,
+    damage: o?.damage ?? mo?.damage ?? def.damage,
   };
+  if (def.leap) value.leap = { ...def.leap, ...(mo?.leap ?? {}) };
+  if (def.spit) value.spit = { ...def.spit, ...(mo?.spit ?? {}) };
   zombieCache.set(def.id, value);
   return value;
 }

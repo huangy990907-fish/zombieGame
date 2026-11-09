@@ -5,6 +5,8 @@
  * 所有数值都可在后续版本里调整，不影响其它模式。
  */
 import { ZOMBIE_IDS } from "../zombies";
+import { WEAPON_IDS } from "../weapons";
+import type { ZombieModeOverrideTable } from "../types";
 
 /** 升级奖励种类；效果由 session 按 kind 应用 */
 export type SurvivalUpgradeKind =
@@ -103,15 +105,6 @@ export const SURVIVAL = {
   },
 
   difficulty: {
-    /** 普通丧尸基础权重 */
-    normalWeight: 12,
-    /** 狂奔丧尸：基础权重 + 每级增量 */
-    runnerBase: 2,
-    runnerPerLevel: 3,
-    /** 胖子从第几级开始出现，以及基础 / 每级权重 */
-    fatStartLevel: 4,
-    fatBase: 2,
-    fatPerLevel: 2,
     /** 每档（30 秒）僵尸血量额外增长比例 */
     hpPerTier: 0.08,
     /** 血量倍率封顶，避免长局单只僵尸硬到打不动 */
@@ -178,11 +171,66 @@ export const SURVIVAL = {
   ] satisfies SurvivalUpgradeDef[],
 } as const;
 
+/**
+ * 求生模式的出怪权重表。
+ * 实际权重 = base + perLevel × (玩家等级 - startLevel)；等级低于 startLevel 时不出现。
+ * **新增僵尸必须在这里登记**，漏登记会被 regression 的「求生池守卫」场景直接判失败。
+ */
+export interface SurvivalZombieWeight {
+  kind: string;
+  /** 玩家达到该等级后才开始出现 */
+  startLevel: number;
+  /** 达到 startLevel 时的权重 */
+  base: number;
+  /** 每高 1 级增加的权重 */
+  perLevel: number;
+}
+
+export const SURVIVAL_ZOMBIE_WEIGHTS: readonly SurvivalZombieWeight[] = [
+  { kind: ZOMBIE_IDS.normal, startLevel: 1, base: 12, perLevel: 0 },
+  { kind: ZOMBIE_IDS.runner, startLevel: 1, base: 2, perLevel: 3 },
+  // 2 级起出现，权重略低于同级的狂奔
+  { kind: ZOMBIE_IDS.leaper, startLevel: 2, base: 4, perLevel: 2.4 },
+  { kind: ZOMBIE_IDS.fat, startLevel: 4, base: 2, perLevel: 2 },
+  // 4 级起出现，权重全场最低
+  { kind: ZOMBIE_IDS.corroder, startLevel: 4, base: 1, perLevel: 0.6 },
+];
+
+/**
+ * 求生可获得的武器池（「获得新武器」的二段选择从这里抽取）。
+ * **新增武器必须显式登记**，漏登记会被 regression 的「求生池守卫」场景拦住。
+ */
+export const SURVIVAL_WEAPON_POOL: readonly string[] = [
+  WEAPON_IDS.mg,
+  WEAPON_IDS.flame,
+  WEAPON_IDS.shotgun,
+  WEAPON_IDS.rocket,
+  WEAPON_IDS.tesla,
+];
+
+/**
+ * 求生模式的僵尸数值覆盖表 —— 求生与其它模式的平衡互不影响，基础定义文件不动。
+ * 缺失字段回退 `src/data/zombies/*.ts` 的基础值：
+ *  - 飞扑者压制：基础 3s / 8 DPS → 求生 1.5s / 4 DPS
+ *  - 腐蚀者毒液：基础 6 DPS → 求生 4 DPS（单角色没有队友分摊，远程伤害更致命）
+ * 以后某模式需要不同的血量 / 承伤 / 移速，也在这张表里给对应 id 加字段即可。
+ */
+export const SURVIVAL_ZOMBIE_OVERRIDES: ZombieModeOverrideTable = {
+  [ZOMBIE_IDS.leaper]: {
+    leap: { pinDuration: 1.5, pinDps: 4 },
+  },
+  [ZOMBIE_IDS.corroder]: {
+    spit: { dps: 4 },
+  },
+};
+
 /** 每种丧尸的经验值；未登记的 id 按 1 点 */
 export const SURVIVAL_XP_BY_KIND: Record<string, number> = {
   [ZOMBIE_IDS.normal]: 1,
   [ZOMBIE_IDS.runner]: 1,
   [ZOMBIE_IDS.fat]: 3,
+  [ZOMBIE_IDS.leaper]: 2,
+  [ZOMBIE_IDS.corroder]: 2,
 };
 
 /** 第 level 级升下一级所需经验 */

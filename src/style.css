@@ -109,6 +109,61 @@ body {
   max-height: calc(100vh - 170px);
 }
 
+/*
+ * 顶部 BOSS 血条：DOM 覆盖层，所有对局模式通用。
+ * 不随 Pixi 镜头缩放，只跟着画布容器定位。
+ */
+.boss-bar {
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(560px, 72%);
+  line-height: 1.35;
+  pointer-events: none;
+  z-index: 4;
+}
+
+.boss-bar.hidden {
+  display: none;
+}
+
+.boss-bar-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 3px;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: #fecaca;
+  text-shadow: 0 1px 3px #000;
+}
+
+.boss-bar-value {
+  font-size: 12px;
+  font-weight: 600;
+  color: #fca5a5;
+}
+
+.boss-bar-track {
+  height: 10px;
+  border: 1px solid #7f1d1d;
+  border-radius: 3px;
+  background: rgba(8, 8, 14, 0.85);
+  overflow: hidden;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+}
+
+.boss-bar-track > i {
+  display: block;
+  height: 100%;
+  width: 100%;
+  background: linear-gradient(90deg, #7f1d1d, #dc2626 55%, #f87171);
+  transition: width 0.12s linear;
+}
+
 .bottom {
   padding: 8px 18px 0;
 }

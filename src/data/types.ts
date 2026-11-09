@@ -163,6 +163,44 @@ export interface ZombieDef {
   leap?: ZombieLeapConfig;
   /** 腐蚀者参数；有该字段即启用远程吐毒与死亡留毒 */
   spit?: ZombieSpitConfig;
+  /** BOSS 标记：不参与尖叫强化，并可单独登记到求生的 BOSS 出怪池 */
+  boss?: boolean;
+  /** 不能主动攻击人类（不撕咬、不产生撕咬伤害），但仍可以啃门窗 */
+  noAttack?: boolean;
+  /** 母体参数；有该字段即启用周期性产卵与死亡产卵 */
+  spawner?: ZombieSpawnerConfig;
+  /** 尖叫者参数；有该字段即启用周期性范围强化 */
+  scream?: ZombieScreamConfig;
+}
+
+/** 母体产卵参数（子体种类从求生池的非 BOSS 僵尸里抽取） */
+export interface ZombieSpawnerConfig {
+  /** 两次产卵的间隔（秒） */
+  interval: number;
+  /** 每次产卵数量 */
+  count: number;
+  /** 由这只母体产出的子体同屏上限 */
+  cap: number;
+  /** 死亡时一次性产出的数量 */
+  deathCount: number;
+  /** 子体经验折算倍率（1 = 正常） */
+  childXpMul: number;
+}
+
+/** 尖叫者的范围强化参数 */
+export interface ZombieScreamConfig {
+  /** 尖叫间隔（秒） */
+  interval: number;
+  /** 强化半径（像素） */
+  radius: number;
+  /** 强化持续时间（秒） */
+  duration: number;
+  /** 移速倍率 */
+  speedMul: number;
+  /** 攻击力（撕咬伤害）倍率 */
+  damageMul: number;
+  /** 承伤倍率（受击伤害乘以该值，0.7 = 减免 30%） */
+  damageTakenMul: number;
 }
 
 export interface ZombieTunables {
@@ -185,6 +223,10 @@ export interface ZombieModeOverride {
   leap?: Partial<ZombieLeapConfig>;
   /** 只覆盖吐毒参数里需要按模式调整的项（如毒液 DPS） */
   spit?: Partial<ZombieSpitConfig>;
+  /** 只覆盖产卵参数里需要按模式调整的项 */
+  spawner?: Partial<ZombieSpawnerConfig>;
+  /** 只覆盖尖叫强化参数里需要按模式调整的项 */
+  scream?: Partial<ZombieScreamConfig>;
 }
 
 /** 一套模式覆盖表：僵尸 id -> 该模式下不同的字段；新增模式只需再加一份表 */

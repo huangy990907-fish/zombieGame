@@ -210,6 +210,8 @@ export function effectiveZombie(id: string): ZombieDef {
   };
   if (def.leap) value.leap = { ...def.leap, ...(mo?.leap ?? {}) };
   if (def.spit) value.spit = { ...def.spit, ...(mo?.spit ?? {}) };
+  if (def.spawner) value.spawner = { ...def.spawner, ...(mo?.spawner ?? {}) };
+  if (def.scream) value.scream = { ...def.scream, ...(mo?.scream ?? {}) };
   zombieCache.set(def.id, value);
   return value;
 }

@@ -17,6 +17,10 @@ export const SFX = {
   ZOMBIE_GROWL_FAT: "zombie-growl-fat", // 胖子的专属低频低吼
   ZOMBIE_GROWL_LEAPER: "zombie-growl-leaper", // 飞扑者的高频尖啸
   ZOMBIE_GROWL_CORRODER: "zombie-growl-corroder", // 腐蚀者的含液咕噜声
+  ZOMBIE_GROWL_MATRIARCH: "zombie-growl-matriarch", // 母体的低沉轰鸣
+  ZOMBIE_SPAWN: "zombie-spawn",  // 母体产卵 / 死亡产卵
+  ZOMBIE_MATRIARCH_DEATH: "zombie-matriarch-death", // 母体倒地
+  ZOMBIE_SCREAM: "zombie-scream", // 尖叫者范围强化
   ZOMBIE_LEAP: "zombie-leap",    // 飞扑者起跳
   ZOMBIE_SPIT: "zombie-spit",    // 腐蚀者吐毒
   ZOMBIE_BITE: "zombie-bite",    // 啃咬（人类或门窗）
@@ -52,6 +56,10 @@ export const SFX_MAP: Record<SfxKey, string> = {
   [SFX.ZOMBIE_GROWL_FAT]: "audio/zombie-growl-fat.mp3",
   [SFX.ZOMBIE_GROWL_LEAPER]: "audio/zombie-growl-leaper.mp3",
   [SFX.ZOMBIE_GROWL_CORRODER]: "audio/zombie-growl-corroder.mp3",
+  [SFX.ZOMBIE_GROWL_MATRIARCH]: "audio/zombie-growl-matriarch.mp3",
+  [SFX.ZOMBIE_SPAWN]: "audio/zombie-spawn.mp3",
+  [SFX.ZOMBIE_MATRIARCH_DEATH]: "audio/zombie-matriarch-death.mp3",
+  [SFX.ZOMBIE_SCREAM]: "audio/zombie-scream.mp3",
   [SFX.ZOMBIE_LEAP]: "audio/zombie-leap.mp3",
   [SFX.ZOMBIE_SPIT]: "audio/zombie-spit.mp3",
   [SFX.ZOMBIE_BITE]: "audio/zombie-bite.mp3",
@@ -82,6 +90,10 @@ export const SFX_THROTTLE: Record<SfxKey, number> = {
   [SFX.ZOMBIE_GROWL_FAT]: 2200,
   [SFX.ZOMBIE_GROWL_LEAPER]: 2600,
   [SFX.ZOMBIE_GROWL_CORRODER]: 2800,
+  [SFX.ZOMBIE_GROWL_MATRIARCH]: 3200,
+  [SFX.ZOMBIE_SPAWN]: 800,
+  [SFX.ZOMBIE_MATRIARCH_DEATH]: 0,
+  [SFX.ZOMBIE_SCREAM]: 1200,
   [SFX.ZOMBIE_LEAP]: 300,
   [SFX.ZOMBIE_SPIT]: 350,
   [SFX.ZOMBIE_BITE]: 400,

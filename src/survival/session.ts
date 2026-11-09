@@ -12,10 +12,11 @@ import { resolveMap, type MapDef } from "../data/maps";
 import { effectiveHuman, effectiveWeapon, setZombieModeOverrides } from "../data/settings/runtime";
 import {
   SURVIVAL,
+  SURVIVAL_BOSS_POOL,
   SURVIVAL_WEAPON_POOL,
-  SURVIVAL_XP_BY_KIND,
   SURVIVAL_ZOMBIE_OVERRIDES,
   SURVIVAL_ZOMBIE_WEIGHTS,
+  survivalXpFor,
   xpNeedFor,
   type SurvivalUpgradeDef,
 } from "../data/survival/config";
@@ -74,6 +75,8 @@ export class SurvivalSession {
   private inputX = 0;
   private inputY = 0;
   private spawnTimer = 0;
+  /** BOSS 投放计时：kind -> 距离下次尝试的秒数 */
+  private bossTimers = new Map<string, number>();
   private orbs: SurvivalOrb[] = [];
   private readonly area: SpawnRegion;
 
@@ -144,6 +147,9 @@ export class SurvivalSession {
     this.inputX = 0;
     this.inputY = 0;
     this.spawnTimer = SURVIVAL.spawn.initialDelay;
+    // BOSS 计时从 0 开始：达到 startLevel 后立刻尝试首只，之后按各自间隔投放
+    this.bossTimers.clear();
+    for (const boss of SURVIVAL_BOSS_POOL) this.bossTimers.set(boss.kind, 0);
     this.orbs = [];
     this.record = loadSurvivalRecord();
 
@@ -219,6 +225,7 @@ export class SurvivalSession {
 
     this.updateOrbs(dt);
     this.spawnTick(dt);
+    this.bossTick(dt);
 
     if (this.pendingLevelUps > 0) this.beginChoice();
   }
@@ -447,7 +454,7 @@ export class SurvivalSession {
       x: z.x + randRange(-off, off),
       y: z.y + randRange(-off, off),
       radius: SURVIVAL.xp.orbRadius,
-      value: SURVIVAL_XP_BY_KIND[z.kind] ?? 1,
+      value: survivalXpFor(z.kind, z.xpMul),
     });
   }
 
@@ -496,10 +503,31 @@ export class SurvivalSession {
     if (this.spawnTimer < 0) this.spawnTimer = 0;
   }
 
-  private spawnOne(): void {
+  /**
+   * BOSS 投放：达到 startLevel 后开始计时；同屏数量达到 maxAlive 时停在 0，
+   * 等现有 BOSS 被击杀后立刻补下一只。
+   */
+  private bossTick(dt: number): void {
+    if (SURVIVAL_BOSS_POOL.length === 0) return;
+    for (const boss of SURVIVAL_BOSS_POOL) {
+      if (this.level < boss.startLevel) continue;
+      let alive = 0;
+      for (let i = 0; i < this.world.zombies.length; i++) {
+        const z = this.world.zombies[i];
+        if (z.alive && z.kind === boss.kind) alive++;
+      }
+      let timer = Math.max(0, (this.bossTimers.get(boss.kind) ?? 0) - dt);
+      if (timer <= 0 && alive < boss.maxAlive) {
+        if (this.spawnOne(boss.kind)) timer = boss.intervalSeconds;
+      }
+      this.bossTimers.set(boss.kind, timer);
+    }
+  }
+
+  private spawnOne(kindOverride?: string): boolean {
     const player = this.player;
-    if (!player) return;
-    const kind = this.rollKind();
+    if (!player) return false;
+    const kind = kindOverride ?? this.rollKind();
     const body = zombieBodyDiameter(getZombieDef(kind));
     const cfg = SURVIVAL.spawn;
     const min2 = cfg.minDistance * cfg.minDistance;
@@ -525,8 +553,9 @@ export class SurvivalSession {
       const spot = this.world.findFreeSpot(x, y, body, this.area);
       if (!spot) continue;
       this.world.spawnZombie(spot.x, spot.y, kind, hpScale);
-      return;
+      return true;
     }
+    return false;
   }
 
   private rollKind(): string {

@@ -14,7 +14,7 @@ import { DEFAULT_MAP, type MapDef } from "../data/maps";
 import { TILE_SIZE } from "../data/maps/schema";
 import { TERRAIN } from "../data/terrain";
 import { effectiveHuman, effectiveWeapon, effectiveZombie, openingInstance, setActiveMap, settings } from "../data/settings/runtime";
-import { zombieBodyDiameter } from "../data/zombies";
+import { getZombieDef, zombieBodyDiameter } from "../data/zombies";
 import type { HumanMode, Rect, SpawnRegion, ZombieMode } from "../data/types";
 import { FlowField, openingNetWidth } from "../systems/flowField";
 import { findFreePoint, isBlockedForBody } from "../systems/collision";
@@ -208,6 +208,20 @@ export interface Zombie {
   pinTargetId: number | null;
   /** 腐蚀者吐毒冷却（秒），0 表示可以吐 */
   spit: number;
+  /** 母体下一次产卵的倒计时（秒）；非母体恒为 0 */
+  spawnerTimer: number;
+  /** 尖叫者下一次尖叫的倒计时（秒）；非尖叫者恒为 0 */
+  screamTimer: number;
+  /** 被尖叫强化的剩余时间（秒）；>0 时按下面的倍率生效 */
+  buffTimer: number;
+  /** 强化：移速 / 攻击力 / 承伤倍率（未强化时均为 1） */
+  buffSpeedMul: number;
+  buffDamageMul: number;
+  buffTakenMul: number;
+  /** 由哪只母体产出；null 表示自然出怪 */
+  spawnedBy: number | null;
+  /** 击杀经验折算倍率（母体子体 0.7，自然出怪 1） */
+  xpMul: number;
   alive: boolean;
   /** 训练场用：血量上限（面板显示 / 重设血量） */
   maxHp?: number;
@@ -811,10 +825,74 @@ export class World {
       leapDY: 0,
       pinTargetId: null,
       spit: 0,
+      spawnerTimer: def.spawner ? def.spawner.interval : 0,
+      screamTimer: def.scream ? def.scream.interval : 0,
+      buffTimer: 0,
+      buffSpeedMul: 1,
+      buffDamageMul: 1,
+      buffTakenMul: 1,
+      spawnedBy: null,
+      xpMul: 1,
       alive: true,
     };
     this.zombies.push(zombie);
     return zombie;
+  }
+
+  /**
+   * 在母体周围环形采样一个空地，产出一只子体。
+   * 落点必须在地图内、不在墙体 / 水池里，并与母体身体保持间距；
+   * 一圈找不到就换更大的半径，全部失败返回 null（由调用方等下一轮）。
+   */
+  spawnChild(mother: Zombie, kind: string, xpMul = 1): Zombie | null {
+    const def = effectiveZombie(kind);
+    const body = zombieBodyDiameter(def);
+    const gap = mother.radius + body * 0.5 + 4;
+    const minX = body * 0.5;
+    const maxX = this.map.width - body * 0.5;
+    const minY = body * 0.5;
+    const maxY = this.map.height - body * 0.5;
+    const steps = 16;
+    for (let ring = 0; ring < 4; ring++) {
+      const radius = gap + ring * (body + 10);
+      const start = Math.random() * Math.PI * 2;
+      for (let i = 0; i < steps; i++) {
+        const ang = start + (i / steps) * Math.PI * 2;
+        const x = mother.x + Math.cos(ang) * radius;
+        const y = mother.y + Math.sin(ang) * radius;
+        if (x < minX || x > maxX || y < minY || y > maxY) continue;
+        if (this.solidAt(x, y, 0, body)) continue;
+        const child = this.spawnZombie(x, y, kind);
+        child.spawnedBy = mother.id;
+        child.xpMul = xpMul;
+        return child;
+      }
+    }
+    return null;
+  }
+
+  /**
+   * 全局 BOSS 血条数据：取场上血量最高的存活母体（多只时另外给出总数）。
+   * 没有任何 BOSS 时返回 null，渲染层据此隐藏血条。
+   */
+  bossBarInfo(): { id: number; name: string; hp: number; maxHp: number; count: number } | null {
+    let best: Zombie | null = null;
+    let count = 0;
+    for (let i = 0; i < this.zombies.length; i++) {
+      const z = this.zombies[i];
+      if (!z.alive || !getZombieDef(z.kind).boss) continue;
+      count++;
+      if (!best || z.hp > best.hp) best = z;
+    }
+    if (!best) return null;
+    const def = getZombieDef(best.kind);
+    return {
+      id: best.id,
+      name: def.name,
+      hp: Math.max(0, best.hp),
+      maxHp: best.maxHp ?? def.hp,
+      count,
+    };
   }
 
   /**

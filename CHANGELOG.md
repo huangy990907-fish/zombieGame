@@ -24,12 +24,20 @@
 - 求生独立数值覆盖表 `SURVIVAL_ZOMBIE_OVERRIDES`（按模式、缺失回退基础定义）：飞扑者压制 1.5 秒 / 每秒 4 点血，腐蚀者毒液每秒 4 点；基础模式仍为 3 秒 / 8 DPS 与 6 DPS，不改僵尸定义文件。`SurvivalSession.start()` 启用、`stop()` 回退。
 - 求生武器池显式登记为 `SURVIVAL_WEAPON_POOL`，「获得新武器」只从该池抽取。
 - 回归脚本新增 4 个场景（共 14 个）：飞扑蓄力受击延长 / 压制与挣脱、毒液伤害 / 减速 / 不叠加 / 不伤丧尸 / 不挡子弹与视线、腐蚀者射程吐毒与死亡留毒、求生池守卫（遍历 `ZOMBIE_IDS` / `WEAPON_IDS` 校验登记 + 覆盖表生效与回退）。
+- 母体（BOSS，`matriarch`）：半径 20（身体直径 40，只能走门）、血量 4000、移速 22、`pursuit: "breach"`，不能主动攻击人类但仍会啃门窗。每 6 秒产 2 只求生池中的非 BOSS 僵尸，子体同屏上限 10 只；死亡时原地一次性产 12 只作为最后一波。子体围绕母体环形找空地，不落墙里且不叠在母体身上；子体击杀经验按正常值的 70% 折算（`Zombie.xpMul`）。
+- 尖叫者（`screamer`）：血量 40、移速 60、半径 5.5、`pursuit: "breach"`，不能主动攻击人类。每 8 秒尖叫一次，强化半径 200px 内其他僵尸 6 秒：移速 +30%、攻击力 +50%、受伤减免 30%；不强化 BOSS、也不强化自己。被强化僵尸有粉紫染色与脚下脉动粉环提示。
+- 全局 BOSS 血条：所有对局模式通用，场上存在母体时在画面顶部显示，多只母体取当前血量最高的一只并标出总数；求生模式中同时作为 BOSS 进度条。
+- 求生出怪新增 `SURVIVAL_BOSS_POOL`：母体 8 级首次出现，之后每 3 分钟尝试投放，同屏最多 1 只；尖叫者进入普通权重表（3 级起）。普通权重只放非 BOSS 僵尸，BOSS 不再混入。
+- 渲染链路按 `SpriteDef.grid` 推导缩放与锚点（`pixel.ts` 的 `spriteScale(diameter, def)` / `spriteAnchor(def)`），32×32 与母体的 64×64 网格共用同一套换算，不再假设固定 32。
+- 音效事件登记：`zombie-growl-matriarch`、`zombie-spawn`、`zombie-matriarch-death`、`zombie-scream`（文件缺失时静默降级）。
+- 回归脚本新增 3 个场景（共 17 个）：母体产卵节奏 / 子体上限 / 不撕咬人类、母体死亡产卵与 70% 经验折算、尖叫强化数值与不强化 BOSS / 自己；求生池守卫同步支持 BOSS 池。
 
 ### 变更
 
 - 版本号升至 `0.8.2`。
 - 训练场按注册表自动出现两种新僵尸的生成按钮与统计行；不新增设置滑块，数值先按定义文件，可在训练场逐单位调参。
-- 精灵与专属音效按约定 id（`zombie-leaper` / `zombie-leaper-death`、`zombie-corroder` / `zombie-corroder-death`）由美术 / 音频会话接入；缺图时沿用现有僵尸兜底，缺音时静默降级。
+- 精灵与专属音效按约定 id（`zombie-leaper` / `zombie-leaper-death`、`zombie-corroder` / `zombie-corroder-death`、`zombie-matriarch` / `zombie-matriarch-death`、`zombie-screamer` / `zombie-screamer-death`）由美术 / 音频会话接入；缺图时沿用现有僵尸兜底，缺音时静默降级。
+- 求生普通权重表与 BOSS 池分离：`SURVIVAL_ZOMBIE_WEIGHTS` 只含非 BOSS 僵尸，母体单独走 `SURVIVAL_BOSS_POOL`；新增僵尸时仍须登记到其一（求生池守卫回归会拦截漏登记）。
 
 ## [0.8.1] - 2026-11-07
 

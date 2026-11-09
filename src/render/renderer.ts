@@ -9,13 +9,13 @@
  *  - 转化中的人类 = human-defected 精灵 + 高频闪烁
  */
 import { Application, CanvasSource, Container, Graphics, Sprite, Text, Texture } from "pixi.js";
-import { COMBO_SPRITES, SPRITE_LIST, SPRITE_SIZE, getNativeFrame, getSprite, type SpriteDef } from "../art";
+import { COMBO_SPRITES, SPRITE_LIST, getNativeFrame, getSprite, type SpriteDef } from "../art";
 import { DEFAULT_MAP, type MapDef } from "../data/maps";
 import { TILE_SIZE } from "../data/maps/schema";
 import { TERRAIN } from "../data/terrain";
 import { settings } from "../data/settings/runtime";
 import type { Effect, Human, World, Zombie } from "../core/world";
-import { HUMAN_DIAMETER, humanSpriteId, spriteDef, spriteRotation, spriteScale, VISUAL_SCALE, zombieDeathSpriteId, zombieSpriteId } from "./pixel";
+import { HUMAN_DIAMETER, humanSpriteId, spriteAnchor, spriteDef, spriteRotation, spriteScale, VISUAL_SCALE, zombieDeathSpriteId, zombieSpriteId } from "./pixel";
 
 /** 单条伤害飘字（训练场用，渲染层只负责画，生命周期由训练场会话管理） */
 export interface FloatingText {
@@ -37,6 +37,8 @@ export interface RenderExtra {
   floating?: FloatingText[];
   /** 「尸潮求生」的经验球 */
   orbs?: Array<{ x: number; y: number; radius: number }>;
+  /** 主菜单等非对局画面：即使背景 World 里还留着 BOSS，也不显示顶部血条 */
+  hideBossBar?: boolean;
 }
 
 /** 圆点贴图的实心核心半径，缩放时以此为基准（只用于子弹/特效，单位已改用像素精灵） */
@@ -145,6 +147,11 @@ export class Renderer {
   private camX: number | null = null;
   private camY = 0;
   private camZoom = 1;
+  /** 顶部 BOSS 血条（DOM 覆盖层，所有对局模式通用；不随镜头缩放） */
+  private bossBar: HTMLDivElement | null = null;
+  private bossNameEl: HTMLElement | null = null;
+  private bossValueEl: HTMLElement | null = null;
+  private bossFillEl: HTMLElement | null = null;
 
   /**
    * 设置镜头。生存模式传玩家坐标与放大倍数：地图大于可视区域时跟随玩家，
@@ -184,6 +191,7 @@ export class Renderer {
       autoDensity: true,
     });
     host.appendChild(this.app.canvas);
+    this.buildBossBar(host);
     this.dot = this.makeDotTexture();
     this.warmSpriteTextures();
     this.floorG = new Graphics();
@@ -649,7 +657,8 @@ export class Renderer {
     const key = `${def.id}|${resolved}`;
     if (st.frame === key) return;
     s.texture = this.texture(def.id, resolved);
-    s.anchor.set(def.anchor.x / SPRITE_SIZE, def.anchor.y / SPRITE_SIZE);
+    const anchor = spriteAnchor(def);
+    s.anchor.set(anchor.x, anchor.y);
     st.frame = key;
   }
 
@@ -674,7 +683,7 @@ export class Renderer {
 
       s.position.set(h.x, h.y);
       s.rotation = spriteRotation(h.facing);
-      const scale = spriteScale(HUMAN_DIAMETER);
+      const scale = spriteScale(HUMAN_DIAMETER, def);
       s.scale.set(turning ? scale * (1 + (1 - h.turning / turnTime) * 0.35) : scale);
       s.alpha = turning ? 0.55 + 0.45 * Math.abs(Math.sin(this.t * 14 + h.id)) : 1;
       // 被压制：轻微紫红染色（不加新素材，靠渲染层标识）
@@ -706,11 +715,12 @@ export class Renderer {
       // 电击单体强化会把闪白计时拉长到 0.16s，用超出的部分叠一个极轻微的尺寸脉冲
       const strongFlash = z.flash > HIT_FLASH;
       const pulse = strongFlash ? (z.flash - HIT_FLASH) / (EMPOWERED_FLASH - HIT_FLASH) : 0;
-      const baseScale = spriteScale(z.bodyDiameter * VISUAL_SCALE);
+      const baseScale = spriteScale(z.bodyDiameter * VISUAL_SCALE, def);
       s.scale.set(baseScale * (1 + pulse * EMPOWERED_PULSE_SCALE));
       // 受击反馈：短促加法混合提亮（闪白），比新建滤镜/叠加精灵成本低
       s.blendMode = z.flash > 0 ? "add" : "normal";
-      s.tint = 0xffffff;
+      // 被尖叫者强化的僵尸：粉紫染色（与压制标识区分：强化偏粉，压制偏紫）
+      s.tint = z.flash > 0 ? 0xffffff : z.buffTimer > 0 ? 0xffc2d8 : 0xffffff;
       s.alpha = z.flash > 0 ? (strongFlash ? 1 : 0.9) : 1;
       this.applyFrame(s, st, def, frame);
     }
@@ -753,7 +763,8 @@ export class Renderer {
     const defaultTextures = framesOf(defaultDef.id);
     while (this.deathSprites.length < this.deaths.length) {
       const s = new Sprite(defaultTextures[0]);
-      s.anchor.set(defaultDef.anchor.x / SPRITE_SIZE, defaultDef.anchor.y / SPRITE_SIZE);
+      const defaultAnchor = spriteAnchor(defaultDef);
+      s.anchor.set(defaultAnchor.x, defaultAnchor.y);
       this.deathLayer.addChild(s);
       this.deathSprites.push(s);
     }
@@ -767,11 +778,12 @@ export class Renderer {
       // 按僵尸类型选倒地精灵：胖子用自己的暗粉配色 + 与活体一致的 33px 体型
       const def = spriteDef(zombieDeathSpriteId(d.kind));
       const textures = framesOf(def.id);
-      s.anchor.set(def.anchor.x / SPRITE_SIZE, def.anchor.y / SPRITE_SIZE);
+      const anchor = spriteAnchor(def);
+      s.anchor.set(anchor.x, anchor.y);
       s.visible = true;
       s.position.set(d.x, d.y);
       s.rotation = spriteRotation(d.angle);
-      s.scale.set(spriteScale(def.footprintRadius * 2 * VISUAL_SCALE));
+      s.scale.set(spriteScale(def.footprintRadius * 2 * VISUAL_SCALE, def));
       // 播完停在末帧；超出序列的部分自然落在 death-3
       const frame = Math.min(DEATH_FRAMES.length - 1, Math.floor(d.age / DEATH_FRAME));
       s.texture = textures[frame];
@@ -846,8 +858,43 @@ export class Renderer {
     this.renderArcs(effects);
     this.renderOpenings(w);
     this.renderHumanHealth(w.humans);
+    this.renderZombieBuffs(w.zombies);
+    this.renderBossBar(w, extra?.hideBossBar === true);
     this.renderSelection(extra?.selection ?? null);
     this.renderFloatingText(extra?.floating);
+  }
+
+  /** 创建顶部 BOSS 血条：纯 DOM 覆盖层，缩放 / 镜头都与画布无关 */
+  private buildBossBar(host: HTMLElement): void {
+    const bar = document.createElement("div");
+    bar.className = "boss-bar hidden";
+    bar.innerHTML =
+      '<div class="boss-bar-head"><span class="boss-bar-name"></span><span class="boss-bar-value"></span></div>' +
+      '<div class="boss-bar-track"><i></i></div>';
+    host.appendChild(bar);
+    this.bossBar = bar;
+    this.bossNameEl = bar.querySelector(".boss-bar-name");
+    this.bossValueEl = bar.querySelector(".boss-bar-value");
+    this.bossFillEl = bar.querySelector(".boss-bar-track > i");
+  }
+
+  /** 场上存在母体时显示顶部血条；多只时取血量最高的一只并标出总数 */
+  private renderBossBar(world: World, hidden: boolean): void {
+    if (!this.bossBar) return;
+    const info = hidden ? null : world.bossBarInfo();
+    if (!info) {
+      this.bossBar.classList.add("hidden");
+      return;
+    }
+    this.bossBar.classList.remove("hidden");
+    const ratio = info.maxHp > 0 ? Math.max(0, Math.min(1, info.hp / info.maxHp)) : 0;
+    if (this.bossNameEl) {
+      this.bossNameEl.textContent = info.count > 1 ? `${info.name} ×${info.count}` : info.name;
+    }
+    if (this.bossValueEl) {
+      this.bossValueEl.textContent = `${Math.ceil(info.hp)} / ${Math.ceil(info.maxHp)}`;
+    }
+    if (this.bossFillEl) this.bossFillEl.style.width = `${(ratio * 100).toFixed(1)}%`;
   }
 
   /**
@@ -887,6 +934,20 @@ export class Renderer {
       g.rect(x - 1, y - 1, w + 2, hgt + 2).fill({ color: 0x05070c, alpha: 0.72 * alpha });
       const color = ratio > 0.6 ? 0x7cf29a : ratio > 0.3 ? 0xfacc15 : 0xef4444;
       g.rect(x, y, w * ratio, hgt).fill({ color, alpha });
+    }
+  }
+
+  /**
+   * 尖叫强化标识：被强化的僵尸脚下画一圈脉动粉环。
+   * 与压制标识同层，但不依赖血条显隐；不额外生成素材。
+   */
+  private renderZombieBuffs(zombies: Zombie[]): void {
+    const g = this.hpBarLayer;
+    for (let i = 0; i < zombies.length; i++) {
+      const z = zombies[i];
+      if (!z.alive || z.buffTimer <= 0) continue;
+      const pulse = 0.55 + 0.35 * Math.sin(this.t * 8 + z.id);
+      g.circle(z.x, z.y, z.radius + 4).stroke({ width: 1.5, color: 0xf472b6, alpha: 0.6 * pulse });
     }
   }
 

@@ -894,7 +894,7 @@ async function boot(): Promise<void> {
 
     // menu / levels：完全冻结逻辑
     acc = 0;
-    renderer.render(game.world, real);
+    renderer.render(game.world, real, { hideBossBar: true });
   });
 
   // ============================================================

@@ -2,8 +2,10 @@ import type { ZombieDef } from "../types";
 import { corroder } from "./corroder";
 import { fat } from "./fat";
 import { leaper } from "./leaper";
+import { matriarch } from "./matriarch";
 import { normal } from "./normal";
 import { runner } from "./runner";
+import { screamer } from "./screamer";
 
 /**
  * 僵尸注册表：id -> 定义。
@@ -15,6 +17,8 @@ export const ZOMBIE_DEFS: Record<string, ZombieDef> = {
   fat,
   leaper,
   corroder,
+  screamer,
+  matriarch,
 };
 
 /** 有序列表（插入顺序）—— 只影响默认展示顺序，身份始终用 id */
@@ -80,6 +84,8 @@ export const ZOMBIE_IDS = {
   fat: fat.id,
   leaper: leaper.id,
   corroder: corroder.id,
+  screamer: screamer.id,
+  matriarch: matriarch.id,
 } as const;
 
 /** 按 id 取定义；未知 id 回落到普通丧尸，保证旧存档 / 脏数据不崩溃 */

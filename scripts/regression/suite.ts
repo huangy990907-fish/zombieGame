@@ -13,15 +13,17 @@ import { WEAPON_IDS, WEAPON_LIST } from "../../src/data/weapons";
 import { ZOMBIE_IDS } from "../../src/data/zombies";
 import { effectiveWeapon, effectiveZombie, setZombieModeOverrides } from "../../src/data/settings/runtime";
 import {
+  SURVIVAL_BOSS_POOL,
   SURVIVAL_WEAPON_POOL,
   SURVIVAL_ZOMBIE_OVERRIDES,
   SURVIVAL_ZOMBIE_WEIGHTS,
+  survivalXpFor,
 } from "../../src/data/survival/config";
 import { compileTilesToMapDef } from "../../src/data/maps/compile";
 import { validateMapJson } from "../../src/data/maps/schema";
 import { validateLevelJson } from "../../src/data/levels/schema";
 import { registerRuntimeMap } from "../../src/data/maps";
-import { World } from "../../src/core/world";
+import { World, type Zombie } from "../../src/core/world";
 import { updateHumans, updateZombies } from "../../src/systems/ai";
 import { damageZombie, tryFire } from "../../src/systems/combat";
 import { openingNetWidth } from "../../src/systems/flowField";
@@ -598,16 +600,109 @@ scenario("腐蚀者：射程内吐毒，死亡在尸体位置留下大毒团", (
   );
 });
 
+/** 推进若干秒僵尸行为（固定 60Hz，和游戏主循环口径一致） */
+function stepZombies(world: World, seconds: number): void {
+  const dt = 1 / 60;
+  const steps = Math.round(seconds / dt);
+  for (let i = 0; i < steps; i++) updateZombies(world, dt);
+}
+
+/** 某只母体当前存活的子体数量 */
+function childCount(world: World, mother: Zombie): number {
+  return world.zombies.filter((z) => z.alive && z.spawnedBy === mother.id).length;
+}
+
+scenario("母体：产卵节奏、子体同屏上限与不撕咬人类", () => {
+  const world = new World(mapDef({ id: "t-matriarch" }));
+  const m = world.spawnZombie(592, 360, ZOMBIE_IDS.matriarch);
+  m.speed = 0;
+
+  stepZombies(world, 5.5);
+  assert(childCount(world, m) === 0, "母体在 6 秒前不应产卵");
+  stepZombies(world, 0.6);
+  assert(childCount(world, m) === 2, `首轮应产 2 只，实际 ${childCount(world, m)}`);
+
+  stepZombies(world, 24);
+  assert(childCount(world, m) === 10, `子体同屏上限应为 10，实际 ${childCount(world, m)}`);
+  stepZombies(world, 12);
+  assert(childCount(world, m) === 10, "达到上限后不应继续增加子体");
+
+  // 清掉子体并把撕咬伤害临时调高：母体依然不能主动攻击人类
+  for (const z of world.zombies) if (z !== m) z.alive = false;
+  m.spawnerTimer = 9999;
+  m.damage = 50;
+  const h = world.spawnHuman(m.x + 10, m.y, "mg");
+  h.hp = 100;
+  stepZombies(world, 2);
+  assert(h.hp === 100, "母体不应主动撕咬人类");
+});
+
+scenario("母体：死亡产出最后一波，子体经验按 70% 折算", () => {
+  const world = new World(mapDef({ id: "t-matriarch-death" }));
+  const m = world.spawnZombie(592, 360, ZOMBIE_IDS.matriarch);
+  damageZombie(world, m, m.hp + 1);
+  const children = world.zombies.filter((z) => z.alive && z.spawnedBy === m.id);
+  assert(children.length === 12, `死亡应产 12 只，实际 ${children.length}`);
+  assert(children.every((z) => z.xpMul === 0.7), "母体子体的经验倍率应为 0.7");
+  assert(
+    Math.abs(survivalXpFor(ZOMBIE_IDS.normal, 0.7) - 0.7) < 1e-9,
+    "普通子体经验应为正常值的 70%",
+  );
+  assert(
+    Math.abs(survivalXpFor(ZOMBIE_IDS.matriarch, 0.7) - 28) < 1e-9,
+    "母体经验应按 40 的 70% 折算",
+  );
+});
+
+scenario("尖叫者：强化移速 / 攻击 / 承伤，且不强化 BOSS 与自己", () => {
+  const world = new World(mapDef({ id: "t-scream" }));
+  const s = world.spawnZombie(592, 360, ZOMBIE_IDS.screamer);
+  s.speed = 0;
+  const n = world.spawnZombie(620, 360, ZOMBIE_IDS.normal);
+  n.speed = 0;
+  n.maxHp = 100;
+  n.hp = 100;
+  const m = world.spawnZombie(640, 360, ZOMBIE_IDS.matriarch);
+  m.speed = 0;
+  m.spawnerTimer = 9999;
+  const far = world.spawnZombie(900, 600, ZOMBIE_IDS.normal);
+  far.speed = 0;
+
+  s.screamTimer = 1 / 60;
+  updateZombies(world, 1 / 60);
+  assert(n.buffTimer > 5.9, "半径内的僵尸应获得 6 秒强化");
+  assert(Math.abs(n.buffSpeedMul - 1.3) < 1e-9, "强化移速应为 +30%");
+  assert(Math.abs(n.buffDamageMul - 1.5) < 1e-9, "强化攻击力应为 +50%");
+  assert(Math.abs(n.buffTakenMul - 0.7) < 1e-9, "强化受伤减免应为 30%");
+  assert(m.buffTimer === 0, "母体（BOSS）不应被尖叫强化");
+  assert(s.buffTimer === 0, "尖叫者不应强化自己");
+  assert(far.buffTimer === 0, "半径外的僵尸不应被强化");
+
+  damageZombie(world, n, 10);
+  assert(Math.abs(n.hp - 93) < 1e-6, `强化后 10 点伤害应只扣 7 点，实际剩余 ${n.hp}`);
+});
+
 scenario("求生池守卫：所有僵尸 / 武器均已登记，模式覆盖表只在求生生效", () => {
-  // 新增僵尸漏登记出怪权重表、或新增武器漏登记武器池，这里直接失败
+  // 新增僵尸漏登记出怪权重表或 BOSS 池、新增武器漏登记武器池，这里直接失败
+  const bossKinds = new Set(SURVIVAL_BOSS_POOL.map((b) => b.kind));
   for (const id of Object.values(ZOMBIE_IDS)) {
     assert(
-      SURVIVAL_ZOMBIE_WEIGHTS.some((row) => row.kind === id),
-      `僵尸 ${id} 未登记求生出怪权重表`,
+      SURVIVAL_ZOMBIE_WEIGHTS.some((row) => row.kind === id) || bossKinds.has(id),
+      `僵尸 ${id} 未登记求生出怪权重表或 BOSS 池`,
     );
   }
   for (const id of Object.values(WEAPON_IDS)) {
     assert(SURVIVAL_WEAPON_POOL.includes(id), `武器 ${id} 未登记求生武器池`);
+  }
+  for (const boss of SURVIVAL_BOSS_POOL) {
+    assert(
+      !SURVIVAL_ZOMBIE_WEIGHTS.some((row) => row.kind === boss.kind),
+      `BOSS ${boss.kind} 不应同时出现在普通出怪权重表`,
+    );
+    assert(
+      effectiveZombie(boss.kind).boss === true,
+      `BOSS 池里的 ${boss.kind} 必须在定义文件标记 boss`,
+    );
   }
 
   // 覆盖表：求生飞扑者压制 1.5 秒 / 4 DPS，腐蚀者毒液 4 DPS；切回基础模式回退定义值

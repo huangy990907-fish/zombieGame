@@ -17,13 +17,14 @@ import { HUMAN_BODY_DIAMETER, HUMAN_DEF } from "../data/humans";
 import { MAX_ZOMBIE_RADIUS, WANDER_TUNING, ZOMBIE_IDS, ZOMBIE_SLOW } from "../data/zombies";
 import { effectiveWeapon, effectiveZombie, openingTuning, settings } from "../data/settings/runtime";
 import { TERRAIN } from "../data/terrain";
-import type { ZombieLeapConfig, ZombiePursuitMode } from "../data/types";
+import type { ZombieLeapConfig, ZombiePursuitMode, ZombieScreamConfig, ZombieSpawnerConfig } from "../data/types";
 import { openingNetWidth } from "./flowField";
 import { tryFire, updateFlame } from "./combat";
 import type { RegionMap } from "./regions";
 import { angDiff, clamp, dist2, pointRectDist, randRange, turnToward } from "../utils/math";
 import type { Human, Opening, World, Zombie } from "../core/world";
 import { sound, SFX } from "../audio/manager";
+import { rollMatriarchChildKind } from "../data/survival/config";
 
 // 复用的查询缓冲区：每帧反复用同一个数组，避免 GC 压力
 const queryZ: Zombie[] = [];
@@ -649,6 +650,7 @@ function retargetZombie(world: World, z: Zombie): void {
   if (z.kind === ZOMBIE_IDS.fat) sound.play(SFX.ZOMBIE_GROWL_FAT);
   else if (z.kind === ZOMBIE_IDS.leaper) sound.play(SFX.ZOMBIE_GROWL_LEAPER);
   else if (z.kind === ZOMBIE_IDS.corroder) sound.play(SFX.ZOMBIE_GROWL_CORRODER);
+  else if (z.kind === ZOMBIE_IDS.matriarch) sound.play(SFX.ZOMBIE_GROWL_MATRIARCH);
   else sound.play(SFX.ZOMBIE_GROWL);
   if (pursuitModeOf(z) === "breach") pursueBreach(world, z, world.regionMap(z.bodyDiameter));
   else retargetDirect(world, z);
@@ -789,6 +791,87 @@ function tickLeaper(world: World, z: Zombie, dt: number, cfg: ZombieLeapConfig):
   return true;
 }
 
+/**
+ * 母体产卵：每 interval 秒产出 count 只子体，由它产出的子体同屏不超过 cap。
+ * 子体种类从求生池的非 BOSS 僵尸里抽取；环形落点找不到空地就少产一只，等下一轮。
+ */
+function tickMatriarch(world: World, z: Zombie, dt: number, cfg: ZombieSpawnerConfig): void {
+  z.spawnerTimer -= dt;
+  if (z.spawnerTimer > 0) return;
+  // 固定节拍：即使这一轮没产满，也按 interval 继续下一次，不把积压叠成一次
+  z.spawnerTimer = cfg.interval;
+
+  let alive = 0;
+  for (let i = 0; i < world.zombies.length; i++) {
+    const o = world.zombies[i];
+    if (o.alive && o.spawnedBy === z.id) alive++;
+  }
+  const slots = Math.min(cfg.count, Math.max(0, cfg.cap - alive));
+  if (slots <= 0) return;
+
+  let spawned = 0;
+  for (let i = 0; i < slots; i++) {
+    if (world.spawnChild(z, rollMatriarchChildKind(), cfg.childXpMul)) spawned++;
+  }
+  if (spawned > 0) {
+    sound.play(SFX.ZOMBIE_SPAWN);
+    world.effects.push({
+      kind: "ring",
+      x: z.x,
+      y: z.y,
+      angle: 0,
+      radius: z.radius + 10,
+      color: 0xfca5a5,
+      age: 0,
+      life: 0.4,
+    });
+  }
+}
+
+/**
+ * 尖叫者：每 interval 秒强化半径内的其他僵尸（移速 / 攻击力 / 受伤减免）。
+ * 不强化 BOSS，也不强化自己；多次尖叫只刷新持续时间并取更强倍率。
+ */
+function tickScreamer(world: World, z: Zombie, dt: number, cfg: ZombieScreamConfig): void {
+  z.screamTimer -= dt;
+  if (z.screamTimer > 0) return;
+  z.screamTimer = cfg.interval;
+
+  const r2 = cfg.radius * cfg.radius;
+  for (let i = 0; i < world.zombies.length; i++) {
+    const o = world.zombies[i];
+    if (o === z || !o.alive) continue;
+    if (dist2(z.x, z.y, o.x, o.y) > r2) continue;
+    if (effectiveZombie(o.kind).boss) continue;
+    o.buffTimer = Math.max(o.buffTimer, cfg.duration);
+    o.buffSpeedMul = Math.max(o.buffSpeedMul, cfg.speedMul);
+    o.buffDamageMul = Math.max(o.buffDamageMul, cfg.damageMul);
+    o.buffTakenMul = Math.min(o.buffTakenMul, cfg.damageTakenMul);
+  }
+  sound.play(SFX.ZOMBIE_SCREAM);
+  world.effects.push({
+    kind: "ring",
+    x: z.x,
+    y: z.y,
+    angle: 0,
+    radius: cfg.radius,
+    color: 0xf472b6,
+    age: 0,
+    life: 0.5,
+  });
+}
+
+/** 强化倒计时：到点清空倍率，避免效果永久残留 */
+function tickZombieBuff(z: Zombie, dt: number): void {
+  if (z.buffTimer <= 0) return;
+  z.buffTimer = Math.max(0, z.buffTimer - dt);
+  if (z.buffTimer <= 0) {
+    z.buffSpeedMul = 1;
+    z.buffDamageMul = 1;
+    z.buffTakenMul = 1;
+  }
+}
+
 export function updateZombies(world: World, dt: number): void {
   const map = world.map;
   const room = map.room;
@@ -806,6 +889,10 @@ export function updateZombies(world: World, dt: number): void {
     }
     if (z.bite > 0) z.bite -= dt;
     const zdef = effectiveZombie(z.kind);
+    // 尖叫强化倒计时：先推进旧效果，再让尖叫者刷新（新效果从完整时长开始）
+    tickZombieBuff(z, dt);
+    if (zdef.spawner) tickMatriarch(world, z, dt, zdef.spawner);
+    if (zdef.scream) tickScreamer(world, z, dt, zdef.scream);
     // 腐蚀者吐毒冷却（按定义文件的 cooldown 推进）
     if (zdef.spit && z.spit > 0) z.spit = Math.max(0, z.spit - dt);
 
@@ -1016,7 +1103,7 @@ export function updateZombies(world: World, dt: number): void {
       z.slowTimer > 0 ? 1 - (1 - z.slowMul) * (z.slowTimer / ZOMBIE_SLOW.duration) : 1;
     // 草丛内丧尸也减速；失效 / 休眠 / 重生中的草按 grassEffectAt 的 0..1 线性过渡
     const grassMul = 1 - (1 - TERRAIN.grass.speedMul) * world.grassEffectAt(z.x, z.y);
-    const speed = z.speed * passMul * (cnt >= 5 ? 0.72 : 1) * wanderMul * slowMul * grassMul;
+    const speed = z.speed * passMul * (cnt >= 5 ? 0.72 : 1) * wanderMul * slowMul * grassMul * z.buffSpeedMul;
     let x = z.x + (dx / len) * speed * dt;
     let y = z.y + (dy / len) * speed * dt;
 
@@ -1107,8 +1194,9 @@ export function updateZombies(world: World, dt: number): void {
     if (z.mode === "hunt" && z.bite <= 0) {
       let bit = false;
       const reach = z.radius + HUMAN_DEF.radius + 2;
-      // 飞扑者不撕咬人类：它的伤害来自压制，贴身后的攻击会被扑击状态机接管
-      if (!zdef.leap) {
+      // 飞扑者不撕咬人类：它的伤害来自压制，贴身后的攻击会被扑击状态机接管。
+      // noAttack 的僵尸（母体 / 尖叫者）同样不撕咬人类，但仍会啃门窗。
+      if (!zdef.leap && !zdef.noAttack) {
         world.humanGrid.query(z.x, z.y, reach, queryH);
         for (let k = 0; k < queryH.length; k++) {
           const h = queryH[k];
@@ -1116,8 +1204,9 @@ export function updateZombies(world: World, dt: number): void {
           if (dist2(z.x, z.y, h.x, h.y) <= reach * reach) {
             // 撕咬先扣真实血量，血量归零才进入异变倒计时；
             // 无敌单位在上一行已被跳过，完全免疫掉血与转化。
-            // 生存模式可单独调低承伤倍率（damageTakenMul），其余模式为 undefined → 1
-            const taken = z.damage * (h.damageTakenMul ?? 1);
+            // 生存模式可单独调低承伤倍率（damageTakenMul），其余模式为 undefined → 1；
+            // 被尖叫强化的僵尸按强化倍率提高撕咬伤害。
+            const taken = z.damage * z.buffDamageMul * (h.damageTakenMul ?? 1);
             const applied = Math.min(taken, Math.max(0, h.hp));
             h.hp = Math.max(0, h.hp - taken);
             h.hurtTimer = 3;

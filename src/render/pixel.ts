@@ -4,7 +4,7 @@
  * 美术精灵统一画成「朝上」（枪管指向局部 -y），而引擎角度 0 指向 +x；
  * 朝向换算、锚点缩放、枪口世界坐标都在这里定义一次，渲染层和战斗层共用。
  */
-import { SPRITE_SIZE, getSprite, type SpriteDef, type Vec2 } from "../art";
+import { SPRITE_SIZE, getSprite, spriteGrid, type SpriteDef, type Vec2 } from "../art";
 import { HUMAN_DEF } from "../data/humans";
 
 /**
@@ -65,17 +65,29 @@ export function zombieDeathSpriteId(kind: string): string {
   return getSprite(id) ? id : "zombie-death";
 }
 
-/** 缩放系数：单位直径 / 32；渲染时 anchor 已对齐躯干中心 */
-export function spriteScale(diameter: number): number {
-  return diameter / SPRITE_SIZE;
+/**
+ * 缩放系数：单位直径 / 精灵实际网格边长。
+ * 不假设固定 32：巨体型单位（如母体）用更大的网格时，按声明的 grid 推导，
+ * 32×32 与 64×64 等任意网格都能得到一致的视觉直径。
+ * 渲染时 anchor 已用 spriteAnchor() 对齐躯干中心。
+ */
+export function spriteScale(diameter: number, def?: SpriteDef): number {
+  const side = def ? Math.max(spriteGrid(def).w, spriteGrid(def).h) : SPRITE_SIZE;
+  return diameter / side;
+}
+
+/** 精灵锚点的归一化坐标（0..1）：按实际网格宽高换算，供 Pixi 的 anchor 使用 */
+export function spriteAnchor(def: SpriteDef): Vec2 {
+  const grid = spriteGrid(def);
+  return { x: def.anchor.x / grid.w, y: def.anchor.y / grid.h };
 }
 
 /**
- * 枪口世界坐标：把 32×32 里的 (muzzle - anchor) 按朝向旋转、再按缩放折算成游戏像素。
+ * 枪口世界坐标：把精灵网格里的 (muzzle - anchor) 按朝向旋转、再按缩放折算成游戏像素。
  * 没有 muzzle 的精灵沿正前方取 12px（局部 -y），保证总有一个合理的出膛点。
  */
 export function muzzleWorld(def: SpriteDef, x: number, y: number, angle: number, diameter: number): Vec2 {
-  const scale = spriteScale(diameter);
+  const scale = spriteScale(diameter, def);
   const lx = (def.muzzle?.x ?? def.anchor.x) - def.anchor.x;
   const ly = (def.muzzle?.y ?? def.anchor.y - 12) - def.anchor.y;
   const r = spriteRotation(angle);

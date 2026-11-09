@@ -15,6 +15,7 @@ import { dist2, mixColor, pointSegDistSq, segRectHit } from "../utils/math";
 import type { BulletKind, DamageSource, Human, World, Zombie } from "../core/world";
 import { sound, SFX } from "../audio/manager";
 import { humanMuzzle } from "../render/pixel";
+import { rollMatriarchChildKind } from "../data/survival/config";
 
 const queryBuf: Zombie[] = [];
 
@@ -563,22 +564,32 @@ function applyHitSlow(world: World, z: Zombie, damage: number, source?: DamageSo
 /** 对丧尸造成伤害，死亡时计数（source 仅供训练场统计，正式对局不传） */
 export function damageZombie(world: World, z: Zombie, dmg: number, source?: DamageSource): void {
   if (!z.alive) return;
+  // 尖叫强化：承伤倍率 <1 时按比例减免（普通受击仍为 1）
+  const taken = dmg * z.buffTakenMul;
   // 实际生效伤害（不超过剩余血量），DPS 统计更准确
-  const applied = Math.min(dmg, z.hp);
-  z.hp -= dmg;
+  const applied = Math.min(taken, z.hp);
+  z.hp -= taken;
   applyHitSlow(world, z, applied, source);
   world.onDamage?.(z, applied, source);
   sound.play(SFX.ZOMBIE_HIT);
   if (z.hp <= 0) {
     z.alive = false;
+    const def = effectiveZombie(z.kind);
     // 腐蚀者死亡时在尸体位置留下一团毒液（与吐出的毒液同源，数值来自定义文件）
-    const spit = effectiveZombie(z.kind).spit;
-    if (spit) {
-      world.addPoison(z.x, z.y, spit.deathRadius, spit.deathDuration, spit.dps, spit.speedMul);
+    if (def.spit) {
+      world.addPoison(z.x, z.y, def.spit.deathRadius, def.spit.deathDuration, def.spit.dps, def.spit.speedMul);
+    }
+    // 母体死亡：原地一次性产出一波非 BOSS 僵尸作为最后反扑（不受子体同屏上限约束）
+    if (def.spawner) {
+      for (let i = 0; i < def.spawner.deathCount; i++) {
+        world.spawnChild(z, rollMatriarchChildKind(), def.spawner.childXpMul);
+      }
+      sound.play(SFX.ZOMBIE_SPAWN);
     }
     world.kills++;
     world.onKill?.(z, source);
     sound.play(SFX.ZOMBIE_KILL);
+    if (def.boss) sound.play(SFX.ZOMBIE_MATRIARCH_DEATH);
   }
 }
 

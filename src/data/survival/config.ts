@@ -4,7 +4,7 @@
  * 逻辑层（src/survival）只读这里，不在会话 / 入口里写魔法常量。
  * 所有数值都可在后续版本里调整，不影响其它模式。
  */
-import { ZOMBIE_IDS } from "../zombies";
+import { getZombieDef, ZOMBIE_IDS } from "../zombies";
 import { WEAPON_IDS } from "../weapons";
 import type { ZombieModeOverrideTable } from "../types";
 
@@ -194,7 +194,39 @@ export const SURVIVAL_ZOMBIE_WEIGHTS: readonly SurvivalZombieWeight[] = [
   { kind: ZOMBIE_IDS.fat, startLevel: 4, base: 2, perLevel: 2 },
   // 4 级起出现，权重全场最低
   { kind: ZOMBIE_IDS.corroder, startLevel: 4, base: 1, perLevel: 0.6 },
+  // 3 级起出现，普通权重档位
+  { kind: ZOMBIE_IDS.screamer, startLevel: 3, base: 2, perLevel: 0.8 },
 ];
+
+/**
+ * 求生 BOSS 出怪池 —— BOSS 不走普通权重表，单独按等级 / 时间投放。
+ * startLevel 首次出现，之后每 intervalSeconds 秒尝试一只，同屏最多 maxAlive 只。
+ * 母体产卵的子体种类也从「普通权重表的非 BOSS 条目」里抽取。
+ */
+export interface SurvivalBossSpawn {
+  kind: string;
+  startLevel: number;
+  intervalSeconds: number;
+  maxAlive: number;
+}
+
+export const SURVIVAL_BOSS_POOL: readonly SurvivalBossSpawn[] = [
+  { kind: ZOMBIE_IDS.matriarch, startLevel: 8, intervalSeconds: 180, maxAlive: 1 },
+];
+
+/** 母体产卵池：普通权重表里的非 BOSS 僵尸（按 base 权重抽取） */
+export function rollMatriarchChildKind(): string {
+  const rows = SURVIVAL_ZOMBIE_WEIGHTS.filter((row) => !getZombieDef(row.kind).boss);
+  if (rows.length === 0) return ZOMBIE_IDS.normal;
+  let total = 0;
+  for (const row of rows) total += Math.max(0.0001, row.base);
+  let roll = Math.random() * total;
+  for (const row of rows) {
+    roll -= Math.max(0.0001, row.base);
+    if (roll < 0) return row.kind;
+  }
+  return rows[rows.length - 1].kind;
+}
 
 /**
  * 求生可获得的武器池（「获得新武器」的二段选择从这里抽取）。
@@ -231,7 +263,14 @@ export const SURVIVAL_XP_BY_KIND: Record<string, number> = {
   [ZOMBIE_IDS.fat]: 3,
   [ZOMBIE_IDS.leaper]: 2,
   [ZOMBIE_IDS.corroder]: 2,
+  [ZOMBIE_IDS.screamer]: 2,
+  [ZOMBIE_IDS.matriarch]: 40,
 };
+
+/** 击杀经验 = 种类基础经验 × 个体折算倍率（母体子体 0.7） */
+export function survivalXpFor(kind: string, xpMul = 1): number {
+  return (SURVIVAL_XP_BY_KIND[kind] ?? 1) * xpMul;
+}
 
 /** 第 level 级升下一级所需经验 */
 export function xpNeedFor(level: number): number {

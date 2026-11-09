@@ -1,5 +1,5 @@
 /**
- * 回归场景：直接加载真实的 src 模块，覆盖 0.8.0 的关键规则。
+ * 回归场景：直接加载真实的 src 模块，覆盖 0.8.2 的关键规则。
  *
  * 由 run.mjs 用 esbuild 打包后执行；每个场景失败只影响自己的断言，
  * 汇总后统一打印失败场景名，并让入口以非零退出码结束。
@@ -11,7 +11,7 @@ import { HUMAN_DEF } from "../../src/data/humans";
 import { TERRAIN } from "../../src/data/terrain";
 import { WEAPON_LIST } from "../../src/data/weapons";
 import { ZOMBIE_IDS } from "../../src/data/zombies";
-import { effectiveWeapon } from "../../src/data/settings/runtime";
+import { effectiveWeapon, effectiveZombie } from "../../src/data/settings/runtime";
 import { compileTilesToMapDef } from "../../src/data/maps/compile";
 import { validateMapJson } from "../../src/data/maps/schema";
 import { validateLevelJson } from "../../src/data/levels/schema";
@@ -432,7 +432,9 @@ scenario("额外投射物层数：机枪 / 霰弹 / 火箭 / 电击枪按层数�
   const teslaWorld = new World(mapDef({ id: "t-extra-tesla" }));
   const teslaHuman = teslaWorld.spawnHuman(300, 300, "tesla");
   teslaHuman.extraProjectiles = 1;
-  teslaWorld.spawnZombie(340, 300, ZOMBIE_IDS.normal);
+  // 血量显式拉高：僵尸出生血量带随机抖动，低血时首道电弧直接打死目标会让第二道找不到目标
+  const teslaTarget = teslaWorld.spawnZombie(340, 300, ZOMBIE_IDS.normal);
+  teslaTarget.hp = teslaTarget.maxHp = 100000;
   teslaWorld.rebuildGrids();
   tryFire(teslaWorld, teslaHuman, 0, 0);
   const arcs = teslaWorld.effects.filter((e) => e.kind === "arc").length;
@@ -440,11 +442,153 @@ scenario("额外投射物层数：机枪 / 霰弹 / 火箭 / 电击枪按层数�
 
   const singleWorld = new World(mapDef({ id: "t-extra-tesla-single" }));
   const singleHuman = singleWorld.spawnHuman(300, 300, "tesla");
-  singleWorld.spawnZombie(340, 300, ZOMBIE_IDS.normal);
+  const singleTarget = singleWorld.spawnZombie(340, 300, ZOMBIE_IDS.normal);
+  singleTarget.hp = singleTarget.maxHp = 100000;
   singleWorld.rebuildGrids();
   tryFire(singleWorld, singleHuman, 0, 0);
   const singleArcs = singleWorld.effects.filter((e) => e.kind === "arc").length;
   assert(singleArcs === 1, `无额外层数时电击枪应只有 1 道电弧，实际 ${singleArcs}`);
+});
+
+scenario("飞扑者：蓄力受击只延长不打断，扑中压制 3 秒后自动挣脱", () => {
+  // 受击延长：0.6 + 0.12 = 0.72；连续受击夹在 2.0 秒上限
+  const chargeWorld = new World(mapDef({ id: "t-leaper-charge" }));
+  const cz = chargeWorld.spawnZombie(100, 100, ZOMBIE_IDS.leaper);
+  cz.hp = cz.maxHp = 100000;
+  cz.leapPhase = 1;
+  cz.leapTimer = 0.6;
+  damageZombie(chargeWorld, cz, 1);
+  assert(Math.abs(cz.leapTimer - 0.72) < 1e-6, `受击应把蓄力延到 0.72，实际 ${cz.leapTimer}`);
+  assert(cz.leapPhase === 1, "受击不应打断蓄力");
+  for (let i = 0; i < 20; i++) damageZombie(chargeWorld, cz, 1);
+  const cfg = effectiveZombie(ZOMBIE_IDS.leaper).leap!;
+  assert(cz.leapTimer <= cfg.chargeMax + 1e-6, `蓄力不应超过 ${cfg.chargeMax} 秒`);
+
+  // 压制与挣脱
+  const world = new World(mapDef({ id: "t-leaper" }));
+  const h = world.spawnHuman(600, 360, "mg");
+  h.manual = true;
+  h.moveX = 0;
+  h.moveY = 0;
+  h.ammo = 0;
+  h.reloadTimer = 999;
+  const z = world.spawnZombie(660, 360, ZOMBIE_IDS.leaper);
+  z.hp = z.maxHp = 100000;
+  z.speed = 150;
+  world.rebuildGrids();
+
+  let pinned = false;
+  for (let f = 0; f < 180; f++) {
+    updateHumans(world, 1 / 60);
+    updateZombies(world, 1 / 60);
+    if (h.pinTimer > 0 && z.pinTargetId === h.id) {
+      pinned = true;
+      break;
+    }
+  }
+  assert(pinned, "飞扑者应在 3 秒内扑中并压制目标");
+  assert(h.pinBy === z.id, "压制者应是该飞扑者");
+  const hpAtPin = h.hp;
+
+  let released = false;
+  for (let f = 0; f < 240; f++) {
+    updateHumans(world, 1 / 60);
+    updateZombies(world, 1 / 60);
+    if (h.pinTimer <= 0) {
+      released = true;
+      break;
+    }
+  }
+  assert(released, "压制应在约 3 秒后自动挣脱");
+  assert(z.pinTargetId === null, "挣脱后飞扑者应清除压制目标");
+  assert(h.pinBy === null, "挣脱后人类应清除压制来源");
+  const lost = hpAtPin - h.hp;
+  assert(lost >= 20 && lost <= 28, `3 秒压制应掉约 24 血，实际 ${lost.toFixed(1)}`);
+});
+
+scenario("腐蚀毒液：持续伤害 / 减速 / 不叠加 / 不伤僵尸 / 不挡子弹与视线", () => {
+  const world = new World(mapDef({ id: "t-poison" }));
+  const h = world.spawnHuman(500, 360, "mg");
+  const z = world.spawnZombie(500, 360, ZOMBIE_IDS.normal);
+  const zHp = z.hp;
+  world.addPoison(500, 360, 40, 6, 6, 0.8);
+
+  const hp0 = h.hp;
+  for (let f = 0; f < 60; f++) world.tickTerrain(1 / 60);
+  const lost = hp0 - h.hp;
+  assert(Math.abs(lost - 6) < 0.4, `毒液 1 秒应掉约 6 血，实际 ${lost.toFixed(2)}`);
+  assert(z.hp === zHp, "毒液不应伤害丧尸");
+
+  // 同位置更强的毒液替换较弱的一团；再叠弱毒也不增加层数
+  world.addPoison(500, 360, 44, 6, 12, 0.5);
+  assert(world.poison.length === 1, "同位置更强的毒液应替换旧团，不叠加");
+  const eff = world.poisonEffectAt(500, 360);
+  assert(eff !== null && eff.dps === 12 && eff.speedMul === 0.5, "同位置应取最高伤害 / 最强减速");
+  world.addPoison(500, 360, 40, 6, 6, 0.8);
+  assert(world.poison.length === 1, "同位置再叠弱毒不应增加层数");
+  assert(world.poisonEffectAt(500, 360)!.dps === 12, "弱毒不应覆盖更强的伤害");
+
+  assert(!world.solidAt(500, 360, 0, 11), "毒液不应阻挡单位");
+  assert(!world.bulletBlocked(460, 360, 540, 360), "毒液不应挡子弹");
+  assert(!world.sightBlocked(460, 360, 540, 360), "毒液不应挡视线");
+
+  // 减速：在毒液里移动 1 秒与裸地对比
+  const bare = moveRightForOneSecond(mapDef({ id: "t-poison-bare" }), 488, 360);
+  const poisonWorld = new World(mapDef({ id: "t-poison-speed" }));
+  poisonWorld.addPoison(520, 360, 40, 6, 6, 0.8);
+  const ph = poisonWorld.spawnHuman(488, 360, "mg");
+  ph.manual = true;
+  ph.moveX = 1;
+  ph.moveY = 0;
+  ph.speedOverride = 70;
+  for (let i = 0; i < 60; i++) updateHumans(poisonWorld, 1 / 60);
+  const covered = ph.x - 488;
+  assert(bare > 0 && covered > 0, "两次移动都应有位移");
+  const ratio = covered / bare;
+  assert(
+    Math.abs(ratio - 0.8) < 0.02,
+    `毒液位移应约为裸地的 0.8，实际 ${ratio.toFixed(3)}`,
+  );
+});
+
+scenario("腐蚀者：射程内吐毒，死亡在尸体位置留下大毒团", () => {
+  const spit = effectiveZombie(ZOMBIE_IDS.corroder).spit!;
+  const world = new World(mapDef({ id: "t-corroder" }));
+  const h = world.spawnHuman(600, 360, "mg");
+  h.manual = true;
+  h.moveX = 0;
+  h.moveY = 0;
+  const z = world.spawnZombie(780, 360, ZOMBIE_IDS.corroder);
+  z.hp = z.maxHp = 1000;
+  z.speed = 38;
+  world.rebuildGrids();
+
+  updateZombies(world, 1 / 60);
+  assert(world.poison.length === 1, "腐蚀者应在 200px 射程内立即吐毒");
+  const pool = world.poison[0];
+  assert(
+    Math.abs(pool.x - h.x) < 1 && Math.abs(pool.y - h.y) < 1,
+    `毒液落点应贴近目标人类，实际 (${pool.x.toFixed(1)}, ${pool.y.toFixed(1)})`,
+  );
+  assert(
+    pool.radius === spit.radius &&
+      pool.dps === spit.dps &&
+      Math.abs(pool.remaining - spit.duration) < 1e-6,
+    "吐出毒液的半径 / 伤害 / 持续时间应与定义文件一致",
+  );
+  assert(z.spit > spit.cooldown - 0.1, "吐毒后应进入完整冷却");
+
+  damageZombie(world, z, z.hp + 10);
+  assert(!z.alive, "腐蚀者应被击杀");
+  const dead = world.poison.find(
+    (p) => Math.hypot(p.x - z.x, p.y - z.y) < 1,
+  );
+  assert(dead !== undefined, "腐蚀者死亡应在尸体位置留下毒液");
+  assert(
+    dead!.radius === spit.deathRadius &&
+      Math.abs(dead!.remaining - spit.deathDuration) < 1e-6,
+    "死亡毒液的半径 / 持续时间应与定义文件一致",
+  );
 });
 
 // ============================================================

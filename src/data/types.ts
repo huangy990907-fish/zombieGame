@@ -37,6 +37,54 @@ export type ZombieMode = "hunt" | "wander";
  */
 export type ZombiePursuitMode = "breach" | "direct";
 
+/**
+ * 飞扑者的行为参数。
+ * 蓄力完成后按 3 倍移速直线扑向目标；扑中进入压制，扑空进入硬直。
+ */
+export interface ZombieLeapConfig {
+  /** 触发蓄力的范围（像素），只对“可见”人类生效 */
+  triggerRadius: number;
+  /** 蓄力时长（秒），蓄力期间原地不动 */
+  chargeTime: number;
+  /** 每次受击延长蓄力的时长（秒） */
+  hitExtend: number;
+  /** 蓄力剩余时长的上限（秒） */
+  chargeMax: number;
+  /** 飞扑时的移速倍率 */
+  leapSpeedMul: number;
+  /** 飞扑最短 / 最长时间（秒），按起跳距离换算后夹在这个区间 */
+  leapMinTime: number;
+  leapMaxTime: number;
+  /** 扑空后的硬直时长（秒） */
+  missStun: number;
+  /** 压制持续时长（秒） */
+  pinDuration: number;
+  /** 被压制人类的移速倍率 */
+  pinMoveMul: number;
+  /** 被压制人类每秒掉血 */
+  pinDps: number;
+}
+
+/** 腐蚀者的远程吐毒与死亡留毒参数 */
+export interface ZombieSpitConfig {
+  /** 吐毒射程（像素） */
+  range: number;
+  /** 吐毒冷却（秒） */
+  cooldown: number;
+  /** 毒液落点半径（像素） */
+  radius: number;
+  /** 毒液持续时长（秒） */
+  duration: number;
+  /** 毒液每秒伤害 */
+  dps: number;
+  /** 毒液内人类移速倍率 */
+  speedMul: number;
+  /** 死亡时留下的毒液半径（像素） */
+  deathRadius: number;
+  /** 死亡毒液持续时长（秒） */
+  deathDuration: number;
+}
+
 /** 武器攻击形态：直线子弹 / 霰弹多弹丸 / 喷火锥形 / 火箭爆炸 / 电击链 */
 export type WeaponKind = "bullet" | "pellet" | "flame" | "rocket" | "tesla";
 
@@ -111,6 +159,10 @@ export interface ZombieDef {
   damage: number;
   /** 追击决策模式；缺省按 breach（连通区域 + 破口追击） */
   pursuit?: ZombiePursuitMode;
+  /** 飞扑者参数；有该字段即启用蓄力飞扑与压制行为 */
+  leap?: ZombieLeapConfig;
+  /** 腐蚀者参数；有该字段即启用远程吐毒与死亡留毒 */
+  spit?: ZombieSpitConfig;
 }
 
 export interface ZombieTunables {

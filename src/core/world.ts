@@ -30,6 +30,31 @@ export interface GrassTileState {
   timer: number;
 }
 
+/**
+ * 腐蚀毒液池 —— 世界级运行时状态，与草丛一样由 tickTerrain 统一推进。
+ * 只伤害人类、不伤害丧尸；不阻挡单位 / 子弹 / 视线。
+ * 多团重叠时“同位置取最高”：伤害取最大值、减速取最强值，不叠加。
+ */
+export interface PoisonPool {
+  x: number;
+  y: number;
+  radius: number;
+  /** 剩余时长（秒） */
+  remaining: number;
+  /** 初始时长（秒），渲染淡出用 */
+  total: number;
+  /** 每秒伤害 */
+  dps: number;
+  /** 池内人类移速倍率 */
+  speedMul: number;
+}
+
+/** 某点毒液的有效效果（多团重叠时已取最高 / 最强） */
+export interface PoisonEffect {
+  dps: number;
+  speedMul: number;
+}
+
 export interface Human {
   id: number;
   x: number;
@@ -70,6 +95,10 @@ export interface Human {
   hurtTimer: number;
   /** 朝向（弧度） */
   facing: number;
+  /** 被飞扑者压制的剩余时间（秒）；>0 时不能开火、移速降低、持续掉血 */
+  pinTimer: number;
+  /** 当前压制自己的飞扑者 id；null 表示未被压制 */
+  pinBy: number | null;
   /** 闲逛目标点 */
   wx: number;
   wy: number;
@@ -163,6 +192,22 @@ export interface Zombie {
   wanderTimer: number;
   /** 漫游是否处于停顿段 */
   wanderRest: boolean;
+  /**
+   * 飞扑者状态机：0 无 / 1 蓄力 / 2 飞扑 / 3 落地硬直。
+   * 非飞扑者恒为 0，不参与任何判定。
+   */
+  leapPhase: 0 | 1 | 2 | 3;
+  /** 当前蓄力 / 飞扑 / 硬直的剩余时间（秒） */
+  leapTimer: number;
+  /** 蓄力时锁定的目标人类 id；null 表示没有目标 */
+  leapTargetId: number | null;
+  /** 飞扑方向（单位向量），起跳瞬间锁定，保证直线扑出 */
+  leapDX: number;
+  leapDY: number;
+  /** 正在压制的人类 id；非空时原地不动 */
+  pinTargetId: number | null;
+  /** 腐蚀者吐毒冷却（秒），0 表示可以吐 */
+  spit: number;
   alive: boolean;
   /** 训练场用：血量上限（面板显示 / 重设血量） */
   maxHp?: number;
@@ -328,6 +373,11 @@ export class World {
   private blockers: Rect[];
   /** 草丛逐格运行时状态（燃烧 / 休眠 / 重生） */
   grass: GrassTileState[];
+  /**
+   * 腐蚀毒液池运行时状态（吐出的 + 腐蚀者死亡留下的）。
+   * 与草丛同属地形级状态，由 tickTerrain 统一推进。
+   */
+  poison: PoisonPool[];
   /** 草丛瓦片索引：<列主序格子号, grass 下标>，用于 O(1) 位置查询 */
   private readonly grassIndex = new Map<number, number>();
   private readonly grassCols: number;
@@ -357,6 +407,7 @@ export class World {
     this.blockers = [...map.walls, ...map.waterBlockers];
     this.grassCols = Math.ceil(map.width / TILE_SIZE);
     this.grass = map.grassTiles.map<GrassTileState>((r) => ({ x: r.x, y: r.y, phase: 0, timer: 0 }));
+    this.poison = [];
     this.grass.forEach((g, i) => {
       const tx = Math.floor(g.x / TILE_SIZE);
       const ty = Math.floor(g.y / TILE_SIZE);
@@ -433,6 +484,75 @@ export class World {
           g.timer = 0;
         }
       }
+    }
+    this.tickPoison(dt);
+  }
+
+  /**
+   * 添加一团毒液。同位置（中心相距 ≤ 8px）已有更强或同强的毒液时只刷新计时，
+   * 否则替换掉较弱的一团，避免同位置叠出多份伤害。
+   */
+  addPoison(x: number, y: number, radius: number, duration: number, dps: number, speedMul: number): void {
+    if (duration <= 0 || radius <= 0) return;
+    for (let i = 0; i < this.poison.length; i++) {
+      const p = this.poison[i];
+      const dx = p.x - x;
+      const dy = p.y - y;
+      if (dx * dx + dy * dy <= 64) {
+        if (p.dps >= dps) {
+          // 已有更强：只合并范围 / 时长 / 更强减速，不叠加伤害
+          p.radius = Math.max(p.radius, radius);
+          p.speedMul = Math.min(p.speedMul, speedMul);
+          p.remaining = Math.max(p.remaining, duration);
+          p.total = Math.max(p.total, duration);
+          return;
+        }
+        this.poison.splice(i, 1);
+        break;
+      }
+    }
+    this.poison.push({ x, y, radius, remaining: duration, total: duration, dps, speedMul });
+  }
+
+  /** 某点的有效毒液效果；多团重叠时伤害取最高、减速取最强，不叠加 */
+  poisonEffectAt(x: number, y: number): PoisonEffect | null {
+    let dps = 0;
+    let speedMul = 1;
+    let found = false;
+    for (const p of this.poison) {
+      const dx = p.x - x;
+      const dy = p.y - y;
+      if (dx * dx + dy * dy > p.radius * p.radius) continue;
+      found = true;
+      if (p.dps > dps) dps = p.dps;
+      if (p.speedMul < speedMul) speedMul = p.speedMul;
+    }
+    return found ? { dps, speedMul } : null;
+  }
+
+  /**
+   * 推进毒液计时并结算池内人类伤害。
+   * 只伤害人类：丧尸不受影响；不写 blockers / bulletWalls，因此不挡单位、子弹与视线。
+   */
+  private tickPoison(dt: number): void {
+    let write = 0;
+    for (const p of this.poison) {
+      p.remaining -= dt;
+      if (p.remaining > 0) this.poison[write++] = p;
+    }
+    this.poison.length = write;
+    if (this.poison.length === 0) return;
+
+    const turnTime = settings().human.turnTime;
+    for (const h of this.humans) {
+      if (!h.alive || h.invincible) continue;
+      const effect = this.poisonEffectAt(h.x, h.y);
+      if (!effect) continue;
+      const taken = effect.dps * dt;
+      const applied = Math.min(taken, Math.max(0, h.hp));
+      h.hp = Math.max(0, h.hp - taken);
+      if (applied > 0) h.hurtTimer = Math.max(h.hurtTimer, 1);
+      if (h.hp <= 0 && h.turning <= 0) h.turning = turnTime;
     }
   }
 
@@ -636,6 +756,8 @@ export class World {
       turning: 0,
       hurtTimer: 0,
       facing: randRange(-Math.PI, Math.PI),
+      pinTimer: 0,
+      pinBy: null,
       wx: x,
       wy: y,
       wTimer: 0,
@@ -682,6 +804,13 @@ export class World {
       wanderAngle: randRange(-Math.PI, Math.PI),
       wanderTimer: 0,
       wanderRest: false,
+      leapPhase: 0,
+      leapTimer: 0,
+      leapTargetId: null,
+      leapDX: 0,
+      leapDY: 0,
+      pinTargetId: null,
+      spit: 0,
       alive: true,
     };
     this.zombies.push(zombie);

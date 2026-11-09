@@ -7,7 +7,7 @@
  * 命中判定用的是“线段扫掠”而不是点：高速子弹一帧能飞十几像素，
  * 只看当前点会穿透丧尸，所以拿“上一帧位置 -> 当前位置”线段去撞。
  */
-import { effectiveWeapon } from "../data/settings/runtime";
+import { effectiveWeapon, effectiveZombie } from "../data/settings/runtime";
 import { MAX_ZOMBIE_RADIUS, ZOMBIE_SLOW } from "../data/zombies";
 import { WEAPON_IDS } from "../data/weapons";
 import type { WeaponDef } from "../data/types";
@@ -545,6 +545,11 @@ function applyHitSlow(world: World, z: Zombie, damage: number, source?: DamageSo
     if (world.time - z.lastFlameSlow < ZOMBIE_SLOW.flameInterval) return;
     z.lastFlameSlow = world.time;
   }
+  // 飞扑者蓄力中受击不打断，只延长蓄力（上限见定义文件）
+  const leap = effectiveZombie(z.kind).leap;
+  if (leap && z.leapPhase === 1) {
+    z.leapTimer = Math.min(leap.chargeMax, z.leapTimer + leap.hitExtend);
+  }
   // 体型按生成时快照的身体直径判定，不受设置面板事后覆盖影响
   const heavy = z.bodyDiameter >= ZOMBIE_SLOW.heavyDiameter;
   const scale = heavy ? ZOMBIE_SLOW.heavyScale : 1;
@@ -566,6 +571,11 @@ export function damageZombie(world: World, z: Zombie, dmg: number, source?: Dama
   sound.play(SFX.ZOMBIE_HIT);
   if (z.hp <= 0) {
     z.alive = false;
+    // 腐蚀者死亡时在尸体位置留下一团毒液（与吐出的毒液同源，数值来自定义文件）
+    const spit = effectiveZombie(z.kind).spit;
+    if (spit) {
+      world.addPoison(z.x, z.y, spit.deathRadius, spit.deathDuration, spit.dps, spit.speedMul);
+    }
     world.kills++;
     world.onKill?.(z, source);
     sound.play(SFX.ZOMBIE_KILL);

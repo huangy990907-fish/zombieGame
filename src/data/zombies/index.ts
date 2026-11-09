@@ -1,5 +1,7 @@
 import type { ZombieDef } from "../types";
+import { corroder } from "./corroder";
 import { fat } from "./fat";
+import { leaper } from "./leaper";
 import { normal } from "./normal";
 import { runner } from "./runner";
 
@@ -11,6 +13,8 @@ export const ZOMBIE_DEFS: Record<string, ZombieDef> = {
   normal,
   runner,
   fat,
+  leaper,
+  corroder,
 };
 
 /** 有序列表（插入顺序）—— 只影响默认展示顺序，身份始终用 id */
@@ -74,6 +78,8 @@ export const ZOMBIE_IDS = {
   normal: normal.id,
   runner: runner.id,
   fat: fat.id,
+  leaper: leaper.id,
+  corroder: corroder.id,
 } as const;
 
 /** 按 id 取定义；未知 id 回落到普通丧尸，保证旧存档 / 脏数据不崩溃 */

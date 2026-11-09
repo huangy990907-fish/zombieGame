@@ -17,7 +17,7 @@ import { HUMAN_BODY_DIAMETER, HUMAN_DEF } from "../data/humans";
 import { MAX_ZOMBIE_RADIUS, WANDER_TUNING, ZOMBIE_IDS, ZOMBIE_SLOW } from "../data/zombies";
 import { effectiveWeapon, effectiveZombie, openingTuning, settings } from "../data/settings/runtime";
 import { TERRAIN } from "../data/terrain";
-import type { ZombiePursuitMode } from "../data/types";
+import type { ZombieLeapConfig, ZombiePursuitMode } from "../data/types";
 import { openingNetWidth } from "./flowField";
 import { tryFire, updateFlame } from "./combat";
 import type { RegionMap } from "./regions";
@@ -73,6 +73,50 @@ function nearestZombie(world: World, h: Human, radius: number): Zombie | null {
 /** 视线检查时玻璃的侧向容差（像素），贴着窗沿的僵尸也算看得见 */
 const WINDOW_SIGHT_PAD = 12;
 
+/** 按 id 找活人；压制 / 飞扑追踪需要稳定引用，数量很小，线性查找足够 */
+function humanById(world: World, id: number | null): Human | null {
+  if (id === null) return null;
+  for (let i = 0; i < world.humans.length; i++) {
+    const h = world.humans[i];
+    if (h.id === id) return h.alive ? h : null;
+  }
+  return null;
+}
+
+/** 按 id 找活着的丧尸 */
+function zombieById(world: World, id: number | null): Zombie | null {
+  if (id === null) return null;
+  for (let i = 0; i < world.zombies.length; i++) {
+    const z = world.zombies[i];
+    if (z.id === id) return z.alive ? z : null;
+  }
+  return null;
+}
+
+/** 指定半径内最近的“看得见”的人类（丧尸视角；墙与完好门窗挡视线） */
+function nearestVisibleHuman(world: World, z: Zombie, radius: number): Human | null {
+  world.humanGrid.query(z.x, z.y, radius, queryH);
+  let best: Human | null = null;
+  let bestD = Infinity;
+  for (let i = 0; i < queryH.length; i++) {
+    const h = queryH[i];
+    if (!h.alive) continue;
+    const d = dist2(z.x, z.y, h.x, h.y);
+    if (d >= bestD) continue;
+    if (world.sightBlocked(z.x, z.y, h.x, h.y, 0)) continue;
+    bestD = d;
+    best = h;
+  }
+  return best;
+}
+
+/** 解除压制：同时清掉双方的状态，避免留下悬空引用 */
+function releasePin(h: Human, pinner?: Zombie | null): void {
+  h.pinTimer = 0;
+  h.pinBy = null;
+  if (pinner) pinner.pinTargetId = null;
+}
+
 export function updateHumans(world: World, dt: number): void {
   // 守卫（guard）模式暂未实现，行为上回落到防守
   const postedMode = world.mode !== "attack";
@@ -96,9 +140,41 @@ export function updateHumans(world: World, dt: number): void {
     const def2 = h.weapon2 ? effectiveWeapon(h.weapon2) : null;
     const posted = postedMode && h.post >= 0 && h.post < world.posts.length;
 
+    /*
+     * 被飞扑者压制：不能开火、移速降低、持续掉血。
+     * 压制者死亡 / 目标转化会立刻解除；到时间自动挣脱。
+     * 同类压制同一时间只允许一只（由扑击瞬间的落点检查保证）。
+     */
+    let pinned = false;
+    let pinMul = 1;
+    if (h.pinTimer > 0) {
+      const pinner = zombieById(world, h.pinBy);
+      if (!pinner || pinner.pinTargetId !== h.id) {
+        releasePin(h);
+      } else {
+        pinned = true;
+        const leap = effectiveZombie(pinner.kind).leap;
+        pinMul = leap?.pinMoveMul ?? 1;
+        if (leap) {
+          h.pinTimer -= dt;
+          if (!h.invincible) {
+            h.hp = Math.max(0, h.hp - leap.pinDps * dt);
+            h.hurtTimer = Math.max(h.hurtTimer, 1);
+            if (h.hp <= 0 && h.turning <= 0) h.turning = s.human.turnTime;
+          }
+          if (h.hp <= 0 || h.pinTimer <= 0) {
+            releasePin(h, pinner);
+            pinned = false;
+            pinMul = 1;
+          }
+        }
+      }
+    }
+
     // 冷却与换弹计时。喷火有自己的一套"持续喷射"计时，交给 updateFlame 推进
-    if (def.kind === "flame") updateFlame(world, h, dt);
-    else if (h.fire > 0) h.fire -= dt;
+    if (def.kind === "flame") {
+      if (!pinned) updateFlame(world, h, dt);
+    } else if (h.fire > 0) h.fire -= dt;
     if (h.reloadTimer > 0) {
       h.reloadTimer -= dt;
       if (h.reloadTimer <= 0) {
@@ -108,8 +184,9 @@ export function updateHumans(world: World, dt: number): void {
     }
     // 副武器：冷却 / 换弹 / 喷火计时完全独立，与主武器同时推进
     if (def2) {
-      if (def2.kind === "flame") updateFlame(world, h, dt, 1);
-      else if ((h.fire2 ?? 0) > 0) h.fire2 = Math.max(0, (h.fire2 ?? 0) - dt);
+      if (def2.kind === "flame") {
+        if (!pinned) updateFlame(world, h, dt, 1);
+      } else if ((h.fire2 ?? 0) > 0) h.fire2 = Math.max(0, (h.fire2 ?? 0) - dt);
       if ((h.reload2 ?? 0) > 0) {
         h.reload2 = Math.max(0, (h.reload2 ?? 0) - dt);
         if (h.reload2 === 0) h.ammo2 = def2.magazine;
@@ -174,11 +251,11 @@ export function updateHumans(world: World, dt: number): void {
       const dist = Math.sqrt(dist2(h.x, h.y, best.x, best.y));
       threatAng = ang;
       threatDist = dist;
-      if (dist <= def.range && Math.abs(angDiff(h.facing, ang)) < 0.3) {
+      if (!pinned && dist <= def.range && Math.abs(angDiff(h.facing, ang)) < 0.3) {
         tryFire(world, h, h.facing);
       }
       // 副武器按自己的射程 / 冷却同时开火，目标与主武器一致
-      if (def2 && dist <= def2.range && Math.abs(angDiff(h.facing, ang)) < 0.3) {
+      if (!pinned && def2 && dist <= def2.range && Math.abs(angDiff(h.facing, ang)) < 0.3) {
         tryFire(world, h, h.facing, 1);
       }
 
@@ -287,10 +364,13 @@ export function updateHumans(world: World, dt: number): void {
       }
     }
 
-    // 期望方向 -> 平滑加速到目标速度（训练场可覆盖单个人类的移速；草丛内减速）
+    // 期望方向 -> 平滑加速到目标速度（训练场可覆盖单个人类的移速；草丛 / 毒液 / 压制减速）
+    const poisonMul = world.poisonEffectAt(h.x, h.y)?.speedMul ?? 1;
     const moveSpeed =
       (h.speedOverride ?? s.human.speed) *
-      (1 - (1 - TERRAIN.grass.speedMul) * world.grassEffectAt(h.x, h.y));
+      (1 - (1 - TERRAIN.grass.speedMul) * world.grassEffectAt(h.x, h.y)) *
+      poisonMul *
+      pinMul;
     const len = Math.hypot(dx, dy);
     if (len > 0.001 && h.turning <= 0) {
       dx /= len;
@@ -565,8 +645,10 @@ function pursueBreach(world: World, z: Zombie, region: RegionMap): void {
 function retargetZombie(world: World, z: Zombie): void {
   // 全局限频 3 秒一次咆哮 —— 不用每只独立响，全局偶尔一声足够，
   // 但僵尸密集时刚好每隔几秒就响一声，自然营造"尸群包围"的氛围。
-  // 胖子用自己的低频低吼，与普通/狂奔的叫声区分。
+  // 每种僵尸用自己的叫声，与普通/狂奔区分（缺失音频时按现有逻辑静默降级）。
   if (z.kind === ZOMBIE_IDS.fat) sound.play(SFX.ZOMBIE_GROWL_FAT);
+  else if (z.kind === ZOMBIE_IDS.leaper) sound.play(SFX.ZOMBIE_GROWL_LEAPER);
+  else if (z.kind === ZOMBIE_IDS.corroder) sound.play(SFX.ZOMBIE_GROWL_CORRODER);
   else sound.play(SFX.ZOMBIE_GROWL);
   if (pursuitModeOf(z) === "breach") pursueBreach(world, z, world.regionMap(z.bodyDiameter));
   else retargetDirect(world, z);
@@ -609,6 +691,104 @@ function bounceWander(z: Zombie, blockedX: boolean, blockedY: boolean): void {
   z.wanderAngle = Math.atan2(vy, vx) + randRange(-0.2, 0.2);
 }
 
+/**
+ * 飞扑者状态机：0 待机 / 1 蓄力 / 2 飞扑 / 3 落地硬直。
+ * 返回 true 表示本帧由飞扑接管，调用方跳过常规移动与撕咬。
+ * 蓄力受击的延长写在 combat.ts 的 applyHitSlow 里（不打断，只加时）。
+ */
+function tickLeaper(world: World, z: Zombie, dt: number, cfg: ZombieLeapConfig): boolean {
+  // 1) 蓄力：原地不动；目标丢失 / 已转化就取消
+  if (z.leapPhase === 1) {
+    z.leapTimer -= dt;
+    const target = humanById(world, z.leapTargetId);
+    if (!target || target.turning > 0) {
+      z.leapPhase = 0;
+      z.leapTimer = 0;
+      z.leapTargetId = null;
+      return true;
+    }
+    if (z.leapTimer > 0) return true;
+
+    // 蓄力完成：朝目标当前位置直线起跳，飞行时间按起跳距离换算
+    const dx = target.x - z.x;
+    const dy = target.y - z.y;
+    const d = Math.hypot(dx, dy);
+    z.leapDX = d > 0.001 ? dx / d : 1;
+    z.leapDY = d > 0.001 ? dy / d : 0;
+    const leapSpeed = Math.max(1, z.speed * cfg.leapSpeedMul);
+    z.leapTimer = clamp(d / leapSpeed, cfg.leapMinTime, cfg.leapMaxTime);
+    z.leapPhase = 2;
+    sound.play(SFX.ZOMBIE_LEAP);
+    return true;
+  }
+
+  // 2) 飞扑：直线冲刺，命中就压制，撞墙 / 超时算扑空
+  if (z.leapPhase === 2) {
+    z.leapTimer -= dt;
+    const speed = Math.max(1, z.speed * cfg.leapSpeedMul);
+    let nx = z.x + z.leapDX * speed * dt;
+    let ny = z.y + z.leapDY * speed * dt;
+    let blocked = false;
+    if (world.solidAt(nx, z.y, 0, z.bodyDiameter)) {
+      nx = z.x;
+      blocked = true;
+    }
+    if (world.solidAt(nx, ny, 0, z.bodyDiameter)) {
+      ny = z.y;
+      blocked = true;
+    }
+    const cx = clamp(nx, z.radius, world.map.width - z.radius);
+    const cy = clamp(ny, z.radius, world.map.height - z.radius);
+    if (cx !== nx || cy !== ny) blocked = true;
+    z.x = cx;
+    z.y = cy;
+
+    const target = humanById(world, z.leapTargetId);
+    const reach = z.radius + HUMAN_DEF.radius + 2;
+    if (target && target.turning <= 0 && dist2(z.x, z.y, target.x, target.y) <= reach * reach) {
+      // 同一人类同时只能被 1 只压制；目标已被压住就算这次扑空
+      if (target.pinTimer <= 0 && target.pinBy === null) {
+        target.pinTimer = cfg.pinDuration;
+        target.pinBy = z.id;
+        target.hurtTimer = Math.max(target.hurtTimer, 3);
+        target.vx = 0;
+        target.vy = 0;
+        z.pinTargetId = target.id;
+        z.leapPhase = 0;
+        z.leapTimer = 0;
+        z.leapTargetId = null;
+        return true;
+      }
+      blocked = true;
+    }
+    if (blocked || z.leapTimer <= 0) {
+      z.leapPhase = 3;
+      z.leapTimer = cfg.missStun;
+      z.leapTargetId = null;
+    }
+    return true;
+  }
+
+  // 3) 落地硬直：原地不动，时间到恢复待机
+  if (z.leapPhase === 3) {
+    z.leapTimer -= dt;
+    if (z.leapTimer <= 0) {
+      z.leapPhase = 0;
+      z.leapTimer = 0;
+    }
+    return true;
+  }
+
+  // 0) 待机：索敌范围内出现“看得见且未被压制”的人类就开始蓄力
+  if (z.mode !== "hunt" || z.stranded) return false;
+  const target = nearestVisibleHuman(world, z, cfg.triggerRadius);
+  if (!target || target.turning > 0 || target.pinTimer > 0) return false;
+  z.leapPhase = 1;
+  z.leapTimer = cfg.chargeTime;
+  z.leapTargetId = target.id;
+  return true;
+}
+
 export function updateZombies(world: World, dt: number): void {
   const map = world.map;
   const room = map.room;
@@ -625,6 +805,9 @@ export function updateZombies(world: World, dt: number): void {
       if (z.slowTimer <= 0) z.slowMul = 1;
     }
     if (z.bite > 0) z.bite -= dt;
+    const zdef = effectiveZombie(z.kind);
+    // 腐蚀者吐毒冷却（按定义文件的 cooldown 推进）
+    if (zdef.spit && z.spit > 0) z.spit = Math.max(0, z.spit - dt);
 
     /*
      * 行为状态切换：场上有活人就索敌进攻，零人类才漫游。
@@ -641,6 +824,15 @@ export function updateZombies(world: World, dt: number): void {
       beginWander(z);
     }
 
+    // 正在压制人类：压在原地不动，不移动也不啃咬；目标挣脱 / 死亡后自动解除
+    if (z.pinTargetId !== null) {
+      const target = humanById(world, z.pinTargetId);
+      if (target && target.pinBy === z.id && target.pinTimer > 0 && target.turning <= 0) {
+        continue;
+      }
+      z.pinTargetId = null;
+    }
+
     if (z.mode === "hunt") {
       // 每隔 0.3~0.6 秒重新索敌，而不是每帧都找（几千只一起找会卡）
       z.retarget -= dt;
@@ -649,6 +841,32 @@ export function updateZombies(world: World, dt: number): void {
         z.retarget = 0.3 + Math.random() * 0.3;
       }
     }
+
+    /*
+     * 腐蚀者远程吐毒：冷却就绪且在射程内有可见人类时，
+     * 直接在人脚下留下一团毒液（毒液是世界状态，伤害 / 减速由 World 统一结算）。
+     */
+    if (zdef.spit && z.mode === "hunt" && z.spit <= 0) {
+      const target = nearestVisibleHuman(world, z, zdef.spit.range);
+      if (target && target.turning <= 0) {
+        world.addPoison(target.x, target.y, zdef.spit.radius, zdef.spit.duration, zdef.spit.dps, zdef.spit.speedMul);
+        z.spit = zdef.spit.cooldown;
+        sound.play(SFX.ZOMBIE_SPIT);
+        world.effects.push({
+          kind: "ring",
+          x: target.x,
+          y: target.y,
+          angle: 0,
+          radius: zdef.spit.radius,
+          color: 0x84cc16,
+          age: 0,
+          life: 0.35,
+        });
+      }
+    }
+
+    // 飞扑者：蓄力 / 飞扑 / 落地硬直由状态机接管；接管时跳过常规移动与撕咬
+    if (zdef.leap && tickLeaper(world, z, dt, zdef.leap)) continue;
 
     let dx: number;
     let dy: number;
@@ -888,28 +1106,30 @@ export function updateZombies(world: World, dt: number): void {
     // 漫游状态下完全不碰建筑：不扣门窗血量、也不触发咬合音效。
     if (z.mode === "hunt" && z.bite <= 0) {
       let bit = false;
-      const zdef = effectiveZombie(z.kind);
       const reach = z.radius + HUMAN_DEF.radius + 2;
-      world.humanGrid.query(z.x, z.y, reach, queryH);
-      for (let k = 0; k < queryH.length; k++) {
-        const h = queryH[k];
-        if (!h.alive || h.turning > 0 || h.invincible) continue;
-        if (dist2(z.x, z.y, h.x, h.y) <= reach * reach) {
-          // 撕咬先扣真实血量，血量归零才进入异变倒计时；
-          // 无敌单位在上一行已被跳过，完全免疫掉血与转化。
-          // 生存模式可单独调低承伤倍率（damageTakenMul），其余模式为 undefined → 1
-          const taken = z.damage * (h.damageTakenMul ?? 1);
-          const applied = Math.min(taken, Math.max(0, h.hp));
-          h.hp = Math.max(0, h.hp - taken);
-          h.hurtTimer = 3;
-          world.onHumanDamage?.(h, applied);
-          if (h.hp <= 0) h.turning = s.human.turnTime;
-          h.vx = 0;
-          h.vy = 0;
-          z.bite = z.biteCycle ?? zdef.bite;
-          sound.play(SFX.ZOMBIE_BITE); // 啃咬人类
-          bit = true;
-          break;
+      // 飞扑者不撕咬人类：它的伤害来自压制，贴身后的攻击会被扑击状态机接管
+      if (!zdef.leap) {
+        world.humanGrid.query(z.x, z.y, reach, queryH);
+        for (let k = 0; k < queryH.length; k++) {
+          const h = queryH[k];
+          if (!h.alive || h.turning > 0 || h.invincible) continue;
+          if (dist2(z.x, z.y, h.x, h.y) <= reach * reach) {
+            // 撕咬先扣真实血量，血量归零才进入异变倒计时；
+            // 无敌单位在上一行已被跳过，完全免疫掉血与转化。
+            // 生存模式可单独调低承伤倍率（damageTakenMul），其余模式为 undefined → 1
+            const taken = z.damage * (h.damageTakenMul ?? 1);
+            const applied = Math.min(taken, Math.max(0, h.hp));
+            h.hp = Math.max(0, h.hp - taken);
+            h.hurtTimer = 3;
+            world.onHumanDamage?.(h, applied);
+            if (h.hp <= 0) h.turning = s.human.turnTime;
+            h.vx = 0;
+            h.vy = 0;
+            z.bite = z.biteCycle ?? zdef.bite;
+            sound.play(SFX.ZOMBIE_BITE); // 啃咬人类
+            bit = true;
+            break;
+          }
         }
       }
       if (!bit) {

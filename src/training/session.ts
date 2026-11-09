@@ -610,12 +610,13 @@ export class TrainingSession {
     return true;
   }
 
-  /** 清场：一键清空所有单位、弹道、特效与飘字 */
+  /** 清场：一键清空所有单位、弹道、特效、毒液与飘字 */
   clearUnits(): void {
     this.world.humans.length = 0;
     this.world.zombies.length = 0;
     this.world.bullets.length = 0;
     this.world.effects.length = 0;
+    this.world.poison.length = 0;
     this.floaters.length = 0;
     this.spawnTimes.clear();
     this.selectedId = null;

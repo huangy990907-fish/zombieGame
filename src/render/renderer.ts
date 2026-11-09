@@ -107,6 +107,8 @@ export class Renderer {
   private terrainLayer = new Graphics();
   /** 动态地形：草丛正常 / 燃烧 / 休眠 / 重生四种状态，逐帧重画 */
   private grassLayer = new Graphics();
+  /** 腐蚀毒液层：画在草丛之后、单位之前，不遮住角色 */
+  private poisonLayer = new Graphics();
   private trainingLayer = new Graphics();
   /** 准备阶段的出生区标记（人类区绿色 / 僵尸区红色），战斗中隐藏 */
   private placementLayer = new Container();
@@ -194,6 +196,7 @@ export class Renderer {
       this.floorLayer,
       this.terrainLayer,
       this.grassLayer,
+      this.poisonLayer,
       this.placementLayer,
       this.trainingLayer,
       this.pickupLayer,
@@ -304,6 +307,7 @@ export class Renderer {
     this.buildStatic();
     this.buildTrainingVisual();
     this.openingLayer.clear();
+    this.poisonLayer.clear();
     this.placementKey = "";
     this.placementLayer.removeChildren().forEach((child) => child.destroy());
     this.placementLayer.visible = false;
@@ -462,6 +466,30 @@ export class Renderer {
         g.rect(t.x, t.y, TILE_SIZE, TILE_SIZE).fill({ color: ash, alpha: 0.55 });
         g.rect(t.x, t.y, TILE_SIZE, TILE_SIZE).fill({ color: green, alpha: 0.5 * p });
         g.rect(t.x, t.y, TILE_SIZE, 2).fill({ color: 0x59b56f, alpha: 0.5 * p });
+      }
+    }
+  }
+
+  /**
+   * 腐蚀毒液：半透明绿色圆盘 + 亮边 + 缓慢旋转的气泡。
+   * 只画世界状态里的 poison；最后一小段按剩余时间淡出，不闪跳。
+   */
+  private renderPoison(world: World): void {
+    const g = this.poisonLayer;
+    g.clear();
+    for (let i = 0; i < world.poison.length; i++) {
+      const p = world.poison[i];
+      const fade = Math.min(1, p.remaining / 1.2);
+      g.circle(p.x, p.y, p.radius).fill({ color: 0x3f6212, alpha: 0.2 * fade });
+      g.circle(p.x, p.y, p.radius * 0.72).fill({ color: 0x65a30d, alpha: 0.16 * fade });
+      g.circle(p.x, p.y, p.radius).stroke({ width: 1.5, color: 0xa3e635, alpha: 0.5 * fade });
+      // 固定 5 个气泡位置，按时间缓慢绕圈 + 上下浮动
+      for (let k = 0; k < 5; k++) {
+        const ang = k * 1.7 + this.t * 0.55 + i;
+        const rr = p.radius * (0.28 + 0.5 * ((k % 3) / 2));
+        const bx = p.x + Math.cos(ang) * rr;
+        const by = p.y + Math.sin(ang) * rr + Math.sin(this.t * 2.4 + k) * 2;
+        g.circle(bx, by, 2 + (k % 2) * 0.8).fill({ color: 0xd9f99d, alpha: 0.55 * fade });
       }
     }
   }
@@ -649,6 +677,8 @@ export class Renderer {
       const scale = spriteScale(HUMAN_DIAMETER);
       s.scale.set(turning ? scale * (1 + (1 - h.turning / turnTime) * 0.35) : scale);
       s.alpha = turning ? 0.55 + 0.45 * Math.abs(Math.sin(this.t * 14 + h.id)) : 1;
+      // 被压制：轻微紫红染色（不加新素材，靠渲染层标识）
+      s.tint = h.pinTimer > 0 ? 0xd8b4fe : 0xffffff;
       this.applyFrame(s, st, def, frame);
     }
     this.pruneAnim(this.hAnim);
@@ -762,6 +792,7 @@ export class Renderer {
 
     this.renderPickups(extra?.orbs);
     this.renderTerrain(w);
+    this.renderPoison(w);
     this.renderHumans(w.humans, dt);
     this.renderZombies(w.zombies, dt);
     this.renderDeaths(dt);
@@ -829,7 +860,22 @@ export class Renderer {
     g.clear();
     for (let i = 0; i < humans.length; i++) {
       const h = humans[i];
-      if (!h.alive || h.hurtTimer <= 0) continue;
+      if (!h.alive) continue;
+      // 压制标识：脉动的紫环 + 四道粉色爪痕，压在角色脚下；不依赖血条是否可见
+      if (h.pinTimer > 0) {
+        const pulse = 0.7 + 0.3 * Math.sin(this.t * 9 + h.id);
+        const r = HUMAN_DIAMETER * 0.72;
+        g.circle(h.x, h.y, r).stroke({ width: 2, color: 0xc084fc, alpha: 0.85 * pulse });
+        for (let k = 0; k < 4; k++) {
+          const ang = k * Math.PI * 0.5 + Math.PI * 0.25;
+          const cx = h.x + Math.cos(ang) * r;
+          const cy = h.y + Math.sin(ang) * r;
+          g.moveTo(cx, cy)
+            .lineTo(cx + Math.cos(ang) * 4, cy + Math.sin(ang) * 4)
+            .stroke({ width: 1.5, color: 0xf472b6, alpha: 0.9 * pulse });
+        }
+      }
+      if (h.hurtTimer <= 0) continue;
       const maxHp = Math.max(1, h.maxHp ?? h.hp);
       const ratio = Math.max(0, Math.min(1, h.hp / maxHp));
       const w = HUMAN_DIAMETER;

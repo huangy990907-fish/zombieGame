@@ -36,19 +36,19 @@
 
 | 需求 | 必改文件 | 通常还需要 |
 |---|---|---|
-| 新增僵尸 | `src/data/zombies/<id>.ts`（含 `damage`、可选 `pursuit` / `leap` / `spit`）、`src/data/zombies/index.ts`（注册 + `ZOMBIE_IDS`） | `src/render/pixel.ts`（缺图兜底 / 死亡精灵 id）；精灵、专属叫声、授权台账、文档与训练场验收按「新增实体三件套」 |
+| 新增僵尸 | `src/data/zombies/<id>.ts`（含 `damage`、可选 `pursuit` / `leap` / `spit`）、`src/data/zombies/index.ts`（注册 + `ZOMBIE_IDS`）、`src/data/survival/config.ts`（`SURVIVAL_ZOMBIE_WEIGHTS` 出怪权重，按需 `SURVIVAL_ZOMBIE_OVERRIDES`） | `src/render/pixel.ts`（缺图兜底 / 死亡精灵 id）；精灵、专属叫声、授权台账、文档与训练场验收按「新增实体三件套」 |
 | 改人类血量 / 撕咬伤害 | `src/systems/ai.ts`（咬人扣血→归零才 turning）、`src/core/world.ts`（`Human.hp/hurtTimer`、`Zombie.damage`）、`src/data/zombies/*.ts`（`damage`） | `src/render/renderer.ts`（头顶血条）、`src/data/settings/runtime.ts`（`damage` 覆盖值）、训练场编辑器/统计；飞扑者不撕咬人类（伤害来自 `leap.pinDps`），腐蚀者为 15 |
 | 改受击减速 | `src/systems/combat.ts`（`applyHitSlow`）、`src/systems/ai.ts`（推进/应用到移速）、`src/data/zombies/index.ts`（`ZOMBIE_SLOW`） | `src/core/world.ts`（`slowMul/slowTimer/flash`）、`src/render/renderer.ts`（受击闪白） |
 | 改飞扑者蓄力 / 扑击 / 压制 | `src/data/zombies/leaper.ts`（`leap` 参数）、`src/systems/ai.ts`（`tickLeaper` 状态机、`releasePin`）、`src/core/world.ts`（`Human.pinTimer/pinBy`、`Zombie.leapPhase/leapTimer/leapTargetId/leapDX/leapDY/pinTargetId`） | `src/systems/combat.ts`（`applyHitSlow` 内蓄力延长 +0.12s、上限 `chargeMax`）、`src/render/renderer.ts`（紫红染色 + 紫环爪痕）、音效 `zombie-leap` |
 | 改腐蚀毒液 | `src/data/zombies/corroder.ts`（`spit` 参数）、`src/core/world.ts`（`PoisonPool` / `World.poison` / `addPoison` / `poisonEffectAt` / `tickPoison`，由 `tickTerrain` 调用）、`src/systems/ai.ts`（射程内吐毒、死亡留毒在 `combat.ts` 的 `damageZombie`） | `src/systems/ai.ts`（毒液减速进入人类移速）、`src/render/renderer.ts`（`poisonLayer`）、训练场「清场」清空 `world.poison`、回归场景 |
-| 新增武器 | `src/data/weapons/<id>.ts`、`src/data/weapons/index.ts`（注册 + `WEAPON_IDS` / `WEAPON_LIST`） | 精灵外观与训练场自动出现按「新增实体三件套」；`src/data/levels/schema.ts`（`LEVEL_WEAPON_ORDER`）、`src/data/settings/sliders.ts`（如要单独滑块）；电击枪类链式武器还要改 `src/systems/combat.ts`（独立 hitscan/链式，不复用 Bullet）与 `src/render/renderer.ts`（`renderArcs` 电弧特效） |
+| 新增武器 | `src/data/weapons/<id>.ts`、`src/data/weapons/index.ts`（注册 + `WEAPON_IDS` / `WEAPON_LIST`）、`src/data/survival/config.ts`（`SURVIVAL_WEAPON_POOL` 武器池） | 精灵外观与训练场自动出现按「新增实体三件套」；`src/data/levels/schema.ts`（`LEVEL_WEAPON_ORDER`）、`src/data/settings/sliders.ts`（如要单独滑块）；电击枪类链式武器还要改 `src/systems/combat.ts`（独立 hitscan/链式，不复用 Bullet）与 `src/render/renderer.ts`（`renderArcs` 电弧特效） |
 | 新增地图 | `public/maps/<id>.json` + `public/maps/manifest.json`（瓦片 74×45 / 16px）、`src/data/maps/index.ts`（注册与加载） | `src/data/maps/schema.ts`（校验）、`src/data/maps/compile.ts`（编译）、`src/data/maps/arena.ts`（TS 兜底）、`src/levels.ts`（`LevelDef.mapId` 引用）、`src/render/renderer.ts`（`setMap()` 重建静态层） |
 | 新增音效 | `public/audio/<name>.mp3`、`src/audio/events.ts`（`SFX` + `SFX_MAP` + `SFX_THROTTLE` 三处） | 调用点（`src/systems/ai.ts` / `src/systems/combat.ts` / `src/core/game.ts` / `src/main.ts`）；授权台账按「新增实体三件套」第 4 步。0.8.2 新增事件：`zombie-growl-leaper` / `zombie-leap`（飞扑者索敌与起跳）、`zombie-growl-corroder` / `zombie-spit`（腐蚀者索敌与吐毒） |
 | 改地形（草丛 / 水池） | `src/data/terrain.ts`（数值）、`src/data/maps/schema.ts`（瓦片字符与校验）、`src/data/maps/compile.ts`（编译 `grassTiles` / `waterTiles` / `waterBlockers`）、`src/core/world.ts`（草地状态 / `grassEffectAt` / `igniteGrassAt` / `tickTerrain` / `blockers`） | `src/systems/ai.ts`（减速与索敌）、`src/systems/combat.ts`（喷火点燃）、`src/systems/flowField.ts` + `regions.ts`（水池阻挡）、`src/render/renderer.ts`（地表与草地层）、`src/workshop/` + `src/training/`（画笔）、`src/data/types.ts`（`MapDef` 字段） |
 | 改求生升级 / 双武器 | `src/data/survival/config.ts`（奖励池 / 上限 / 难度）、`src/survival/session.ts`（`ownedWeapons` / `extraProjectiles` / `crit` / `lifesteal` / `pickupMul` / `rollChoices` / `chooseWeapon`） | `src/core/world.ts`（`Human.weapon2/ammo2/fire2...` 与 `extraProjectiles/critChance/critMul`）、`src/systems/combat.ts`（`slotState` / `tryFire(...,slot)` / `updateFlame(...,slot)` / 暴击）、`src/systems/ai.ts`（副武器同帧开火）、`src/survival/ui.ts` + `index.html` + `src/style.css`（二段选武器与 HUD 芯片） |
 | 改回归脚本 | `scripts/regression/suite.ts`（场景与断言）、`scripts/regression/run.mjs`（esbuild 打包与退出码）、`package.json`（`regression` 脚本与 `esbuild` devDependency） | 新增场景时用 `scenario()` 注册并保持失败信息包含场景名；不要 import 会触碰 DOM / Pixi 的模块（`main.ts` / `renderer.ts` / `workshop/page.ts`） |
 | 改 AI 行为 | `src/systems/ai.ts`（含 `breach` / `direct` 分发、`tickLeaper` 飞扑状态机、`nearestVisibleHuman` 吐毒索敌） | `src/data/zombies/<id>.ts`（`pursuit` / `leap` / `spit`）、`src/data/types.ts`（`ZombiePursuitMode` / `ZombieLeapConfig` / `ZombieSpitConfig`）、`src/systems/regions.ts`（连通区域图）、`src/systems/flowField.ts`（寻路规则）、`src/core/world.ts`（区域 / 流场缓存与 `invalidateNavigation`、毒液池）、`src/data/zombies/index.ts`（`WANDER_TUNING`）、`src/data/settings/runtime.ts` + `sliders.ts`（可调参数） |
-| 改尸潮求生数值 / 奖励池 | `src/data/survival/config.ts` | `src/survival/session.ts`（升级应用 `syncPlayerStats` / `syncWeaponStats`）、`src/survival/ui.ts`（卡片文案与副武器芯片） |
+| 改尸潮求生数值 / 奖励池 / 出怪 | `src/data/survival/config.ts`（`spawn` / `difficulty` / `SURVIVAL_ZOMBIE_WEIGHTS` / `SURVIVAL_ZOMBIE_OVERRIDES` / `SURVIVAL_WEAPON_POOL`） | `src/survival/session.ts`（升级应用 `syncPlayerStats` / `syncWeaponStats`）、`src/survival/ui.ts`（卡片文案与副武器芯片） |
 | 改尸潮求生流程 / 出怪 / 经验 | `src/survival/session.ts` | `src/data/survival/config.ts`、`src/core/world.ts`（`findFreeSpot` / `onKill`）、`src/main.ts`（ticker 与键盘输入） |
 | 改求生 HUD / 升级 / 结算界面 | `src/survival/ui.ts`、`index.html`、`src/style.css` | `src/main.ts`（路由、镜头、快捷键）、`src/survival/storage.ts`（记录展示） |
 | 改移动 / 碰撞判定 | `src/systems/collision.ts`（`isBlockedForBody` / `findFreePoint`） | `src/core/world.ts`（`solidAt` / `findFreeSpot`）、`src/systems/ai.ts`（人类逐轴移动）、`src/core/game.ts`（随机出生落点）、`src/training/session.ts`（点选生成）、`src/data/humans.ts`（`HUMAN_BODY_DIAMETER`） |
@@ -68,11 +68,12 @@
 ## 新增实体「三件套」流程（缺一项视为未完成）
 
 1. **数据注册**：新建定义文件并在注册表登记。数值只写定义文件，不在设置里重复；僵尸必须写 `damage`（每次撕咬对人类的伤害）。训练场按钮、统计行、HUD 会自动跟随注册表。
-2. **精灵与动画帧**：`src/art/sprites.ts` 增加 `SpriteDef`（32 行 × 32 字符，`.` 透明）；僵尸 id 为 `zombie-<kind>`，倒地帧用 `zombie-<kind>-death`；同步 `sprites.html` 预览（1× / 游戏内尺寸 / 8×）。细节以实际 `src/art/sprites.ts` 为准。
-3. **音效与 events**：文件放 `public/audio/`，`src/audio/events.ts` 登记事件、映射、限频；无新素材时优先从现有 CC0 派生，避免新增授权。
-4. **授权台账**：`public/audio/CREDITS.md` 记录来源、许可证、作者与处理方式；派生物注明原文件。
-5. **文档**：按「强制约定」同步 `README.md` 与 `CHANGELOG.md`。
-6. **训练场验收**：单位库出现按钮、可生成、可选中、统计行有数值；再跑 `npx tsc --noEmit`、`npm run build`，实跑 `#/play`、`#/training` 无 console error。
+2. **登记求生池（0.8.2 起的硬性要求）**：新增僵尸必须同步登记到 `src/data/survival/config.ts` 的 `SURVIVAL_ZOMBIE_WEIGHTS`（出怪权重表），需要独立平衡时再加 `SURVIVAL_ZOMBIE_OVERRIDES`；新增武器必须加入 `SURVIVAL_WEAPON_POOL`。漏登记会被 `npm run regression` 的「求生池守卫」场景直接判失败，视为未完成。
+3. **精灵与动画帧**：`src/art/sprites.ts` 增加 `SpriteDef`（32 行 × 32 字符，`.` 透明）；僵尸 id 为 `zombie-<kind>`，倒地帧用 `zombie-<kind>-death`；同步 `sprites.html` 预览（1× / 游戏内尺寸 / 8×）。细节以实际 `src/art/sprites.ts` 为准。
+4. **音效与 events**：文件放 `public/audio/`，`src/audio/events.ts` 登记事件、映射、限频；无新素材时优先从现有 CC0 派生，避免新增授权。
+5. **授权台账**：`public/audio/CREDITS.md` 记录来源、许可证、作者与处理方式；派生物注明原文件。
+6. **文档**：按「强制约定」同步 `README.md` 与 `CHANGELOG.md`。
+7. **训练场验收**：单位库出现按钮、可生成、可选中、统计行有数值；再跑 `npx tsc --noEmit`、`npm run build`，实跑 `#/play`、`#/training` 无 console error。
 
 ## 强制约定
 
@@ -91,7 +92,7 @@ npm install
 npm run dev       # 开发服务器（默认 5173，可 --port 指定）
 npm run build     # tsc --noEmit + vite build，产物 dist/
 npm run preview   # 预览构建产物
-npm run regression # Node + esbuild 回归脚本（13 个场景，失败返回非零退出码）
+npm run regression # Node + esbuild 回归脚本（14 个场景，失败返回非零退出码）
 npx tsc --noEmit  # 单项类型检查
 npm run app:build # 先 build，再按当前平台打包桌面版（macOS 出 .app 后用 hdiutil 封 dmg，产物在 release/）
 npm run app:build:win # 在 Windows 上先 build，再出 NSIS 安装包
@@ -149,7 +150,8 @@ npm run app:build:win # 在 Windows 上先 build，再出 NSIS 安装包
 - 规则（玩家单位）：单个人类，初始武器 `mg`，最多同时持有 2 把（`SURVIVAL.maxWeapons`），血量 / 移速沿用 `HUMAN_DEF`；`Human.manual = true` 让 `ai.ts` 跳过闲逛 / 归岗 / 进攻走位，直接按 `moveX/moveY` 走逐轴碰撞，并用身体半径夹在地图边界（`freeBounds`）。自动索敌与开火仍走 `updateHumans` → `nearestZombie` → `tryFire`，朝向跟随目标。只额外覆盖 `spreadOverride`（收窄散布）与 `damageTakenMul`（降承伤），不复制战斗逻辑。
 - 规则（双武器与额外投射物）：副武器存 `Human.weapon2 / ammo2 / reload2 / fire2 / burst2`，与主武器各自独立计时；`tryFire(world,h,angle,slot)` 与 `updateFlame(world,h,dt,slot)` 的 `slot` 取 0/1，`slotState()` 返回读写闭包。`Human.extraProjectiles`（0..4）在 `tryFire` 内展开：机枪 / 火箭 `1+extra` 条弹道（角度间隔 0.05），霰弹 `pellets+extra` 颗，电击枪 `1+extra` 道弧线且每道独立 `findTeslaFirst`、起始角度抖动 ±0.09 弧度，链式仍受 5 跳上限。暴击由 `critRoll()` 读 `critChance / critMul`，在弹丸、电弧首目标与火焰每 tick 结算。升级池与上限集中在 `src/data/survival/config.ts`（`extraProjectileMax = 4`、`baseCritMul = 1.5`、`basePickupMul = 1`）。
 - 规则（经验与升级）：击杀经 `World.onKill` 掉经验球（`SURVIVAL.xp.dropChance`），玩家 `48 × pickupMul` 内吸附；`addXp` 满 `xpNeedFor(level)` 时 `pendingLevelUps++`，tick 末尾 `beginChoice()` 把状态切到 `choosing` 并暂停世界。`rollChoices()` 随机抽 3 个不重复项，武器满级 / 已持有 2 把时过滤武器项，`maxStacks` 已满时过滤（如额外投射物 4 层）。选择后 `syncPlayerStats()` 重算 `dmgMul = attackMul × 武器倍率 × baseDamageMul`、`cdMul = fireRateMul × 武器冷却倍率`、`speedOverride`、`maxHp`、`critChance / critMul / lifesteal / pickupMul`；「获得新武器」走二段选择 `chooseWeapon()` / `consumeChoice()`。奖励可重复、永久累乘。
-- 规则（出怪与难度）：`spawnOne()` 只从可通行落点里抽（`World.findFreeSpot`），要求离玩家 ≥320px 且屏幕外（`|dx| > viewW/2 + 24 || |dy| > viewH/2 + 24`）；每 30 秒一档，出怪间隔、同屏上限与僵尸血量倍率（每档 +8%，封顶 2.5 倍）按 `SURVIVAL.spawn` / `difficulty` 推导；僵尸种类权重由玩家等级驱动（`difficulty`）。忽略地图的人类区 / 僵尸区语义。
+- 规则（出怪与难度）：`spawnOne()` 只从可通行落点里抽（`World.findFreeSpot`），要求离玩家 ≥320px 且屏幕外（`|dx| > viewW/2 + 24 || |dy| > viewH/2 + 24`）；每 30 秒一档，出怪间隔、同屏上限与僵尸血量倍率（每档 +8%，封顶 2.5 倍）按 `SURVIVAL.spawn` / `difficulty` 推导；僵尸种类权重由 `SURVIVAL_ZOMBIE_WEIGHTS` 按玩家等级驱动（权重 = `base + perLevel × (等级 - startLevel)`，未到 `startLevel` 不出现）。飞扑者 2 级起（权重略低于同级狂奔），腐蚀者 4 级起（权重最低）。忽略地图的人类区 / 僵尸区语义。
+- 规则（求生池与模式覆盖表）：求生与其他模式的平衡互相独立。僵尸出怪权重表 `SURVIVAL_ZOMBIE_WEIGHTS`、武器池 `SURVIVAL_WEAPON_POOL`、按模式数值覆盖表 `SURVIVAL_ZOMBIE_OVERRIDES` 都在 `src/data/survival/config.ts`；**不改基础僵尸 / 武器定义文件**。`SurvivalSession.start()` 调 `setZombieModeOverrides(SURVIVAL_ZOMBIE_OVERRIDES)` 启用，`stop()` 传 `null` 回退基础定义（`effectiveZombie()` 的优先级：玩家覆盖值 > 模式覆盖表 > 基础定义，`leap` / `spit` 只合并定义里已存在的字段）。求生当前取值：飞扑者压制 1.5s / 4 DPS，腐蚀者毒液 4 DPS；其余缺失字段回退基础值。新增模式只需再提供一份 `ZombieModeOverrideTable`。
 - 规则（空地地图与校验）：`open-field` 是 74×45 全空地，`openings: []`。`validateMapJson()` 仅在「整张画布无墙且无任何门窗」时豁免「至少 1 扇门 / 至少 1 格墙体」，其余地图规则不变；`openingTuning()` 对空 openings 返回 `doorHp = 0`、`winHp = 0`、`winPassSpeed = 1` 兜底。
 - 规则（渲染与记录）：经验球通过 `RenderExtra.orbs` 传入 `Renderer.render()`，由新增的 `pickupLayer` 画呼吸光晕；`Renderer.setCamera()` 变换舞台并在渲染时按地图边界夹取。最佳记录 key 为 `zombieGame.survival.v1`，只存 `bestTime` / `bestLevel`。
 - 规则（快捷键与焦点）：survival 路由 `WASD` / 方向键写 `heldKeys`，`Space` 暂停 / 继续（同时识别 `code === "Space"` 与 `key === " "`），`R` 重开，`choosing` 时 `1–3` 选卡；点击「开始求生」与升级卡后 `document.activeElement.blur()`，并在 survival 路由对 `Space` keyup `preventDefault()`，避免残留焦点按钮被空格再次激活。
@@ -161,8 +163,8 @@ npm run app:build:win # 在 Windows 上先 build，再出 NSIS 安装包
 - 地形只在地图瓦片层生效：草丛 / 水池需在地图 JSON 或工坊 / 训练场画出，正式对局不能运行时新增；草丛燃烧 / 休眠 / 重生计时全局统一（1.5 / 10 / 1 秒），没有逐格差异。水池按设计不挡子弹与视线，只阻挡单位与寻路。
 - 飞扑者只按「看得见」判断蓄力与扑击，不做区域路径规划：目标隔完整门窗时仍可能起跳，撞墙即扑空并硬直 1 秒；扑击途中不绕路。同一人类同时只能被 1 只压制，第二名飞扑者扑到已压制目标按扑空处理。飞扑者不撕咬人类，但仍会啃门窗。
 - 压制伤害与毒液伤害不计入训练场「人类被咬次数 / 掉血」统计（该口径只统计丧尸撕咬与人类武器输出）；观察时以头顶血条与实际掉血为准。
-- 飞扑者 / 腐蚀者没有专属设置滑块：蓄力时长、扑击倍率、压制时长与 DPS、毒液半径 / 持续 / DPS / 减速都在 `src/data/zombies/leaper.ts` / `corroder.ts`，训练场只能逐单位调血量 / 移速 / 咬人间隔 / 攻击力。腐蚀者 `damage=15` 只用于它自己的撕咬。
-- 毒液按连续伤害结算（每帧 `dps × dt`），没有逐秒跳字；不伤害丧尸、不影响僵尸寻路与索敌；不能在对局运行时手动添加（只能由腐蚀者吐毒 / 死亡或调试代码产生）。求生出怪池暂未接入飞扑者 / 腐蚀者，仍只有普通 / 狂奔 / 胖子。
+- 飞扑者 / 腐蚀者没有专属设置滑块：基础模式的蓄力时长、扑击倍率、压制时长与 DPS、毒液半径 / 持续 / DPS / 减速都在 `src/data/zombies/leaper.ts` / `corroder.ts`，求生模式的差异值在 `src/data/survival/config.ts` 的 `SURVIVAL_ZOMBIE_OVERRIDES`；训练场只能逐单位调血量 / 移速 / 咬人间隔 / 攻击力。腐蚀者 `damage=15` 只用于它自己的撕咬。
+- 毒液按连续伤害结算（每帧 `dps × dt`），没有逐秒跳字；不伤害丧尸、不影响僵尸寻路与索敌；不能在对局运行时手动添加（只能由腐蚀者吐毒 / 死亡或调试代码产生）。求生出怪池已接入飞扑者（2 级起）与腐蚀者（4 级起），求生的压制 / 毒液数值走 `SURVIVAL_ZOMBIE_OVERRIDES`。
 - 地图若没有人类区，出生点取地图中心，仍走 `findFreeSpot`。
 - 局内布局在窗口宽度 ≤ 900px 时库存面板改为底部横排；880×720 这类更小的窗口需要纵向滚动才能看到完整面板。
 - 工坊「未保存改动」以 `dirty` 标记为准（自上次载入 / 显式保存后是否有编辑），自动写入 localStorage 的草稿不算“已保存”；切图确认后草稿会被新图覆盖。
@@ -183,7 +185,7 @@ npm run app:build:win # 在 Windows 上先 build，再出 NSIS 安装包
 - 工坊「保存到项目 / 删除地图」只在 `npm run dev` 可用：`npm run preview` / `dist` 没有接口和按钮；默认只接受 loopback，`npm run dev --host` 暴露给局域网后保存 / 删除会 403，除非显式设 `VITE_WORKSHOP_ALLOW_REMOTE=1`（此时任何能访问 dev server 的人都能写 / 删 `public/maps` 与 `public/levels`，仅限可信网络）。
 - 工坊保存只写 `public/maps/<id>.json` 与 manifest，**不创建关卡**；关卡编辑器保存只写 `public/levels/<id>.json` 与 manifest，**不创建新的模式入口**。新地图要进正式对局需给关卡 JSON 写 `mapId`。
 - 备份只在本机 `public/maps/.bak/` 与 `public/levels/.bak/`，每个 id 留最近 5 份且被 git 忽略；`vite.config.ts` 的 build-only 插件会在构建后删除 `dist` 内的 `.bak`。保存 / 删除都不 reload 当前训练会话，覆盖或删除当前训练图时要切走再切回（删除当前训练图会自动切回 `arena` 并重建 World）。
-- `npm run regression` 覆盖 13 个逻辑场景（开口通行 / 碰撞 / breach / 求生经验与目标 / JSON 校验 / 地形 / 双武器 / 额外投射物 / 飞扑蓄力与压制 / 腐蚀毒液 / 腐蚀者吐毒与死亡留毒），但不覆盖渲染、输入与 DOM；`npm run build` 只保证类型与打包，行为正确性仍需浏览器实跑。
+- `npm run regression` 覆盖 14 个逻辑场景（开口通行 / 碰撞 / breach / 求生经验与目标 / JSON 校验 / 地形 / 双武器 / 额外投射物 / 飞扑蓄力与压制 / 腐蚀毒液 / 腐蚀者吐毒与死亡留毒 / 求生池守卫），但不覆盖渲染、输入与 DOM；`npm run build` 只保证类型与打包，行为正确性仍需浏览器实跑。
 - 美术只有朝上的单套帧，运行时按朝向旋转，任意角度会有轻微锯齿；特效/场景装饰仍由 Pixi 代码绘制。
 - 碰撞只按躯干圆处理：人类武器枪管、丧尸头饰等装饰不参与碰撞，贴墙时可能少量越入墙面；这是美术层表现，不影响移动与通行。
 - 桌面版（Electron）产物未签名、未公证，macOS 首次启动需 Control + 打开或到「隐私与安全性 → 仍要打开」，Windows 需 SmartScreen「仍要运行」；正式分发前必须签名 + 公证。

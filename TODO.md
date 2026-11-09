@@ -7,6 +7,7 @@
 新增**僵尸 / 武器 / 地图 / 关卡**时必须同时交付以下内容，缺一不算完成：
 
 - 代码：实体定义 + 注册表登记（僵尸 `src/data/zombies/`、武器 `src/data/weapons/`、地图 `public/maps/` + manifest、关卡 `public/levels/` + manifest）。
+- 求生池：新增僵尸登记 `src/data/survival/config.ts` 的 `SURVIVAL_ZOMBIE_WEIGHTS`（按需加 `SURVIVAL_ZOMBIE_OVERRIDES`），新增武器登记 `SURVIVAL_WEAPON_POOL`；漏登记会被回归的求生池守卫判失败。
 - 精灵：`src/art/` 里的 32×32 像素精灵与全部动画帧，并在 `sprites.html` 核对 anchor / muzzle / footprintRadius。
 - 音效：`public/audio/` 文件 + `src/audio/events.ts` 三处登记 + `public/audio/CREDITS.md` 授权台账。
 - 文档：同步更新 `README.md`、`CHANGELOG.md`、`AGENTS.md`。

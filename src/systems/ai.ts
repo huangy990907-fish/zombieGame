@@ -19,7 +19,7 @@ import { effectiveWeapon, effectiveZombie, openingTuning, settings } from "../da
 import { TERRAIN } from "../data/terrain";
 import type { ZombieLeapConfig, ZombiePursuitMode, ZombieScreamConfig, ZombieSpawnerConfig } from "../data/types";
 import { openingNetWidth } from "./flowField";
-import { tryFire, updateFlame } from "./combat";
+import { beginReload, tryFire, updateFlame } from "./combat";
 import type { RegionMap } from "./regions";
 import { angDiff, clamp, dist2, pointRectDist, randRange, turnToward } from "../utils/math";
 import type { Human, Opening, World, Zombie } from "../core/world";
@@ -407,7 +407,7 @@ export function updateHumans(world: World, dt: number): void {
     h.x = nx;
     h.y = ny;
 
-    if (h.ammo <= 0 && h.reloadTimer <= 0) h.reloadTimer = def.reload;
+    if (h.ammo <= 0 && h.reloadTimer <= 0) beginReload(h, 0, def);
   }
 }
 

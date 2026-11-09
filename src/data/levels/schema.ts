@@ -215,4 +215,5 @@ export const LEVEL_WEAPON_ORDER: string[] = [
   WEAPON_IDS.shotgun,
   WEAPON_IDS.rocket,
   WEAPON_IDS.tesla,
+  WEAPON_IDS.sniper,
 ];

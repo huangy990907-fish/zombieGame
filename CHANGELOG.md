@@ -10,7 +10,7 @@
 
 ## [0.8.2] - 2026-11-09
 
-新增两种僵尸「飞扑者」与「腐蚀者」，把腐蚀毒液做成统一的世界状态，并为尸潮求生建立独立的僵尸池与数值覆盖表。
+新增两种僵尸「飞扑者」与「腐蚀者」，把腐蚀毒液做成统一的世界状态，并为尸潮求生建立独立的僵尸池与数值覆盖表；同版本追加两种僵尸与一把狙击枪。
 
 ### 新增
 
@@ -31,6 +31,11 @@
 - 渲染链路按 `SpriteDef.grid` 推导缩放与锚点（`pixel.ts` 的 `spriteScale(diameter, def)` / `spriteAnchor(def)`），32×32 与母体的 64×64 网格共用同一套换算，不再假设固定 32。
 - 音效事件登记：`zombie-growl-matriarch`、`zombie-spawn`、`zombie-matriarch-death`、`zombie-scream`（文件缺失时静默降级）。
 - 回归脚本新增 3 个场景（共 17 个）：母体产卵节奏 / 子体上限 / 不撕咬人类、母体死亡产卵与 70% 经验折算、尖叫强化数值与不强化 BOSS / 自己；求生池守卫同步支持 BOSS 池。
+- 狙击枪（`sniper`）：射程 550（机枪 ×2，全武器最远）、单发 42（机枪 ×7）、冷却 1.6s、弹匣 5 发、换弹 2.2s；无散布、不惩罚移速。射程 / 伤害 / 弹速全部相对机枪推导，没有独立的魔法常量。
+- 狙击枪使用现有弹丸系统的实体高速子弹（弹速 1560）+ 28px 曳光拖尾，不做瞬时 hitscan；命中后继续飞行，第二个目标吃 60% 伤害，同一条弹道最多命中 2 个目标。命中处生成 4 团暗红血雾（`EffectKind = "blood"`）。
+- 狙击枪命中减速比通用口径更强：在 `applyHitSlow` 结果上再乘 `hitSlowMul = 0.75`，普通体型最低 30%（通用 40%）、大体型 52.5%（通用 70%）。
+- 音效：登记 `weapon-sniper`；把长期未接线的 `weapon-reload` 接入 `beginReload()`（弹匣打空 / 待机空仓 / 电击枪打空），并受 `SFX_THROTTLE.RELOAD` 全局限频。喷火枪打空属于散热，不播换弹音效。
+- 回归脚本新增 1 个场景（共 18 个）：狙击枪穿透命中 2 个目标、第二目标 60%、同一条弹道不命中第 3 个，并校验曳光、减速与血雾。
 
 ### 变更
 
@@ -38,6 +43,8 @@
 - 训练场按注册表自动出现两种新僵尸的生成按钮与统计行；不新增设置滑块，数值先按定义文件，可在训练场逐单位调参。
 - 精灵与专属音效按约定 id（`zombie-leaper` / `zombie-leaper-death`、`zombie-corroder` / `zombie-corroder-death`、`zombie-matriarch` / `zombie-matriarch-death`、`zombie-screamer` / `zombie-screamer-death`）由美术 / 音频会话接入；缺图时沿用现有僵尸兜底，缺音时静默降级。
 - 求生普通权重表与 BOSS 池分离：`SURVIVAL_ZOMBIE_WEIGHTS` 只含非 BOSS 僵尸，母体单独走 `SURVIVAL_BOSS_POOL`；新增僵尸时仍须登记到其一（求生池守卫回归会拦截漏登记）。
+- 狙击枪登记进 `WEAPON_IDS` / `WEAPON_LIST`、`LEVEL_WEAPON_ORDER` 与 `SURVIVAL_WEAPON_POOL`；训练场按钮 / 统计行与库存卡片按注册表自动出现，库存数字键扩展到 `1–6`。
+- 精灵 `human-sniper` 与音效 `weapon-sniper.mp3` 按约定 id 由美术 / 音频会话接入；缺图 / 缺音沿用现有兜底。
 
 ## [0.8.1] - 2026-11-07
 

@@ -88,6 +88,14 @@ export interface ZombieSpitConfig {
 /** 武器攻击形态：直线子弹 / 霰弹多弹丸 / 喷火锥形 / 火箭爆炸 / 电击链 */
 export type WeaponKind = "bullet" | "pellet" | "flame" | "rocket" | "tesla";
 
+/** 穿透弹道的参数：命中后继续飞行，最多命中 maxTargets 个目标，之后逐个目标乘 falloff */
+export interface PierceConfig {
+  /** 单条弹道最多命中的目标数（含第一个目标） */
+  maxTargets: number;
+  /** 后续目标相对上一个目标的伤害倍率（0.6 = 第二个目标只吃 60%） */
+  falloff: number;
+}
+
 /** 电击枪的链式参数（全部集中在这里，训练场/后续调参只改这份配置） */
 export interface TeslaConfig {
   /** 链式跳跃搜索半径（像素） */
@@ -134,6 +142,15 @@ export interface WeaponDef {
   blastDamage: number;
   /** 电击链参数，仅电击枪用 */
   tesla?: TeslaConfig;
+  /** 穿透参数，仅狙击枪用；缺省表示命中即消失 */
+  pierce?: PierceConfig;
+  /** 曳光拖尾长度（像素），0 / 缺省表示不画拖尾 */
+  tracer?: number;
+  /**
+   * 命中减速加深倍率（叠在 applyHitSlow 的通用口径上，<1 更强）。
+   * 缺省 1 = 与其它武器一致；狙击枪用 0.75 把最低移速从 40% 压到 30%。
+   */
+  hitSlowMul?: number;
 }
 
 /** 武器定义里允许被玩家覆盖的数值字段 */

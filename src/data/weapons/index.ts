@@ -3,6 +3,7 @@ import { flame } from "./flame";
 import { mg } from "./mg";
 import { rocket } from "./rocket";
 import { shotgun } from "./shotgun";
+import { sniper } from "./sniper";
 import { tesla } from "./tesla";
 
 /**
@@ -15,6 +16,7 @@ export const WEAPONS: Record<string, WeaponDef> = {
   shotgun,
   rocket,
   tesla,
+  sniper,
 };
 
 /** 有序列表（插入顺序）—— 仅用于默认展示与配比，身份始终用 id */
@@ -27,6 +29,7 @@ export const WEAPON_IDS = {
   shotgun: shotgun.id,
   rocket: rocket.id,
   tesla: tesla.id,
+  sniper: sniper.id,
 } as const;
 
 /** 按 id 取定义；未知 id 回落到机枪，保证旧存档 / 脏数据不崩溃 */

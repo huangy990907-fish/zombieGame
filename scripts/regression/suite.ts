@@ -10,7 +10,7 @@ import type { MapDef, OpeningDef, Rect, SpawnRegion } from "../../src/data/types
 import { HUMAN_DEF } from "../../src/data/humans";
 import { TERRAIN } from "../../src/data/terrain";
 import { WEAPON_IDS, WEAPON_LIST } from "../../src/data/weapons";
-import { ZOMBIE_IDS } from "../../src/data/zombies";
+import { ZOMBIE_IDS, ZOMBIE_SLOW } from "../../src/data/zombies";
 import { effectiveWeapon, effectiveZombie, setZombieModeOverrides } from "../../src/data/settings/runtime";
 import {
   SURVIVAL_BOSS_POOL,
@@ -25,7 +25,7 @@ import { validateLevelJson } from "../../src/data/levels/schema";
 import { registerRuntimeMap } from "../../src/data/maps";
 import { World, type Zombie } from "../../src/core/world";
 import { updateHumans, updateZombies } from "../../src/systems/ai";
-import { damageZombie, tryFire } from "../../src/systems/combat";
+import { damageZombie, tryFire, updateCombat } from "../../src/systems/combat";
 import { openingNetWidth } from "../../src/systems/flowField";
 import { isBlockedForBody } from "../../src/systems/collision";
 import { SurvivalSession } from "../../src/survival/session";
@@ -457,6 +457,55 @@ scenario("额外投射物层数：机枪 / 霰弹 / 火箭 / 电击枪按层数�
   tryFire(singleWorld, singleHuman, 0, 0);
   const singleArcs = singleWorld.effects.filter((e) => e.kind === "arc").length;
   assert(singleArcs === 1, `无额外层数时电击枪应只有 1 道电弧，实际 ${singleArcs}`);
+});
+
+scenario("狙击枪：穿透 2 个目标，第二目标吃 60%，单条弹道不命中第 3 个", () => {
+  const mg = effectiveWeapon(WEAPON_IDS.mg);
+  const def = effectiveWeapon(WEAPON_IDS.sniper);
+  assert(def.range === mg.range * 2, `狙击枪射程应为机枪 2 倍，实际 ${def.range}`);
+  assert(def.damage === mg.damage * 7, `狙击枪伤害应为机枪 7 倍，实际 ${def.damage}`);
+  assert(
+    def.pierce?.maxTargets === 2 && def.pierce.falloff === 0.6,
+    "狙击枪穿透应为最多 2 个目标、后续目标 60%",
+  );
+
+  const world = new World(mapDef({ id: "t-sniper-pierce" }));
+  const h = world.spawnHuman(120, 300, WEAPON_IDS.sniper);
+  h.facing = 0;
+  h.ammo = def.magazine;
+  h.fire = 0;
+  h.reloadTimer = 0;
+  // 三个目标排成一条直线，全部落在弹道上
+  const zs = [200, 260, 320].map((x) => {
+    const z = world.spawnZombie(x, 300, ZOMBIE_IDS.normal);
+    z.hp = z.maxHp = 1000;
+    return z;
+  });
+  world.rebuildGrids();
+
+  tryFire(world, h, 0, 0);
+  assert(world.bullets.length === 1, `狙击枪一次射击应只有 1 颗子弹，实际 ${world.bullets.length}`);
+  const bullet = world.bullets[0];
+  assert((bullet.tracer ?? 0) > 0, "狙击枪弹丸应带曳光拖尾");
+  assert((bullet.pierceLeft ?? 0) === 1, "狙击枪弹丸应剩余 1 次穿透机会");
+
+  for (let i = 0; i < 60 && world.bullets.some((b) => b.alive); i++) updateCombat(world, 1 / 60);
+
+  const dmg1 = 1000 - zs[0].hp;
+  const dmg2 = 1000 - zs[1].hp;
+  assert(Math.abs(dmg1 - def.damage) < 1e-6, `首个目标应吃满 ${def.damage} 点，实际 ${dmg1}`);
+  assert(
+    Math.abs(dmg2 - def.damage * 0.6) < 1e-6,
+    `第二个目标应吃 60% 即 ${def.damage * 0.6} 点，实际 ${dmg2}`,
+  );
+  assert(zs[2].hp === 1000, "同一条弹道最多命中 2 个目标，第三个不应受伤");
+  assert(!world.bullets.some((b) => b.alive), "命中 2 个目标后弹丸应消失");
+  // 命中减速比通用口径更深：普通体型 floor 40% × 0.75 = 30%
+  assert(
+    Math.abs(zs[0].slowMul - ZOMBIE_SLOW.floorMul * 0.75) < 1e-6,
+    `狙击枪减速最低应到 30%，实际 ${zs[0].slowMul}`,
+  );
+  assert(world.effects.some((e) => e.kind === "blood"), "狙击枪命中应产生血雾特效");
 });
 
 scenario("飞扑者：蓄力受击只延长不打断，扑中压制 3 秒后自动挣脱", () => {

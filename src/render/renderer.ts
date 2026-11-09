@@ -127,6 +127,8 @@ export class Renderer {
   private fxLayer = new Container();
   /** 电击枪闪电：独立 Graphics 层，画折线，不走圆点精灵池 */
   private arcLayer = new Graphics();
+  /** 高速弹道曳光：独立 Graphics 层，每帧按弹丸位置重画短线 */
+  private tracerLayer = new Graphics();
   private selectionLayer = new Graphics();
   private textLayer = new Container();
   private dot!: Texture;
@@ -210,6 +212,7 @@ export class Renderer {
       this.pickupLayer,
       this.deathLayer,
       this.unitLayer,
+      this.tracerLayer,
       this.fxLayer,
       this.arcLayer,
       this.openingLayer,
@@ -554,6 +557,26 @@ export class Renderer {
   }
 
   /**
+   * 高速弹道的曳光：沿速度反方向拉出一小段亮线（只对 WeaponDef.tracer > 0 的弹丸生效）。
+   * 独立 Graphics 层每帧重画；狙击枪弹丸数量少，开销可忽略。
+   */
+  private renderTracers(w: World): void {
+    const g = this.tracerLayer;
+    g.clear();
+    for (let i = 0; i < w.bullets.length; i++) {
+      const b = w.bullets[i];
+      const len = b.tracer ?? 0;
+      if (!b.alive || len <= 0) continue;
+      const v = Math.hypot(b.vx, b.vy) || 1;
+      const tx = b.x - (b.vx / v) * len;
+      const ty = b.y - (b.vy / v) * len;
+      // 外层暖白辉光 + 内核亮线，快速飞过时形成一条清晰的弹道
+      g.moveTo(tx, ty).lineTo(b.x, b.y).stroke({ width: 3, color: 0xffd27a, alpha: 0.28 });
+      g.moveTo(tx, ty).lineTo(b.x, b.y).stroke({ width: 1.2, color: 0xfff8e0, alpha: 0.8 });
+    }
+  }
+
+  /**
    * 门窗层：每帧重画（数量少，开销可忽略）。
    * 透明度随血量下降 —— 门被打得越烂颜色越暗，窗裂纹越多越透；
    * 破损后只描边框，窗还多画一条房间内侧的窗檐（就是绊丧尸的那道坎）。
@@ -817,8 +840,11 @@ export class Renderer {
       s.position.set(b.x, b.y);
       s.tint = b.kind === "rocket" ? 0xffb066 : 0xfff3c4;
       s.alpha = 1;
-      s.scale.set((b.kind === "rocket" ? 3.4 : 1.9) / CORE_R);
+      // 狙击枪弹丸略大一点，配合曳光更容易看清
+      const core = b.kind === "rocket" ? 3.4 : (b.tracer ?? 0) > 0 ? 2.4 : 1.9;
+      s.scale.set(core / CORE_R);
     }
+    this.renderTracers(w);
 
     const effects = w.effects;
     // 电弧与命中光环单独画在 arcLayer；圆点精灵池只分给 ember / blast
@@ -846,6 +872,11 @@ export class Renderer {
         s.blendMode = "add";
         s.alpha = (1 - p) * 0.85;
         s.scale.set((e.radius / CORE_R) * (0.55 + p * 0.9));
+      } else if (e.kind === "blood") {
+        // 血雾：普通混合的暗红雾团，边扩散边淡出（狙击枪命中反馈）
+        s.blendMode = "normal";
+        s.alpha = (1 - p) * 0.6;
+        s.scale.set((e.radius * (0.7 + p * 0.8)) / CORE_R);
       } else {
         // 爆炸 / 火花：从中心向外扩散后消失
         s.blendMode = "normal";

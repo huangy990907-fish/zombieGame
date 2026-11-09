@@ -15,6 +15,7 @@ const WEAPON_ICONS: Record<string, string> = {
   shotgun: "💥",
   rocket: "🚀",
   tesla: "⚡",
+  sniper: "🎯",
 };
 
 function el(id: string): HTMLElement {

@@ -257,6 +257,14 @@ export interface Bullet {
   weapon?: string;
   ownerId?: number;
   dmgMul?: number;
+  /** 剩余可穿透目标数（0 = 命中即消失）；狙击枪由武器定义写入 */
+  pierceLeft?: number;
+  /** 穿透后每个目标相对上一个的伤害倍率 */
+  pierceFalloff?: number;
+  /** 该弹道已命中过的僵尸 id，避免同一目标被重复结算 */
+  hitIds?: number[];
+  /** 曳光拖尾长度（像素），0 / 缺省表示不画 */
+  tracer?: number;
 }
 
 /**
@@ -282,7 +290,7 @@ export interface Post {
   oy: number;
 }
 
-export type EffectKind = "blast" | "ember" | "arc" | "ring";
+export type EffectKind = "blast" | "ember" | "arc" | "ring" | "blood";
 
 /** 纯视觉特效，不参与逻辑 */
 export interface Effect {

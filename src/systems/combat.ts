@@ -18,6 +18,8 @@ import { humanMuzzle } from "../render/pixel";
 import { rollMatriarchChildKind } from "../data/survival/config";
 
 const queryBuf: Zombie[] = [];
+/** 子弹命中候选（复用数组，避免每颗子弹每帧新建）；按距离排序后依次结算 */
+const hits: Array<{ z: Zombie; d2: number }> = [];
 
 /** 暴击掷骰：返回最终伤害（未设置暴击率时原样返回，不影响其它模式） */
 function critRoll(h: Human, damage: number): number {
@@ -80,6 +82,15 @@ function slotState(h: Human, slot: 0 | 1): WeaponSlotState {
 }
 
 /**
+ * 开始换弹：写入换弹计时并播放换弹音效。
+ * 所有「打空弹匣 / 主动换弹」的调用点都走这里，音效受 SFX_THROTTLE.RELOAD 全局限频。
+ */
+export function beginReload(h: Human, slot: 0 | 1, def: WeaponDef): void {
+  slotState(h, slot).setReload(def.reload);
+  sound.play(SFX.RELOAD);
+}
+
+/**
  * 尝试开火。冷却中 / 换弹中 / 没弹药则直接返回。
  * 弹药打空自动进入换弹。
  *
@@ -114,7 +125,7 @@ export function tryFire(world: World, h: Human, angle: number, slot: 0 | 1 = 0):
     st.setAmmo(st.ammo() - 1);
     sound.play(SFX.TESLA);
     fireTesla(world, h, angle, def, dmgMul, weaponId, extra);
-    if (st.ammo() <= 0) st.setReload(def.reload);
+    if (st.ammo() <= 0) beginReload(h, slot, def);
     return;
   }
 
@@ -124,8 +135,9 @@ export function tryFire(world: World, h: Human, angle: number, slot: 0 | 1 = 0):
   st.setAmmo(st.ammo() - 1);
 
   // —— 武器音效触发（每种武器独立限频，密集开火自然形成火力密度）——
-  if (def.kind === "bullet") sound.play(SFX.MG_SHOT);
-  else if (def.kind === "pellet") sound.play(SFX.SHOTGUN);
+  if (def.kind === "bullet") {
+    sound.play(weaponId === WEAPON_IDS.sniper ? SFX.SNIPER : SFX.MG_SHOT);
+  } else if (def.kind === "pellet") sound.play(SFX.SHOTGUN);
   else if (def.kind === "rocket") sound.play(SFX.ROCKET);
 
   if (def.kind === "pellet") {
@@ -146,9 +158,15 @@ export function tryFire(world: World, h: Human, angle: number, slot: 0 | 1 = 0):
       );
     }
   } else {
-    // 机枪 / 火箭：额外投射物每层多一条独立弹道，按小角度均匀散开避免完全重叠
+    // 机枪 / 狙击 / 火箭：额外投射物每层多一条独立弹道，按小角度均匀散开避免完全重叠
     const count = 1 + extra;
     const kind: BulletKind = def.kind === "rocket" ? "rocket" : "bullet";
+    // 穿透与曳光都由武器定义驱动，狙击枪之外的行为完全不变
+    const opts = {
+      pierceLeft: def.pierce ? def.pierce.maxTargets - 1 : 0,
+      pierceFalloff: def.pierce?.falloff ?? 1,
+      tracer: def.tracer ?? 0,
+    };
     for (let i = 0; i < count; i++) {
       const offset = count > 1 ? (i - (count - 1) / 2) * 0.05 : 0;
       const a = angle + offset + (Math.random() - 0.5) * spread * 2;
@@ -162,11 +180,12 @@ export function tryFire(world: World, h: Human, angle: number, slot: 0 | 1 = 0):
         def.blast,
         def.range / def.speed,
         weaponId,
+        opts,
       );
     }
   }
 
-  if (st.ammo() <= 0) st.setReload(def.reload);
+  if (st.ammo() <= 0) beginReload(h, slot, def);
 }
 
 /** 电击枪视线：墙体和未破的门/窗都会挡住链式跳跃（破口后放行） */
@@ -501,6 +520,16 @@ function flameTick(world: World, h: Human, def: WeaponDef, weaponId: string): vo
   }
 }
 
+/** 弹药 / 曳光等可选参数（缺省值 = 普通子弹的行为） */
+interface BulletOptions {
+  /** 剩余可穿透的目标数（0 = 命中即消失） */
+  pierceLeft?: number;
+  /** 穿透后每个目标相对上一个的伤害倍率 */
+  pierceFalloff?: number;
+  /** 曳光拖尾长度（像素），0 = 不画 */
+  tracer?: number;
+}
+
 function spawnBullet(
   world: World,
   h: Human,
@@ -511,6 +540,7 @@ function spawnBullet(
   blast: number,
   life: number,
   weaponId: string = h.weapon,
+  opts?: BulletOptions,
 ): void {
   const muzzle = humanMuzzle(weaponId, h.x, h.y, angle);
   const x = muzzle.x;
@@ -531,6 +561,9 @@ function spawnBullet(
     weapon: weaponId,
     ownerId: h.id,
     dmgMul: h.dmgMul ?? 1,
+    pierceLeft: opts?.pierceLeft ?? 0,
+    pierceFalloff: opts?.pierceFalloff ?? 1,
+    tracer: opts?.tracer ?? 0,
   });
 }
 
@@ -555,7 +588,9 @@ function applyHitSlow(world: World, z: Zombie, damage: number, source?: DamageSo
   const heavy = z.bodyDiameter >= ZOMBIE_SLOW.heavyDiameter;
   const scale = heavy ? ZOMBIE_SLOW.heavyScale : 1;
   const floor = heavy ? ZOMBIE_SLOW.heavyFloorMul : ZOMBIE_SLOW.floorMul;
-  const target = Math.max(floor, 1 - damage * ZOMBIE_SLOW.perDamage * scale);
+  // 部分武器（狙击枪）在通用口径上再加深一档：floor 与按伤害算出的倍率一起乘
+  const deep = source?.weapon ? effectiveWeapon(source.weapon).hitSlowMul ?? 1 : 1;
+  const target = Math.max(floor, 1 - damage * ZOMBIE_SLOW.perDamage * scale) * deep;
   if (z.slowTimer <= 0 || target < z.slowMul) z.slowMul = target;
   z.slowTimer = ZOMBIE_SLOW.duration;
   z.flash = 0.08; // 短促亮起，渲染层用加法混合做受击提亮
@@ -632,7 +667,31 @@ function explode(
   }
 }
 
-/** 子弹推进与命中结算 */
+/** 狙击枪命中处的血雾：几团暗红小雾向外扩散再淡出（纯视觉，不参与伤害） */
+function addBloodMist(world: World, x: number, y: number): void {
+  for (let i = 0; i < 4; i++) {
+    const a = Math.random() * Math.PI * 2;
+    const speed = 22 + Math.random() * 38;
+    world.effects.push({
+      kind: "blood",
+      x: x + Math.cos(a) * 3,
+      y: y + Math.sin(a) * 3,
+      angle: a,
+      radius: 5 + Math.random() * 4,
+      color: i % 2 === 0 ? 0xb91c1c : 0x7f1d1d,
+      vx: Math.cos(a) * speed,
+      vy: Math.sin(a) * speed,
+      age: 0,
+      life: 0.22 + Math.random() * 0.14,
+    });
+  }
+}
+
+/**
+ * 子弹推进与命中结算。
+ * 穿透弹（狙击枪）：命中后不消失，记下已命中的目标并继续飞，
+ * 按 pierceLeft 限制最多命中的目标数（2 个），后续目标伤害乘 pierceFalloff（0.6）。
+ */
 export function updateCombat(world: World, dt: number): void {
   for (let i = 0; i < world.bullets.length; i++) {
     const b = world.bullets[i];
@@ -668,25 +727,41 @@ export function updateCombat(world: World, dt: number): void {
     // 查询边距 = 线段半长 + 最大僵尸半径 + 擦边容差，胖子的大判定圈不会被漏查
     world.zombieGrid.query(midX, midY, segLen * 0.5 + MAX_ZOMBIE_RADIUS + 3, queryBuf);
 
-    let hit: Zombie | null = null;
+    /*
+     * 同一帧的线段可能同时压到多个目标：按到线段起点的距离排序，
+     * 普通子弹只吃最近的一个；穿透弹按顺序逐个结算，已命中过的目标跳过，
+     * 避免子弹停留在某个目标体内时下一帧被重复结算。
+     */
+    hits.length = 0;
     for (let k = 0; k < queryBuf.length; k++) {
       const z = queryBuf[k];
       if (!z.alive) continue;
+      if (b.hitIds && b.hitIds.includes(z.id)) continue;
       const r = z.radius + 3;
       const d2 = pointSegDistSq(z.x, z.y, b.px, b.py, b.x, b.y);
-      if (d2 <= r * r) {
-        hit = z;
+      if (d2 <= r * r) hits.push({ z, d2 });
+    }
+    if (hits.length > 1) hits.sort((a, c) => a.d2 - c.d2);
+
+    for (let k = 0; k < hits.length; k++) {
+      const z = hits[k].z;
+      if (b.kind === "rocket") {
+        explode(world, z.x, z.y, b.blast, bulletSource(b), b.dmgMul ?? 1);
+        b.alive = false;
         break;
       }
-    }
-
-    if (hit) {
-      if (b.kind === "rocket") {
-        explode(world, hit.x, hit.y, b.blast, bulletSource(b), b.dmgMul ?? 1);
-      } else {
-        damageZombie(world, hit, b.damage, bulletSource(b));
+      const source = bulletSource(b);
+      damageZombie(world, z, b.damage, source);
+      if (source?.weapon === WEAPON_IDS.sniper) addBloodMist(world, z.x, z.y);
+      if ((b.pierceLeft ?? 0) > 0) {
+        // 穿透：记下目标、扣一次穿透次数、伤害衰减后继续飞
+        (b.hitIds ??= []).push(z.id);
+        b.pierceLeft = (b.pierceLeft ?? 0) - 1;
+        b.damage *= b.pierceFalloff ?? 1;
+        continue;
       }
       b.alive = false;
+      break;
     }
   }
 }

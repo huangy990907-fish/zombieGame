@@ -1136,7 +1136,7 @@ async function boot(): Promise<void> {
       if (e.code === "Space") {
         e.preventDefault();
         pauseBtn.click();
-      } else if (/^[1-5]$/.test(e.key)) {
+      } else if (/^[1-9]$/.test(e.key)) {
         // 数字键选择人类种类（与库存卡片右上角一致）
         const index = Number(e.key) - 1;
         const slot = game.inventory[index];

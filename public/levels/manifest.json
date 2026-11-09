@@ -5,6 +5,11 @@
       "id": "level-1",
       "file": "level-1.json",
       "readOnly": true
+    },
+    {
+      "id": "level-2",
+      "file": "level-2.json",
+      "readOnly": true
     }
   ]
 }

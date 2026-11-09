@@ -7,6 +7,11 @@
       "readOnly": true
     },
     {
+      "id": "corrupted-block",
+      "file": "corrupted-block.json",
+      "readOnly": true
+    },
+    {
       "id": "open-field",
       "file": "open-field.json",
       "readOnly": true

@@ -36,7 +36,7 @@
 - **失败**：已经放置过人类、场上又不存在任何人类（正在转化倒计时的人仍算存在，转完才算消失）。
 - 还没放置过任何人类时不判负，只提示「至少放置一名人类」，避免开局误判。
 
-关卡参数全部来自 `public/levels/<id>.json`：绑定地图、人类种类（= 武器种类）的血量与库存、每波僵尸种类与只数、波间间隔。内置教学关「初次尸潮」为 8 波共 1186 只。
+关卡参数全部来自 `public/levels/<id>.json`：绑定地图、人类种类（= 武器种类）的血量与库存、每波僵尸种类与只数、波间间隔。内置两关：「初次尸潮」（`level-1`，arena，8 波共 1186 只）与「全面沦陷」（`level-2`，corrupted-block，12 波共 1936 只），按 manifest 顺序逐关解锁。
 
 ### 波次
 
@@ -352,12 +352,14 @@ zombieGame/
 │   ├── maps/               # 内置地图 JSON + manifest（运行时加载，内置只读）
 │   │   ├── manifest.json   # 地图清单（id / 文件 / readOnly）
 │   │   ├── arena.json      # 竞技场：74×45 瓦片、门窗实例、出生区与人类区
+│   │   ├── corrupted-block.json # 腐化街区：双层建筑、2 门 3 窗、草丛带与北侧水池
 │   │   ├── test-yard.json  # 测试庭院：第二张只读地图，用于换图回归
 │   │   ├── test-multi.json # 测试双门庭院：2 门 3 窗，用于任意户型回归
 │   │   └── open-field.json # 空旷地：全空地无墙无门窗，尸潮求生默认地图
-│   └── levels/             # 关卡 JSON + manifest（运行时加载，教学关只读）
+│   └── levels/             # 关卡 JSON + manifest（运行时加载，内置关卡只读）
 │       ├── manifest.json   # 关卡清单（id / 文件 / readOnly）
-│       └── level-1.json    # 教学关「初次尸潮」：arena 地图、8 波、5 类人类库存
+│       ├── level-1.json    # 教学关「初次尸潮」：arena 地图、8 波、5 类人类库存
+│       └── level-2.json    # 第二关「全面沦陷」：corrupted-block、12 波、全武器 + 母体终局
 ├── src/
 │   ├── main.ts             # 启动、hash 路由切换、主循环、键盘快捷键、选关/编辑器接线
 │   ├── levels.ts           # 关卡展示投影（标题/描述/节点坐标/难度）与地图 / 关卡引用登记
@@ -746,7 +748,7 @@ npm run dev
 - 胜负条件：放置模式胜利 = 打完全部配置波次，失败 = 已放置过人类后场上无人类；尸潮求生只有失败（玩家血量归零），没有胜利条件。
 - 人类种类严格等于武器种类，关卡不能自定义新的「职业」或给同一武器配多档血量；血量、库存与恢复都读取关卡 JSON 的 `humans`。
 - 开发者新建关卡保存后会立即出现在选关列表，但不会自动绑定到任何新游玩入口；玩家模式仍按 manifest 顺序逐关解锁。被引用的关卡通过 `getLevelReferences()` 保护，当前尚无模式登记引用，因此除只读外都可删除。
-- 关卡编辑器不能改关卡 id，也不能编辑教学关里的 `settings` 兼容块；教学关只读，必须先「复制」。
+- 关卡编辑器不能改关卡 id，也不能编辑内置关卡的 `settings` 兼容块；所有内置关卡（`level-1` / `level-2`）只读，必须先「复制」。
 - 关卡保存 / 删除只在 `npm run dev` 可用：`npm run preview` / `dist` 没有接口与按钮，默认只接受 loopback；生产构建会剥离编辑器代码、接口路径与保存 / 删除文案。
 - 关卡 JSON 加载失败、manifest 非法或校验不通过时会回退 `src/data/levels/level-1.ts` 的 TS 兜底关卡，并在选关页显示提示；此时新增的工坊关卡不可见。
 - 训练场「无敌」完全免疫撕咬掉血与异变；「人类血量」滑杆会真实改变该单位的初始/当前血量。
@@ -768,13 +770,13 @@ npm run dev
 
 **工程与内容**
 
-- 内置只有 1 个关卡（`level-1`「初次尸潮」，8 波共 1186 只），4 张只读地图（`arena` / `test-yard` / `test-multi` / `open-field`）。关卡以 `public/levels/*.json` + manifest 运行时加载（0.6.0），通过 `mapId` 引用地图；开发者可在 `#/levels` 新建 / 编辑 / 复制 / 删除 `readOnly:false` 的关卡，内置教学关只读。地图与关卡两套编辑器入口都只在开发者模式下显示；玩家模式直达 `#/workshop` 会被挡回主菜单，`#/levels` 只显示已解锁关卡。这些拦截都只是界面显隐，不是安全边界。
+- 内置 2 个关卡（`level-1`「初次尸潮」8 波共 1186 只、`level-2`「全面沦陷」12 波共 1936 只），5 张只读地图（`arena` / `corrupted-block` / `test-yard` / `test-multi` / `open-field`）。关卡以 `public/levels/*.json` + manifest 运行时加载（0.6.0），通过 `mapId` 引用地图；开发者可在 `#/levels` 新建 / 编辑 / 复制 / 删除 `readOnly:false` 的关卡，内置关卡只读。地图与关卡两套编辑器入口都只在开发者模式下显示；玩家模式直达 `#/workshop` 会被挡回主菜单，`#/levels` 只显示已解锁关卡。这些拦截都只是界面显隐，不是安全边界。
 - 0.6.0 的关卡格式限制：`mode` 只支持 `placement`；人类种类只认武器 id；波次只支持「僵尸种类 + 只数」与波间间隔；关卡 `settings` 兼容块不在编辑器表单里，需手改 JSON。画布尺寸、门窗数量等仍受地图格式限制（固定 `74 × 45` 格 / `16px`）。
 - 工坊草稿只存 localStorage，不能当作发布：试玩通过 `?map=workshop-draft` 注册运行时地图。0.5.1 起开发态可在工坊内「保存到项目」直接写 `public/maps/` 并登记 manifest，也可删除 `readOnly:false` 的工坊图（删除前同样备份、被关卡引用的图受保护；只允许 loopback，每个 id 留最近 5 份），但这些接口只存在于 `npm run dev`，生产构建会整段剥离，**不是发布通道**；正式发布仍需提交 JSON 与 `manifest.json`。工坊目前没有多人协同、图层或自定义画布尺寸。
 - 地图 JSON 加载失败、manifest 非法或校验不通过时，会回退 `src/data/maps/arena.ts` 的 0.4.3 TS 兜底几何（画布 `1180 × 720`、窗宽 18），并在 console 输出 `[maps]` warning；正常路径下以 `public/maps/arena.json` 编译出的 `1184 × 720` / 窗宽 16 为准。请求地图 id 不存在时会回退默认图并在页面顶部显示 `.map-notice` 提示。
-- 阶段 1B 折中：玩家设置的门 / 窗覆盖仍按种类统一生效，优先级高于逐扇 JSON 默认值；因此 `#/play` 下 `level-1` 的 `doorHp=450 / winHp=100 / winPassSpeed=0.45` 会覆盖 `test-multi` 的逐扇默认值，想看逐扇差异请用 `#/training` 或无关卡覆盖的场景。逐扇独立覆盖 UI 留到后续阶段。
-- 音效：22 个事件已接线（0.8.2 新增 `zombie-growl-leaper` / `zombie-leap` / `zombie-growl-corroder` / `zombie-spit` / `zombie-growl-matriarch` / `zombie-spawn` / `zombie-matriarch-death` / `zombie-scream`），素材均为 freesound CC0 录音或其派生；缺文件时按现有逻辑静默降级。`weapon-reload` 与 `human-hurt` 仍没有调用点，放入文件也不会响。
-- 美术：单位与武器使用像素精灵（`src/art/`，含 5 个 `human-<weapon>` 组合），运行时按朝向线性旋转，任意角会有轻微锯齿；母体使用 64×64 精灵网格，渲染层按 `SpriteDef.grid` 推导缩放与锚点，32×32 与更大网格共用同一套换算。特效与场景装饰仍由 Pixi 代码绘制。
+- 阶段 1B 折中：玩家设置的门 / 窗覆盖仍按种类统一生效，优先级高于逐扇 JSON 默认值；`level-1` 的 `settings.opening`（`doorHp=450 / winHp=100 / winPassSpeed=0.45`）会覆盖逐扇默认值。`level-2` 刻意不写 `settings.opening`，直接使用地图 JSON 的逐扇 `maxHp / passSpeed`（南门 900、北门 650、窗户 80–110）；但同一会话先跑过 `level-1` 时，旧的全局覆盖仍会残留——这是既有折中，逐扇独立覆盖 UI 留到后续阶段。
+- 音效：24 个事件已接线（0.8.2 新增 `zombie-growl-leaper` / `zombie-leap` / `zombie-growl-corroder` / `zombie-spit` / `zombie-growl-matriarch` / `zombie-spawn` / `zombie-matriarch-death` / `zombie-scream` / `weapon-sniper`），素材均为 freesound CC0 录音或其派生；缺文件时按现有逻辑静默降级。`weapon-reload` 已接入 `beginReload()`，`human-hurt` 仍没有调用点。
+- 美术：单位与武器使用像素精灵（`src/art/`，含 6 个 `human-<weapon>` 组合），运行时按朝向线性旋转，任意角会有轻微锯齿；母体使用 64×64 精灵网格，渲染层按 `SpriteDef.grid` 推导缩放与锚点，32×32 与更大网格共用同一套换算。特效与场景装饰仍由 Pixi 代码绘制。
 - 电击枪是瞬时命中，链式最多 5 只且每跳都要求视线可见；未破的门窗会挡住后续跳跃，想观察满 5 跳请在训练场把僵尸排成一条并在同侧放置，或先把窗打破。链式半径/上限/衰减/单体加成都在 `src/data/weapons/tesla.ts` 的 `tesla` 字段，没有全局滑块。
 - 母体产卵按环形采样找空地，周围被墙或其它地形完全堵死时会少产甚至本轮不产；死亡产卵同样受落点限制（开放地图可稳定产出 12 只）。母体与尖叫者不主动攻击人类，但仍会啃门窗；它们的撕咬伤害为 0，训练场统计里的「人类被咬」不会增长。
 - 尖叫强化对同一只僵尸只保留最强倍率并刷新 6 秒计时，不叠加；BOSS 与尖叫者自身免疫。被强化僵尸的粉紫染色 / 粉环只活在渲染层，与压制标识（紫色）区分。BOSS 血条在多只母体时按「当前血量最高」选择展示对象，血量接近时可能发生切换。

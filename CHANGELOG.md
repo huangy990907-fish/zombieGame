@@ -10,7 +10,7 @@
 
 ## [0.8.2] - 2026-11-09
 
-新增两种僵尸「飞扑者」与「腐蚀者」，把腐蚀毒液做成统一的世界状态，并为尸潮求生建立独立的僵尸池与数值覆盖表；同版本追加两种僵尸与一把狙击枪。
+新增两种僵尸「飞扑者」与「腐蚀者」，把腐蚀毒液做成统一的世界状态，并为尸潮求生建立独立的僵尸池与数值覆盖表；同版本追加两种僵尸、一把狙击枪，以及一张内置地图与放置抵抗第二关。
 
 ### 新增
 
@@ -36,11 +36,15 @@
 - 狙击枪命中减速比通用口径更强：在 `applyHitSlow` 结果上再乘 `hitSlowMul = 0.75`，普通体型最低 30%（通用 40%）、大体型 52.5%（通用 70%）。
 - 音效：登记 `weapon-sniper`；把长期未接线的 `weapon-reload` 接入 `beginReload()`（弹匣打空 / 待机空仓 / 电击枪打空），并受 `SFX_THROTTLE.RELOAD` 全局限频。喷火枪打空属于散热，不播换弹音效。
 - 回归脚本新增 1 个场景（共 18 个）：狙击枪穿透命中 2 个目标、第二目标 60%、同一条弹道不命中第 3 个，并校验曳光、减速与血雾。
+- 内置地图「腐化街区」（`corrupted-block`，`public/maps/corrupted-block.json`，manifest 登记 `readOnly: true`）：74×45 / 16px，五种瓦片全部用上——中央双层建筑（主厅 + 东西侧室，内墙留 3 格通道）、2 扇门（南门主压力 / 北门单通道）、3 扇窗（东 1 / 西 2）、西侧室与主厅之间的草丛带、北门外把入口挤成单通道的水池；人类区 2 块（主厅 / 东侧室），僵尸区 3 块（上 / 下 / 左）形成多向夹击。逐扇开口参数：南门 900 / 1.0、北门 650 / 0.85、西窗 80–90 / 0.40–0.42、东窗 110 / 0.45。
+- 放置抵抗第二关「全面沦陷」（`level-2`，`public/levels/level-2.json`，`readOnly: true`）：绑定 `corrupted-block`、`mode: "placement"`、12 波共 1936 只；六种武器全部启用并各自配置 `hp / initial / cap / regen`。第 1 波普通、第 2 波起飞扑者、第 3 波起腐蚀者、第 4 波起尖叫者、第 5 波起胖子，第 11 波母体 1 只 + 混编，第 12 波母体 1 只 + 全部种族混编终局。刻意不写 `settings.opening`，开口血量 / 通过速度完全由地图 JSON 逐扇决定。
+- 关卡清单顺序 `level-1` → `level-2`，按 manifest 顺序逐关解锁；`level-2` 未通关 `level-1` 时在玩家模式显示锁定，通关后自动解锁。
 
 ### 变更
 
 - 版本号升至 `0.8.2`。
 - 训练场按注册表自动出现两种新僵尸的生成按钮与统计行；不新增设置滑块，数值先按定义文件，可在训练场逐单位调参。
+- 内置地图从 4 张增至 5 张、内置关卡从 1 关增至 2 关；地图 / 关卡 manifest 校验与回归覆盖同步新条目，启动日志应显示 `[maps] 内置地图就绪 6/6，默认「arena」`（manifest 共 6 项，含 dev 工坊图 `my-map`）与 `[levels] 关卡就绪 2 个（清单 2 项）`。
 - 精灵与专属音效按约定 id（`zombie-leaper` / `zombie-leaper-death`、`zombie-corroder` / `zombie-corroder-death`、`zombie-matriarch` / `zombie-matriarch-death`、`zombie-screamer` / `zombie-screamer-death`）由美术 / 音频会话接入；缺图时沿用现有僵尸兜底，缺音时静默降级。
 - 求生普通权重表与 BOSS 池分离：`SURVIVAL_ZOMBIE_WEIGHTS` 只含非 BOSS 僵尸，母体单独走 `SURVIVAL_BOSS_POOL`；新增僵尸时仍须登记到其一（求生池守卫回归会拦截漏登记）。
 - 狙击枪登记进 `WEAPON_IDS` / `WEAPON_LIST`、`LEVEL_WEAPON_ORDER` 与 `SURVIVAL_WEAPON_POOL`；训练场按钮 / 统计行与库存卡片按注册表自动出现，库存数字键扩展到 `1–6`。

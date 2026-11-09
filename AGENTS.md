@@ -14,7 +14,7 @@
 |---|---|---|
 | `src/data/` | **唯一数值来源**：实体定义、地图、关卡、地形、默认设置、滑块元数据 | 调平衡只改这里；玩家改动只存覆盖值，读取时合并 |
 | `public/maps/` | **地图运行时来源**：`manifest.json` + `<id>.json` 瓦片地图（内置图只读，另有 dev 期保存的工坊图） | 内置只读；加载失败回退 `src/data/maps/arena.ts` |
-| `public/levels/` | **关卡运行时来源**：`manifest.json` + `<id>.json`（内置 `level-1` 只读） | 关卡只引用 `mapId`，不复制地图数据；加载失败回退 `src/data/levels/level-1.ts` |
+| `public/levels/` | **关卡运行时来源**：`manifest.json` + `<id>.json`（内置 `level-1` / `level-2` 只读） | 关卡只引用 `mapId`，不复制地图数据；加载失败回退 `src/data/levels/level-1.ts` |
 | `src/core/` | 运行时状态与流程：`world.ts` 实体/空间索引/开口/母体产卵落点/全局 BOSS 血条数据，`game.ts` 准备/放置/库存/波次/胜负，`storage.ts` 存档与逐关解锁，`devMode.ts` 开发者模式开关与密码校验 | `world` 只存状态和查询；行为不放这里 |
 | `src/systems/` | 行为与规则：`ai.ts` 人类/丧尸/感染/受击减速推进与追击模式分发（含草丛减速与索敌、母体产卵、尖叫者强化），`collision.ts` 人类/丧尸/生成落点共用的阻挡判定，`combat.ts` 开火、命中、减速、暴击与死亡产卵结算，`flowField.ts` BFS 寻路（支持显式多源），`regions.ts` 按体型的连通区域图与区域邻接边 | 新玩法规则优先落在这里 |
 | `src/render/` | PixiJS 绘制：`renderer.ts` 场景/单位/粒子/倒地/准备区标记/强化标识/DOM BOSS 血条，`pixel.ts` 精灵与坐标换算（按 `SpriteDef.grid` 推导缩放与锚点） | 只读 World，不改数据 |
@@ -185,13 +185,13 @@ npm run app:build:win # 在 Windows 上先 build，再出 NSIS 安装包
 - 僵尸攻击力目前只有训练场按单位调整，全局滑块表未登记 `damage`；默认值在 `src/data/zombies/*.ts`。
 - breach 追击的区域层级只看“门窗通不通”，破拆耗时按 `maxHp / buildBiteDamage * bite` 估算，未计入多只僵尸同时啃食加速；同区追击用流场绕墙，不处理“同区但被内部墙隔开需要绕远”的额外代价。`direct` 模式仍是旧的全局最近人类直扑。
 - 无 BGM；只有一次性音效，且同一事件全局限频，**没有随机音效变体**（音高/时长变化）。
-- `weapon-reload`、`human-hurt` 两个事件已声明、文件已备好，但当前没有调用点。
-- 内置教学关 1 关（`level-1`「初次尸潮」，8 波共 1186 只，只读）与 4 张只读地图（`arena` / `test-yard` / `test-multi` / `open-field`），另有 dev 期保存的工坊图（如 `my-map`）。开发者可在 dev 下新增关卡 / 地图，保存后直接进入对应列表；内置教学关只能复制。地图 JSON 支持固定 `74×45` / `16px` 画布、任意数量门窗（完全空白的画布允许 0 扇门）与多块人类区 / 僵尸区。
+- `weapon-reload` 已接入 `beginReload()`（弹匣打空 / 待机空仓 / 电击枪打空）；`human-hurt` 已声明、文件已备好，但当前没有调用点。
+- 内置 2 关（`level-1`「初次尸潮」，8 波共 1186 只；`level-2`「全面沦陷」，12 波共 1936 只，含第 11 / 12 波母体）与 5 张只读地图（`arena` / `corrupted-block` / `test-yard` / `test-multi` / `open-field`），另有 dev 期保存的工坊图（如 `my-map`）。开发者可在 dev 下新增关卡 / 地图，保存后直接进入对应列表；内置关卡只能复制。地图 JSON 支持固定 `74×45` / `16px` 画布、任意数量门窗（完全空白的画布允许 0 扇门）与多块人类区 / 僵尸区。
 - 正式对局的人类补充完全依赖库存恢复，不再有「每波补 1 人」；库存恢复在准备阶段也走表，暂停时不恢复。
 - 胜负：放置模式胜利 = 打完全部配置波次，失败 = 已放置过人类后场上无人类；尸潮求生只有失败（玩家血量归零），没有胜利条件。其它模式的胜负规则只预留了引用 / 进度 key。
-- 编辑器不能改关卡 id，也不能编辑教学关的 `settings` 兼容块（需手改 JSON）。
+- 编辑器不能改关卡 id，也不能编辑内置关卡的 `settings` 兼容块（需手改 JSON）。
 - 关卡编辑器的保存 / 删除在 `npm run preview` / `dist` 下接口 404、按钮不存在；`VITE_WORKSHOP_ALLOW_REMOTE=1` 会把关卡写接口暴露给局域网，仅限可信网络。
-- 开口参数折中：`#/play` 下 `level-1` 的 `doorHp=450 / winHp=100 / winPassSpeed=0.45` 会覆盖 `test-multi` 的逐扇默认值（优先级规则见「规则」段中的出怪与逐扇参数）；逐扇差异需在 `#/training` 或无关卡覆盖的场景观察，逐扇独立覆盖 UI 属于后续阶段。
+- 开口参数折中：`#/play` 下 `level-1` 的 `doorHp=450 / winHp=100 / winPassSpeed=0.45` 会覆盖 `test-multi` 的逐扇默认值（优先级规则见「规则」段中的出怪与逐扇参数）；`level-2` 刻意不写 `settings.opening`，直接使用 `corrupted-block.json` 的逐扇 `maxHp / passSpeed`，但同一会话先跑 `level-1` 时旧的全局覆盖仍会残留。逐扇独立覆盖 UI 属于后续阶段。
 - 求生页不提供地图编辑器：新建 / 编辑地图仍要回工坊。
 - 主菜单「清空存档」只清玩法进度（放置抵抗关卡进度、尸潮求生最佳记录、预留的 `zombieGame.challenge.*`），保留音量偏好与参数覆盖值。
 - 工坊「保存到项目 / 删除地图」只在 `npm run dev` 可用：`npm run preview` / `dist` 没有接口和按钮；默认只接受 loopback，`npm run dev --host` 暴露给局域网后保存 / 删除会 403，除非显式设 `VITE_WORKSHOP_ALLOW_REMOTE=1`（此时任何能访问 dev server 的人都能写 / 删 `public/maps` 与 `public/levels`，仅限可信网络）。

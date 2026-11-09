@@ -1,0 +1,147 @@
+{
+  "schemaVersion": 1,
+  "id": "level-2",
+  "name": "全面沦陷",
+  "mapId": "corrupted-block",
+  "mode": "placement",
+  "difficulty": 4,
+  "humans": [
+    { "id": "mg", "enabled": true, "hp": 100, "initial": 24, "cap": 24, "regen": 22 },
+    { "id": "flame", "enabled": true, "hp": 100, "initial": 6, "cap": 6, "regen": 52 },
+    { "id": "shotgun", "enabled": true, "hp": 100, "initial": 10, "cap": 10, "regen": 34 },
+    { "id": "rocket", "enabled": true, "hp": 100, "initial": 3, "cap": 4, "regen": 100 },
+    { "id": "tesla", "enabled": true, "hp": 100, "initial": 6, "cap": 12, "regen": 55 },
+    { "id": "sniper", "enabled": true, "hp": 100, "initial": 4, "cap": 10, "regen": 60 }
+  ],
+  "waves": [
+    {
+      "interval": 2.0,
+      "zombies": [{ "kind": "normal", "count": 70 }]
+    },
+    {
+      "interval": 1.9,
+      "zombies": [
+        { "kind": "normal", "count": 75 },
+        { "kind": "leaper", "count": 10 }
+      ]
+    },
+    {
+      "interval": 1.9,
+      "zombies": [
+        { "kind": "normal", "count": 80 },
+        { "kind": "runner", "count": 20 },
+        { "kind": "corroder", "count": 6 }
+      ]
+    },
+    {
+      "interval": 1.9,
+      "zombies": [
+        { "kind": "normal", "count": 85 },
+        { "kind": "runner", "count": 25 },
+        { "kind": "leaper", "count": 12 },
+        { "kind": "screamer", "count": 2 }
+      ]
+    },
+    {
+      "interval": 1.8,
+      "zombies": [
+        { "kind": "normal", "count": 90 },
+        { "kind": "runner", "count": 30 },
+        { "kind": "leaper", "count": 14 },
+        { "kind": "corroder", "count": 8 },
+        { "kind": "fat", "count": 3 }
+      ]
+    },
+    {
+      "interval": 1.8,
+      "zombies": [
+        { "kind": "normal", "count": 95 },
+        { "kind": "runner", "count": 35 },
+        { "kind": "leaper", "count": 16 },
+        { "kind": "corroder", "count": 10 },
+        { "kind": "fat", "count": 4 },
+        { "kind": "screamer", "count": 2 }
+      ]
+    },
+    {
+      "interval": 1.8,
+      "zombies": [
+        { "kind": "normal", "count": 100 },
+        { "kind": "runner", "count": 40 },
+        { "kind": "leaper", "count": 18 },
+        { "kind": "corroder", "count": 12 },
+        { "kind": "fat", "count": 5 }
+      ]
+    },
+    {
+      "interval": 1.8,
+      "zombies": [
+        { "kind": "normal", "count": 105 },
+        { "kind": "runner", "count": 45 },
+        { "kind": "leaper", "count": 20 },
+        { "kind": "corroder", "count": 14 },
+        { "kind": "fat", "count": 6 },
+        { "kind": "screamer", "count": 3 }
+      ]
+    },
+    {
+      "interval": 1.7,
+      "zombies": [
+        { "kind": "normal", "count": 110 },
+        { "kind": "runner", "count": 50 },
+        { "kind": "leaper", "count": 22 },
+        { "kind": "corroder", "count": 16 },
+        { "kind": "fat", "count": 7 }
+      ]
+    },
+    {
+      "interval": 1.7,
+      "zombies": [
+        { "kind": "normal", "count": 115 },
+        { "kind": "runner", "count": 55 },
+        { "kind": "leaper", "count": 25 },
+        { "kind": "corroder", "count": 18 },
+        { "kind": "fat", "count": 8 },
+        { "kind": "screamer", "count": 3 }
+      ]
+    },
+    {
+      "interval": 1.6,
+      "zombies": [
+        { "kind": "matriarch", "count": 1 },
+        { "kind": "normal", "count": 100 },
+        { "kind": "runner", "count": 50 },
+        { "kind": "leaper", "count": 25 },
+        { "kind": "corroder", "count": 20 },
+        { "kind": "fat", "count": 8 },
+        { "kind": "screamer", "count": 3 }
+      ]
+    },
+    {
+      "interval": 1.5,
+      "zombies": [
+        { "kind": "matriarch", "count": 1 },
+        { "kind": "normal", "count": 110 },
+        { "kind": "runner", "count": 60 },
+        { "kind": "leaper", "count": 30 },
+        { "kind": "corroder", "count": 25 },
+        { "kind": "fat", "count": 10 },
+        { "kind": "screamer", "count": 4 }
+      ]
+    }
+  ],
+  "settings": {
+    "wave": {
+      "count": 12,
+      "base": 120,
+      "growth": 1.06,
+      "spawnBase": 12,
+      "spawnPerWave": 2,
+      "spawnMax": 80,
+      "maxAlive": 400,
+      "reinforce": 1
+    },
+    "human": { "start": 50, "cap": 50, "hp": 100, "speed": 54, "sight": 420, "turnTime": 2.8 },
+    "zombie": { "jitter": 0.2 }
+  }
+}

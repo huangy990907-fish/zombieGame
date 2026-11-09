@@ -4,7 +4,7 @@
  * 目的是在渲染层重构期间也能独立预览，不产生耦合。
  */
 
-/** 一帧像素画：32 行、每行 32 个字符；"." 代表透明 */
+/** 一帧像素画：默认 32 行、每行 32 个字符；"." 代表透明。大网格精灵行数见 SpriteDef.grid */
 export type PixelFrame = string[];
 
 /** 字模 → 十六进制颜色，例如 { g: "#63a04b" } */
@@ -16,10 +16,16 @@ export type Frames = Record<string, PixelFrame>;
 /** 精灵分组；combo = 人 + 枪烘焙后的组合精灵 */
 export type SpriteGroup = "zombie" | "human" | "weapon" | "combo";
 
-/** 32×32 精灵内的像素坐标 */
+/** 精灵网格内的像素坐标（默认 32×32，大网格见 SpriteDef.grid） */
 export interface Vec2 {
   x: number;
   y: number;
+}
+
+/** 精灵自定义网格尺寸（像素格）；未声明时按 SPRITE_SIZE×SPRITE_SIZE */
+export interface SpriteGrid {
+  w: number;
+  h: number;
 }
 
 /** 一个单位的完整像素精灵定义 */
@@ -34,12 +40,18 @@ export interface SpriteDef {
   /** 美术取舍说明，展示在预览页 */
   note: string;
   /**
-   * 单位中心在 32×32 精灵内的像素坐标。
-   * 渲染时把纹理的这个点钉在单位逻辑坐标上（Pixi 里即 sprite.anchor = anchor/32），
+   * 自定义像素网格尺寸；省略时统一 32×32。
+   * 大于 32 的网格用于需要更细像素密度的巨体型单位（如 40px 的母体用 64×64），
+   * 这样放大到游戏尺寸时每个像素的缩放倍率仍接近其它精灵，不会出现像素粗细不均。
+   */
+  grid?: SpriteGrid;
+  /**
+   * 单位中心在精灵网格内的像素坐标（默认 32×32 网格）。
+   * 渲染时把纹理的这个点钉在单位逻辑坐标上（Pixi 里即 sprite.anchor = anchor/网格边长），
    * 这样旋转、缩放、碰撞体都以同一个中心为准。
    */
   anchor: Vec2;
-  /** 开火帧枪口在 32×32 内的像素坐标；没有武器的精灵为 undefined */
+  /** 开火帧枪口在精灵网格内的像素坐标；没有武器的精灵为 undefined */
   muzzle?: Vec2;
   /** 建议用于碰撞 / 遮挡排序的半径（单位：游戏像素） */
   footprintRadius: number;
@@ -51,8 +63,13 @@ export interface SpriteDef {
   frames: Frames;
 }
 
-/** 所有精灵统一 32×32 */
+/** 默认精灵网格边长（未声明 grid 的精灵统一 32×32） */
 export const SPRITE_SIZE = 32;
+
+/** 取精灵的实际网格尺寸：未声明 grid 时回退 32×32 */
+export function spriteGrid(def: SpriteDef): SpriteGrid {
+  return def.grid ?? { w: SPRITE_SIZE, h: SPRITE_SIZE };
+}
 
 /** 默认描边色（深蓝黑，和游戏 #07070d 的地板色接近） */
 export const OUTLINE_COLOR = "#0a0c14";

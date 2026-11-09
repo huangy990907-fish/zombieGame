@@ -5,7 +5,7 @@
 import { COMBO_SPRITES } from "./composites";
 import { SPRITE_LIST } from "./sprites";
 import { frameStats, getNativeFrame, isOpaqueAt, renderAtSize, type OutlineMode } from "./render";
-import { SPRITE_SIZE, type SpriteDef } from "./types";
+import { SPRITE_SIZE, spriteGrid, type SpriteDef } from "./types";
 
 interface Card {
   root: HTMLElement;
@@ -90,6 +90,9 @@ function metaRows(def: SpriteDef, firstFrame: string): string {
 
 function createCard(def: SpriteDef): Card {
   const sequence = framesOf(def);
+  const grid = spriteGrid(def);
+  // 8× 放大按 256px 展示框反推：32 网格 → 8×，64 网格 → 4×，保证像素网格不被压缩
+  const zoomScale = Math.max(1, Math.floor(256 / Math.max(grid.w, grid.h)));
   const article = document.createElement("article");
   article.className = `card group-${def.group}`;
   article.dataset.id = def.id;
@@ -104,8 +107,8 @@ function createCard(def: SpriteDef): Card {
     </header>
     <div class="views">
       <figure class="view">
-        <div class="stage stage-one"><canvas class="one" width="${SPRITE_SIZE}" height="${SPRITE_SIZE}"></canvas></div>
-        <figcaption>1× 原生 ${SPRITE_SIZE}px</figcaption>
+        <div class="stage stage-one"><canvas class="one" width="${grid.w}" height="${grid.h}"></canvas></div>
+        <figcaption>1× 原生 ${grid.w}×${grid.h}</figcaption>
       </figure>
       <figure class="view">
         <div class="stage stage-game"><canvas class="game" width="${def.gameDiameter}" height="${def.gameDiameter}"></canvas></div>
@@ -113,10 +116,10 @@ function createCard(def: SpriteDef): Card {
       </figure>
       <figure class="view view-zoom">
         <div class="stage stage-zoom">
-          <canvas class="zoom" width="${SPRITE_SIZE * 8}" height="${SPRITE_SIZE * 8}"></canvas>
+          <canvas class="zoom" width="${grid.w * zoomScale}" height="${grid.h * zoomScale}"></canvas>
           <div class="grid-overlay"></div>
         </div>
-        <figcaption>8× / 像素网格</figcaption>
+        <figcaption>${zoomScale}× / 像素网格</figcaption>
       </figure>
     </div>
     <div class="meta">${metaRows(def, sequence[0])}</div>
@@ -128,7 +131,12 @@ function createCard(def: SpriteDef): Card {
   const zoom = must(article.querySelector<HTMLCanvasElement>(".zoom"), `${def.id} 8x 画布`);
   const frameLabel = must(article.querySelector<HTMLElement>(".frame-label"), `${def.id} 帧标签`);
   const zoomStage = must(article.querySelector<HTMLElement>(".stage-zoom"), `${def.id} 8x 容器`);
-  zoomStage.style.setProperty("--cell", `${zoom.width / SPRITE_SIZE}px`);
+  // 大网格（如 64×64）在 1× 视图里超出 56px 固定框会被裁掉，按实际网格放宽舞台
+  const oneStage = must(article.querySelector<HTMLElement>(".stage-one"), `${def.id} 1x 容器`);
+  const oneSize = Math.max(56, grid.w, grid.h);
+  oneStage.style.width = `${oneSize}px`;
+  oneStage.style.height = `${oneSize}px`;
+  zoomStage.style.setProperty("--cell", `${zoom.width / grid.w}px`);
   return { root: article, def, one, game, zoom, frameLabel, sequence };
 }
 
@@ -170,13 +178,15 @@ function drawCheckCanvas(canvas: HTMLCanvasElement, def: SpriteDef): void {
   ctx.imageSmoothingEnabled = false;
   ctx.drawImage(small, 0, 0, size, size);
 
-  // 32×32 精灵坐标 → 自检画布坐标
-  const k = size / SPRITE_SIZE;
+  // 精灵网格坐标 → 自检画布坐标
+  const grid = spriteGrid(def);
+  const kx = size / grid.w;
+  const ky = size / grid.h;
   // 游戏像素 → 自检画布坐标（12px 精灵放大 CHECK_SCALE 倍）
   const g = CHECK_SCALE;
 
-  const ax = def.anchor.x * k;
-  const ay = def.anchor.y * k;
+  const ax = def.anchor.x * kx;
+  const ay = def.anchor.y * ky;
 
   // 碰撞半径（虚线圆），按 footprintRadius 换算成放大后的像素
   ctx.save();
@@ -203,8 +213,8 @@ function drawCheckCanvas(canvas: HTMLCanvasElement, def: SpriteDef): void {
 
   // muzzle 标记（粉），只有带武器的精灵才有
   if (def.muzzle) {
-    const mx = def.muzzle.x * k;
-    const my = def.muzzle.y * k;
+    const mx = def.muzzle.x * kx;
+    const my = def.muzzle.y * ky;
     ctx.save();
     ctx.strokeStyle = "#ff5c8a";
     ctx.lineWidth = 1.5;
@@ -350,16 +360,19 @@ function bindControls(): void {
 function syncStat(): void {
   const singles = SPRITE_LIST.reduce((sum, def) => sum + Object.keys(def.frames).length, 0);
   const combos = COMBO_SPRITES.reduce((sum, def) => sum + Object.keys(def.frames).length, 0);
+  const bigGrids = SPRITE_LIST.filter((def) => def.grid).map((def) => `${def.id} ${def.grid!.w}×${def.grid!.h}`);
+  const gridText = bigGrids.length > 0 ? ` · 自定义网格 ${bigGrids.join(" / ")}` : "";
   const stat = document.getElementById("stat");
   if (stat) {
-    stat.textContent = `共 ${SPRITE_LIST.length} 个单体精灵（${singles} 帧）+ ${COMBO_SPRITES.length} 个烘焙组合（${combos} 帧）· 每帧 ${SPRITE_SIZE}×${SPRITE_SIZE} · 当前描边 ${state.outline === 0 ? "无" : `${state.outline}px`}`;
+    stat.textContent = `共 ${SPRITE_LIST.length} 个单体精灵（${singles} 帧）+ ${COMBO_SPRITES.length} 个烘焙组合（${combos} 帧）· 默认每帧 ${SPRITE_SIZE}×${SPRITE_SIZE}${gridText} · 当前描边 ${state.outline === 0 ? "无" : `${state.outline}px`}`;
   }
 }
 
-/** 自检报告：任一帧为全透明、anchor/muzzle 落在透明像素都会在这里暴露出来 */
+/** 自检报告：任一帧为全透明、anchor/muzzle 落在透明像素、行宽与声明网格不符都会在这里暴露出来 */
 function collectReport() {
   const all = [...SPRITE_LIST, ...COMBO_SPRITES];
   const sprites = all.map((def) => {
+    const grid = spriteGrid(def);
     const frames = Object.entries(def.frames).map(([name]) => {
       const stats = frameStats(def, name);
       return {
@@ -367,7 +380,7 @@ function collectReport() {
         opaque: stats.opaque,
         bbox: stats.bbox,
         rows: def.frames[name].length,
-        widthOk: def.frames[name].every((row) => row.length === SPRITE_SIZE),
+        widthOk: def.frames[name].every((row) => row.length === grid.w),
       };
     });
     return {
@@ -375,6 +388,7 @@ function collectReport() {
       name: def.name,
       group: def.group,
       facing: def.facing,
+      grid,
       anchor: def.anchor,
       muzzle: def.muzzle ?? null,
       footprintRadius: def.footprintRadius,
@@ -384,7 +398,9 @@ function collectReport() {
     };
   });
   const emptyFrames = sprites.flatMap((s) => s.frames.filter((f) => f.opaque === 0).map((f) => `${s.id}.${f.frame}`));
-  const badWidth = sprites.flatMap((s) => s.frames.filter((f) => !f.widthOk || f.rows !== SPRITE_SIZE).map((f) => `${s.id}.${f.frame}`));
+  const badWidth = sprites.flatMap((s) =>
+    s.frames.filter((f) => !f.widthOk || f.rows !== s.grid.h).map((f) => `${s.id}.${f.frame}`),
+  );
   const composites = COMBO_SPRITES.map((def) => ({
     id: def.id,
     frames: Object.keys(def.frames),

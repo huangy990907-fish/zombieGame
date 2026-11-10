@@ -383,8 +383,10 @@ body {
 
 .settings-row label {
   color: #c6d0de;
-  white-space: nowrap;
   font-size: 12px;
+  line-height: 1.3;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .settings-row input[type="range"] {
@@ -3069,6 +3071,17 @@ body.survival .screen canvas {
   font-size: 24px;
   letter-spacing: 4px;
   color: #e9d5ff;
+}
+
+/* 暂停菜单：三个按钮竖排，避免横排 3×240px 溢出 360px 卡片 */
+.survival-pause-card .menu-modal-actions {
+  flex-direction: column;
+  gap: 10px;
+}
+
+.survival-pause-card .menu-btn {
+  width: 100%;
+  min-width: 0;
 }
 
 /* 换弹状态：只在换弹期间显示，紧贴血量条右侧 */

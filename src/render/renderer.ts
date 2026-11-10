@@ -16,20 +16,15 @@ import { TERRAIN } from "../data/terrain";
 import { settings } from "../data/settings/runtime";
 import type { Effect, Human, World, Zombie } from "../core/world";
 import { HUMAN_DIAMETER, humanSpriteId, spriteAnchor, spriteDef, spriteRotation, spriteScale, VISUAL_SCALE, zombieDeathSpriteId, zombieSpriteId } from "./pixel";
-
-/** 单条伤害飘字（训练场用，渲染层只负责画，生命周期由训练场会话管理） */
-export interface FloatingText {
-  x: number;
-  y: number;
-  text: string;
-  color: number;
-  age: number;
-  life: number;
-  /** 每秒上飘速度（像素/秒） */
-  vy: number;
-  /** 额外缩放（默认 1；换弹提示用它画得小一点） */
-  scale?: number;
-}
+import {
+  FLOATING_FONT_FAMILY,
+  FLOATING_FONT_SIZE,
+  FLOATING_FONT_WEIGHT,
+  FLOATING_STROKE_WIDTH,
+  floatingAlpha,
+  floatingScale,
+  type FloatingText,
+} from "./floating";
 
 /** 渲染附加信息：正式对局不传，训练场用它画选中框和飘字 */
 export interface RenderExtra {
@@ -1090,11 +1085,11 @@ export class Renderer {
       const text = new Text({
         text: "",
         style: {
-          fontFamily: "monospace",
-          fontSize: 14,
-          fontWeight: "700",
+          fontFamily: FLOATING_FONT_FAMILY,
+          fontSize: FLOATING_FONT_SIZE,
+          fontWeight: FLOATING_FONT_WEIGHT,
           fill: 0xffffff,
-          stroke: { color: 0x000000, width: 3 },
+          stroke: { color: 0x000000, width: FLOATING_STROKE_WIDTH },
         },
       });
       text.anchor.set(0.5);
@@ -1108,13 +1103,12 @@ export class Renderer {
         continue;
       }
       const f = items[i];
-      const p = Math.min(1, f.age / f.life);
       s.visible = true;
       s.text = f.text;
       s.position.set(f.x, f.y);
       s.tint = f.color;
-      s.alpha = p < 0.65 ? 1 : (1 - p) / 0.35;
-      s.scale.set((1 + p * 0.22) * (f.scale ?? 1));
+      s.alpha = floatingAlpha(f);
+      s.scale.set(floatingScale(f) * (f.scale ?? 1));
     }
   }
 }

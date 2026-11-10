@@ -25,7 +25,7 @@ import type { DamageSource, Human, World, Zombie } from "../core/world";
 import { updateHumans, updateZombies } from "../systems/ai";
 import { updateCombat } from "../systems/combat";
 import { clamp, dist2 } from "../utils/math";
-import type { FloatingText } from "../render/renderer";
+import { ageFloating, pushFloating, type FloatingText } from "../render/floating";
 
 /** 逻辑固定步长（和正式对局一致：1/60 秒） */
 export const STEP = 1 / 60;
@@ -163,9 +163,6 @@ export type SelectedUnit =
 const BUCKET_SEC = 0.5;
 const BUCKET_SLOTS = 8;
 const BUCKET_WINDOW = BUCKET_SEC * BUCKET_SLOTS;
-
-/** 飘字数量上限，避免高射速 + 大量单位时 DOM/Text 对象爆掉 */
-const MAX_FLOATERS = 160;
 
 function emptyWeaponStat(): WeaponStat {
   return { damage: 0, hits: 0, kills: 0, ttkSum: 0, ttkCount: 0 };
@@ -343,17 +340,7 @@ export class TrainingSession {
       color = effectiveWeapon(source.weapon).color;
     }
 
-    if (this.floaters.length < MAX_FLOATERS) {
-      this.floaters.push({
-        x: z.x + (Math.random() - 0.5) * 10,
-        y: z.y - 8,
-        text: String(Math.max(1, Math.round(amount))),
-        color,
-        age: 0,
-        life: 0.55,
-        vy: -34,
-      });
-    }
+    pushFloating(this.floaters, z.x, z.y, String(Math.max(1, Math.round(amount))), color);
   }
 
   private recordKill(z: Zombie, source?: DamageSource): void {
@@ -460,14 +447,7 @@ export class TrainingSession {
   }
 
   private ageFloaters(dt: number): void {
-    let w = 0;
-    for (let i = 0; i < this.floaters.length; i++) {
-      const f = this.floaters[i];
-      f.age += dt;
-      f.y += f.vy * dt;
-      if (f.age < f.life) this.floaters[w++] = f;
-    }
-    this.floaters.length = w;
+    ageFloating(this.floaters, dt);
   }
 
   private dropDeadSelection(): void {

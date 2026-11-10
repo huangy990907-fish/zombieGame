@@ -1,6 +1,6 @@
 # 音效授权台账（public/audio）
 
-本目录 27 个 mp3 均来自 **CC0 实录素材**（检索时用 `license:"Creative Commons 0"` 过滤，逐条核对 API 返回的 license 字段），不再包含程序化合成或自制派生文件。`zombie-growl-fat.mp3` 与 `weapon-tesla.mp3` 在 0.4.2 / 0.4.3 曾是派生成品，现已各自替换为独立的 CC0 实录；历史派生关系见 CHANGELOG 对应版本，不代表当前来源。
+本目录 28 个 mp3 均来自 **CC0 实录素材**（检索时用 `license:"Creative Commons 0"` 过滤，逐条核对 API 返回的 license 字段），不再包含程序化合成或自制派生文件。`zombie-growl-fat.mp3` 与 `weapon-tesla.mp3` 在 0.4.2 / 0.4.3 曾是派生成品，现已各自替换为独立的 CC0 实录；历史派生关系见 CHANGELOG 对应版本，不代表当前来源。
 
 - 许可证：**CC0 1.0（Creative Commons Zero）**，可复制、修改、商用，无需署名。
   官方文本：<https://creativecommons.org/publicdomain/zero/1.0/>
@@ -28,6 +28,7 @@
 | `zombie-leap.mp3` | 0.34s | 5.8 KB | 669714 | single big impact, large creature jumping down.wav | vestibule-door | CC0 1.0 | https://freesound.org/s/669714/ | 截取源文件 0.08–0.38s 的大型生物落地冲击段（0.30s 内容），首 15ms 淡入 / 末 60ms 淡出；mean 对齐 `zombie-bite` 的 -26.1dB（实测 -26.0）；44.1kHz mono 128kbps |
 | `zombie-spit.mp3` | 0.55s | 9.0 KB | 445117 | Cartoon Splat | Breviceps | CC0 1.0 | https://freesound.org/s/445117/ | 截取完整 0.00–0.52s 的粘稠泼溅（0.52s 内容），首 12ms 淡入 / 末 60ms 淡出，整体衰减 8.1dB；mean 对齐短音口径 -27.0dB（介于 `zombie-bite` 与 `weapon-tesla` 之间）；44.1kHz mono 128kbps |
 | `zombie-scream.mp3` | 1.57s | 24.9 KB | 844112 | scream_female_dry | perspektywa_tn | CC0 1.0 | https://freesound.org/s/844112/ | 作者标注 raw / dry 的高音女声尖叫（无混响、人声特质清晰）；截取源文件 0.20–1.72s（1.52s 内容），首 20ms 淡入 / 末 120ms 淡出，整体衰减 4.3dB；mean 对齐 `zombie-growl-fat` 的 -21.1dB（实测 -21.1），peak -9.3dB；44.1kHz mono 128kbps |
+| `zombie-splat.mp3` | 0.39s | 6.6 KB | 445109 | Mud Splat | Breviceps | CC0 1.0 | https://freesound.org/s/445109/ | 粘稠泥浆泼溅的落地实录；截取 0.00–0.34s（0.34s 内容，去掉尾部静音），首 5ms 淡入 / 末 60ms 淡出，整体衰减 6.5dB；mean -28.1dB（比 `zombie-spit` 的 -27.0 低约 1dB），peak -8.1dB；44.1kHz mono 128kbps |
 | `zombie-bite.mp3` | 0.26s | 4.5 KB | 682094 | Bite 1.wav | HenKonen | CC0 1.0 | https://freesound.org/s/682094/ | 脆咬声（咀嚼水果），0.22s，卡通化的“咔嚓”质感 |
 | `zombie-hit.mp3` | 0.10s | 2.1 KB | 877027 | Meat Slime Hit Layer 3 | qubodup | CC0 1.0 | https://freesound.org/s/877027/ | 肉感史莱姆受击层，取前 60ms 瞬态，极短去混响 |
 | `zombie-kill.mp3` | 0.50s | 8.2 KB | 555412 | Zombie Death 1.wav | tonsil5 | CC0 1.0 | https://freesound.org/s/555412/ | 僵尸死亡/倒地呻吟，0.02–0.47s，与中弹音色区分 |
@@ -42,11 +43,11 @@
 
 - 所有条目均为 **CC0 1.0**，API 返回的 `license` 字段均为 `http://creativecommons.org/publicdomain/zero/1.0/`；未使用 CC-BY、NC 或来源不明的素材。
 - 使用的是 freesound 官方 preview-hq-mp3 预览文件（由 CC0 原始素材转码），版权状态与原始素材一致。
-- 合计 **27 个文件、约 408 KB（417,464 字节）**；单文件最大 63.7 KB（`defeat.mp3`），均小于 100 KB，总量远低于 1.5 MB。
+- 合计 **28 个文件、约 414 KB（424,195 字节）**；单文件最大 63.7 KB（`defeat.mp3`），均小于 100 KB，总量远低于 1.5 MB。
 - `zombie-growl-fat.mp3` 与 `weapon-tesla.mp3` 现为独立 CC0 实录（freesound 643766 / 488664）；0.4.2 / 0.4.3 的旧派生关系已废弃，历史记录见 CHANGELOG 对应版本，不代表当前来源。
 
 ## 备注
 
 - `weapon-reload`、`human-hurt` 两个事件在 [events.ts](file:///Users/huangyu/agentSpace/trae/zombieGame/src/audio/events.ts) 已声明，但游戏代码仍无调用点；文件已备好，接线后即可发声（本次未改游戏逻辑）。
-- 文件名统一按 `src/audio/events.ts` 的 `SFX_MAP` 命名规则（小写、连字符、`.mp3`）。以下 9 个文件尚待开发会话在 `events.ts` 登记事件，登记后即随预加载生效：`zombie-growl-leaper`、`zombie-leap`、`zombie-growl-corroder`、`zombie-spit`、`zombie-growl-matriarch`、`zombie-spawn`、`zombie-matriarch-death`、`zombie-scream`、`weapon-sniper`；本次未改该文件。
-- 本次没有“未替换”项：27 个文件全部来自 CC0 实录；两条历史派生物（`zombie-growl-fat`、`weapon-tesla`）已替换为独立来源。
+- 文件名统一按 `src/audio/events.ts` 的 `SFX_MAP` 命名规则（小写、连字符、`.mp3`）。以下 10 个文件尚待开发会话在 `events.ts` 登记事件，登记后即随预加载生效：`zombie-growl-leaper`、`zombie-leap`、`zombie-growl-corroder`、`zombie-spit`、`zombie-growl-matriarch`、`zombie-spawn`、`zombie-matriarch-death`、`zombie-scream`、`weapon-sniper`、`zombie-splat`；本次未改该文件。
+- 本次没有“未替换”项：28 个文件全部来自 CC0 实录；两条历史派生物（`zombie-growl-fat`、`weapon-tesla`）已替换为独立来源。

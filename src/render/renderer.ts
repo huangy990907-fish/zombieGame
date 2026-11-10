@@ -127,6 +127,8 @@ export class Renderer {
   private fxLayer = new Container();
   /** 电击枪闪电：独立 Graphics 层，画折线，不走圆点精灵池 */
   private arcLayer = new Graphics();
+  /** 飞扑者附身精灵：叠在人类与特效之上，避免被爆炸 / 电弧盖住 */
+  private attachLayer = new Container();
   /** 高速弹道曳光：独立 Graphics 层，每帧按弹丸位置重画短线 */
   private tracerLayer = new Graphics();
   /** 腐蚀者毒液弹：画抛物线轨迹与落点阴影，位于单位之上、特效之下 */
@@ -143,6 +145,8 @@ export class Renderer {
   private zSprites: Sprite[] = [];
   private bSprites: Sprite[] = [];
   private fxSprites: Sprite[] = [];
+  /** 附身飞扑者精灵池（attachLayer 内，按附身数量复用） */
+  private attachSprites: Sprite[] = [];
   private deathSprites: Sprite[] = [];
   private textPool: Text[] = [];
   private t = 0;
@@ -218,6 +222,7 @@ export class Renderer {
       this.poisonShotLayer,
       this.fxLayer,
       this.arcLayer,
+      this.attachLayer,
       this.openingLayer,
       this.wallLayer,
       this.hpBarLayer,
@@ -755,9 +760,26 @@ export class Renderer {
     this.pruneAnim(this.hAnim);
   }
 
+  /**
+   * 飞扑者按状态选精灵：蓄力 / 跃起 / 附身各自用专用帧组，
+   * 其余僵尸仍按 zombie-<kind>。缺图时 spriteDef 会回落到人类素体，
+   * 但 0.8.3 的插图已提供全部五套。
+   */
+  private zombieVisualId(z: Zombie): string {
+    if (z.kind !== "leaper") return zombieSpriteId(z.kind);
+    if (z.pinTargetId !== null) return "zombie-leaper-attach";
+    if (z.leapPhase === 1) return "zombie-leaper-windup";
+    if (z.leapPhase === 2) return "zombie-leaper-leap";
+    return zombieSpriteId(z.kind);
+  }
+
   /** 僵尸：按 kind 取 zombie-<kind>；移动帧交替，静止回 idle */
   private renderZombies(zombies: Zombie[], dt: number): void {
     this.sync(this.zSprites, zombies.length, this.unitLayer);
+    let attachCount = 0;
+    for (let i = 0; i < zombies.length; i++) if (zombies[i].pinTargetId !== null) attachCount++;
+    this.sync(this.attachSprites, attachCount, this.attachLayer);
+    let attachIndex = 0;
     for (const st of this.zAnim.values()) st.seen = false;
     for (let i = 0; i < zombies.length; i++) {
       const z = zombies[i];
@@ -769,21 +791,44 @@ export class Renderer {
       st.seen = true;
       st.kind = z.kind;
 
-      const def = spriteDef(zombieSpriteId(z.kind));
-      const frame = st.moving ? (st.step ? "walk2" : "walk1") : "idle";
-      s.position.set(z.x, z.y);
-      s.rotation = spriteRotation(st.angle);
+      const attached = z.pinTargetId !== null;
+      const def = spriteDef(this.zombieVisualId(z));
+      const frame = attached ? "idle" : st.moving ? (st.step ? "walk2" : "walk1") : "idle";
       // 渲染直径 = 身体直径(2r) * 视觉放大（普通 11→16.5，胖子 22→33）
       // 电击单体强化会把闪白计时拉长到 0.16s，用超出的部分叠一个极轻微的尺寸脉冲
       const strongFlash = z.flash > HIT_FLASH;
       const pulse = strongFlash ? (z.flash - HIT_FLASH) / (EMPOWERED_FLASH - HIT_FLASH) : 0;
       const baseScale = spriteScale(z.bodyDiameter * VISUAL_SCALE, def);
+      const tint = z.flash > 0 ? 0xffffff : z.buffTimer > 0 ? 0xffc2d8 : 0xffffff;
+      const alpha = z.flash > 0 ? (strongFlash ? 1 : 0.9) : 1;
+
+      if (attached) {
+        // 附身精灵独立成层：跟随被附着人类的平滑朝向，叠在人类与特效之上
+        s.visible = false;
+        const a = this.attachSprites[attachIndex++];
+        a.visible = true;
+        a.position.set(z.x, z.y);
+        const human = this.hAnim.get(z.pinTargetId as number);
+        a.rotation = spriteRotation(human ? human.angle : angle);
+        a.scale.set(baseScale * (1 + pulse * EMPOWERED_PULSE_SCALE));
+        a.blendMode = z.flash > 0 ? "add" : "normal";
+        a.tint = tint;
+        a.alpha = alpha;
+        const anchor = spriteAnchor(def);
+        a.anchor.set(anchor.x, anchor.y);
+        a.texture = this.texture(def.id, "idle");
+        continue;
+      }
+
+      s.visible = true;
+      s.position.set(z.x, z.y);
+      s.rotation = spriteRotation(st.angle);
       s.scale.set(baseScale * (1 + pulse * EMPOWERED_PULSE_SCALE));
       // 受击反馈：短促加法混合提亮（闪白），比新建滤镜/叠加精灵成本低
       s.blendMode = z.flash > 0 ? "add" : "normal";
       // 被尖叫者强化的僵尸：粉紫染色（与压制标识区分：强化偏粉，压制偏紫）
-      s.tint = z.flash > 0 ? 0xffffff : z.buffTimer > 0 ? 0xffc2d8 : 0xffffff;
-      s.alpha = z.flash > 0 ? (strongFlash ? 1 : 0.9) : 1;
+      s.tint = tint;
+      s.alpha = alpha;
       this.applyFrame(s, st, def, frame);
     }
 

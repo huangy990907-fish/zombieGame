@@ -82,6 +82,7 @@ export class SurvivalUi {
   private weaponsEl = document.getElementById("svWeapons") as HTMLElement;
 
   private upgradeEl = document.getElementById("survivalUpgrade") as HTMLElement;
+  private upgradeSubtitleEl = document.getElementById("survivalUpgradeSubtitle") as HTMLElement;
   private upgradeCardsEl = document.getElementById("survivalUpgradeCards") as HTMLElement;
   private defeatEl = document.getElementById("survivalDefeat") as HTMLElement;
   private defeatStatsEl = document.getElementById("survivalDefeatStats") as HTMLElement;
@@ -299,6 +300,7 @@ export class SurvivalUi {
 
   /** 二段选武器：用与三选一相同的卡片样式，点击装备为副武器 */
   private renderWeaponPicks(ids: string[]): void {
+    this.upgradeSubtitleEl.textContent = `选择一把武器作为副武器（数字键 1–${ids.length} 也可选择）`;
     this.upgradeCardsEl.innerHTML = ids
       .map((id, i) => {
         const def = getWeaponDef(id);
@@ -313,6 +315,7 @@ export class SurvivalUi {
   }
 
   private renderUpgradeChoices(choices: SurvivalUpgradeDef[]): void {
+    this.upgradeSubtitleEl.textContent = `选择一项强化（数字键 1–${choices.length} 也可选择）`;
     this.upgradeCardsEl.innerHTML = choices
       .map(
         (c, i) => `<button class="sv-upgrade-card" data-upgrade-id="${escapeHtml(c.id)}">

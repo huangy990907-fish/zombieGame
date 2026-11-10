@@ -1522,9 +1522,18 @@ async function boot(): Promise<void> {
         survival.togglePause();
       } else if (e.key === "r" || e.key === "R") {
         if (survival.state !== "idle") startSurvival(survival.map.id);
-      } else if (survival.state === "choosing" && /^[1-3]$/.test(e.key)) {
-        const up = survival.choices[Number(e.key) - 1];
-        if (up) survival.chooseUpgrade(up.id);
+      } else if (survival.state === "choosing") {
+        // 卡片编号与当前阶段实际数量一致：二段选武器 1–N，普通升级 1–3
+        const n = Number(e.key);
+        if (Number.isInteger(n) && n >= 1) {
+          if (survival.weaponPicks.length > 0) {
+            const weaponId = survival.weaponPicks[n - 1];
+            if (weaponId) survival.chooseWeapon(weaponId);
+          } else {
+            const up = survival.choices[n - 1];
+            if (up) survival.chooseUpgrade(up.id);
+          }
+        }
       }
     }
   });

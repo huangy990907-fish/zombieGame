@@ -6,7 +6,7 @@
 
 浏览器 2D 关卡制自动对抗小游戏：玩家在关卡里的人类区放置不同武器的人类（各自有库存与恢复），抵御从门/窗涌入的丧尸；开发者可在选关页新建 / 编辑关卡。玩家不直接操控单位，通过放置、切行为模式与速度观察战局；「尸潮求生」则是单角色 Roguelike 生存，玩家自己移动、自动开火、吃经验升级，只计失败；另有独立训练场做单位与武器回归。技术栈 **PixiJS 8 + TypeScript 5.7 + Vite 6**，像素美术与音效全部内置于仓库，无外部 CDN / 在线美术依赖。
 
-当前版本 **0.8.3**。路由只有 7 个：`#/menu`（主菜单）、`#/levels`（选关与关卡编辑入口，`?level=<id>` 进关；`#/levels/edit?id=<id>` 是编辑器直达别名，映射到本路由且仅开发者模式可打开）、`#/play`（对局）、`#/survival`（尸潮求生，单角色 Roguelike 生存）、`#/training`（训练场）、`#/workshop`（工坊编辑器，仅开发者模式可见，玩家模式直达会被挡回主菜单）、`#/tuning`（数值调参，仅开发者模式可见，玩家模式直达会被挡回主菜单）。**数值调整统一走独立的 `#/tuning` 栏目，游玩界面不再提供设置入口。**
+当前版本 **1.0.0**。路由只有 7 个：`#/menu`（主菜单）、`#/levels`（选关与关卡编辑入口，`?level=<id>` 进关；`#/levels/edit?id=<id>` 是编辑器直达别名，映射到本路由且仅开发者模式可打开）、`#/play`（对局）、`#/survival`（尸潮求生，单角色 Roguelike 生存）、`#/training`（训练场）、`#/workshop`（工坊编辑器，仅开发者模式可见，玩家模式直达会被挡回主菜单）、`#/tuning`（数值调参，仅开发者模式可见，玩家模式直达会被挡回主菜单）。**数值调整统一走独立的 `#/tuning` 栏目，游玩界面不再提供设置入口。**
 
 ## 顶层目录职责
 
@@ -162,7 +162,7 @@ npm run app:build:win # 在 Windows 上先 build，再出 NSIS 安装包
 - 规则（求生池与模式覆盖表）：求生与其他模式的平衡互相独立。僵尸普通出怪权重表 `SURVIVAL_ZOMBIE_WEIGHTS`、BOSS 投放表 `SURVIVAL_BOSS_POOL`、武器池 `SURVIVAL_WEAPON_POOL`、按模式数值覆盖表 `SURVIVAL_ZOMBIE_OVERRIDES` 与经验表 `SURVIVAL_XP_BY_KIND` 都在 `src/data/survival/config.ts`；**不改基础僵尸 / 武器定义文件**。`SurvivalSession.start()` 调 `setZombieModeOverrides(SURVIVAL_ZOMBIE_OVERRIDES)` 启用，`stop()` 传 `null` 回退基础定义（`effectiveZombie()` 的优先级：玩家覆盖值 > 模式覆盖表 > 基础定义，`leap` / `spit` / `spawner` / `scream` 只合并定义里已存在的字段）。求生当前取值：飞扑者压制 1.5s / 4 DPS，腐蚀者毒液 4 DPS；母体产卵与尖叫强化沿用基础定义。新增模式只需再提供一份 `ZombieModeOverrideTable`。
 - 规则（空地地图与校验）：`open-field` 是 74×45 全空地，`openings: []`。`validateMapJson()` 仅在「整张画布无墙且无任何门窗」时豁免「至少 1 扇门 / 至少 1 格墙体」，其余地图规则不变；`openingTuning()` 对空 openings 返回 `doorHp = 0`、`winHp = 0`、`winPassSpeed = 1` 兜底。
 - 规则（渲染与记录）：经验球通过 `RenderExtra.orbs` 传入 `Renderer.render()`，由新增的 `pickupLayer` 画呼吸光晕；`Renderer.setCamera()` 变换舞台并在渲染时按地图边界夹取。最佳记录 key 为 `zombieGame.survival.v1`，只存 `bestTime` / `bestLevel`。
-- 规则（快捷键与焦点）：survival 路由 `WASD` / 方向键写 `heldKeys`，`Space` 暂停 / 继续（同时识别 `code === "Space"` 与 `key === " "`），`R` 重开，`choosing` 时 `1–3` 选卡；点击「开始求生」与升级卡后 `document.activeElement.blur()`，并在 survival 路由对 `Space` keyup `preventDefault()`，避免残留焦点按钮被空格再次激活。
+- 规则（快捷键与焦点）：survival 路由 `WASD` / 方向键写 `heldKeys`，`Space` 暂停 / 继续（同时识别 `code === "Space"` 与 `key === " "`），`R` 重开；`choosing` 时按当前阶段的实际卡片数取数字键：二段选武器走 `weaponPicks[1–N]`，普通升级走 `choices[1–3]`，卡片编号、键盘范围与副标题文案必须一致；点击「开始求生」与升级卡后 `document.activeElement.blur()`，并在 survival 路由对 `Space` keyup `preventDefault()`，避免残留焦点按钮被空格再次激活。
 
 ## 已知限制
 

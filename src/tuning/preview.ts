@@ -48,35 +48,44 @@ import {
   zombieSpriteId,
 } from "../render/pixel";
 
-const MAP_W = 520;
-const MAP_H = 190;
 const STEP = 1 / 60;
 const RESPAWN_DELAY = 1.2;
 /** 重生淡入时长（0.2–0.3s） */
 const RESPAWN_FADE = 0.25;
 /** 开火帧保持时长，和主渲染器一致 */
 const FIRE_HOLD = 0.12;
+/** 未测量到容器尺寸时的兜底预览尺寸（覆盖层还没显示时会走到） */
+const FALLBACK_W = 520;
+const FALLBACK_H = 190;
+/** 地面色：与对局草丛/地面同一色系，避免预览露出黑底 */
+const GROUND_TOP = "#1a2a20";
+const GROUND_BOTTOM = "#101a14";
+const GRID_COLOR = "rgba(122, 170, 124, 0.085)";
+const GROUND_LINE = "rgba(150, 200, 155, 0.14)";
 
 /** 预览专用空场地图：没有墙 / 门窗 / 草丛，靶子不会移动也不会被地形挡住 */
-const PREVIEW_MAP: MapDef = {
-  id: "tuning-preview",
-  name: "调参预览",
-  width: MAP_W,
-  height: MAP_H,
-  room: { left: 0, top: 0, right: MAP_W, bottom: MAP_H, wall: 0 },
-  walls: [],
-  openings: [],
-  openingCenters: [],
-  spawn: [],
-  windowSpawn: {},
-  humanZones: [{ x0: 0, y0: 0, x1: MAP_W, y1: MAP_H }],
-  humanBounds: { x0: 24, y0: 28, x1: MAP_W - 24, y1: MAP_H - 28 },
-  buildBiteDamage: 0,
-  buildBiteSlow: 1,
-  grassTiles: [],
-  waterTiles: [],
-  waterBlockers: [],
-};
+function previewMap(width: number, height: number): MapDef {
+  return {
+    id: "tuning-preview",
+    name: "调参预览",
+    width,
+    height,
+    room: { left: 0, top: 0, right: width, bottom: height, wall: 0 },
+    walls: [],
+    openings: [],
+    openingCenters: [],
+    spawn: [],
+    windowSpawn: {},
+    humanZones: [{ x0: 0, y0: 0, x1: width, y1: height }],
+    humanBounds: { x0: 24, y0: 28, x1: Math.max(24, width - 24), y1: Math.max(28, height - 28) },
+    buildBiteDamage: 0,
+    buildBiteSlow: 1,
+    grassTiles: [],
+    waterTiles: [],
+    waterBlockers: [],
+  };
+}
+
 
 export interface PreviewStats {
   /** 上一只靶子的击杀耗时（秒）；每只靶子单独计时 */
@@ -125,12 +134,21 @@ export class TuningPreview {
   private prevFire = 0;
   private fireHold = 0;
 
+  /** 画布当前的 CSS 尺寸（= 沙盒世界的宽高），随容器变化 */
+  private viewW = FALLBACK_W;
+  private viewH = FALLBACK_H;
+  private sizeDirty = true;
+  private ro: ResizeObserver | null = null;
+
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
     const ctx = canvas.getContext("2d");
     if (!ctx) throw new Error("preview canvas 2d context unavailable");
     this.ctx = ctx;
-    this.resize();
+    this.ro = new ResizeObserver(() => {
+      this.sizeDirty = true;
+    });
+    this.ro.observe(canvas);
   }
 
   /** 切换武器：重建场景（靶子沿用上次选中的僵尸） */
@@ -161,7 +179,8 @@ export class TuningPreview {
   /** 进入调参页时调用 */
   start(): void {
     if (this.running) return;
-    this.resize();
+    this.sizeDirty = true;
+    this.syncSize();
     this.rebuild();
     this.running = true;
     this.lastFrame = performance.now();
@@ -173,6 +192,8 @@ export class TuningPreview {
     this.running = false;
     if (this.raf) cancelAnimationFrame(this.raf);
     this.raf = 0;
+    this.ro?.disconnect();
+    this.ro = null;
     this.world = null;
     this.human = null;
     this.targetId = null;
@@ -185,15 +206,45 @@ export class TuningPreview {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
   }
 
-  private resize(): void {
+  /**
+   * 让画布跟随容器：宽高取容器的 CSS 尺寸，按 devicePixelRatio 放大后备缓冲。
+   * 尺寸变化后重建沙盒世界（保留 DPS 累计），保证网格铺满整个画布、不留黑边。
+   */
+  private syncSize(): void {
+    const w = Math.max(160, Math.round(this.canvas.clientWidth || 0));
+    const h = Math.max(120, Math.round(this.canvas.clientHeight || 0));
+    if (!this.sizeDirty && w === this.viewW && h === this.viewH) return;
+    this.sizeDirty = false;
+    if (w === this.viewW && h === this.viewH) return;
+    this.viewW = w;
+    this.viewH = h;
     const dpr = Math.min(2, window.devicePixelRatio || 1);
-    this.canvas.width = Math.round(MAP_W * dpr);
-    this.canvas.height = Math.round(MAP_H * dpr);
+    this.canvas.width = Math.round(w * dpr);
+    this.canvas.height = Math.round(h * dpr);
     this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    if (this.world) this.relayout();
+  }
+
+  /** 只换尺寸不换实体：重建世界并让人类 / 靶子重新居中，DPS 与击杀耗时保留 */
+  private relayout(): void {
+    const world = createWorld(previewMap(this.viewW, this.viewH));
+    this.world = world;
+    this.installHooks(world);
+    this.spawnHuman(world);
+    if (this.respawning) {
+      const pos = this.targetPosition();
+      this.respawnX = pos.x;
+      this.respawnY = pos.y;
+    } else {
+      this.spawnTarget(world);
+    }
+    this.floaters.length = 0;
+    this.prevFire = 0;
+    this.fireHold = 0;
   }
 
   private rebuild(): void {
-    const world = createWorld(PREVIEW_MAP);
+    const world = createWorld(previewMap(this.viewW, this.viewH));
     this.world = world;
     this.sessionTime = 0;
     this.totalDamage = 0;
@@ -210,11 +261,18 @@ export class TuningPreview {
     this.prevFire = 0;
     this.fireHold = 0;
 
+    this.installHooks(world);
+    this.spawnHuman(world);
+    this.spawnTarget(world);
+    this.draw();
+  }
+
+  /** 伤害 / 击杀钩子：统计与飘字，和训练场同一套口径 */
+  private installHooks(world: World): void {
     world.onDamage = (z, amount, source?: DamageSource) => {
       if (z.id !== this.targetId) return;
       this.totalDamage += amount;
       this.buckets[this.bucketIdx] += amount;
-      // 与训练场同一条规则：颜色跟随来源武器，数值取整
       const color = source?.weapon ? effectiveWeapon(source.weapon).color : 0xffffff;
       pushFloating(this.floaters, z.x, z.y, String(Math.max(1, Math.round(amount))), color);
     };
@@ -226,26 +284,39 @@ export class TuningPreview {
       // 母体死亡会产卵：清掉全部旧单位，保证预览始终是"一只靶子"的循环
       world.zombies.length = 0;
     };
+  }
 
-    this.spawnHuman(world);
-    this.spawnTarget(world);
-    this.draw();
+  /** 预览区正中心 */
+  private center(): { x: number; y: number } {
+    return { x: this.viewW / 2, y: this.viewH / 2 };
+  }
+
+  /**
+   * 人类与靶子的固定间距：按当前武器射程取 70%（保证在射程内），
+   * 只跟武器走、不随窗口尺寸变化，短射程武器（喷火 158）也不会打不到。
+   */
+  private gap(): number {
+    const range = effectiveWeapon(this.weaponId).range;
+    return Math.max(110, Math.min(range * 0.7, 280));
+  }
+
+  private humanPosition(): { x: number; y: number } {
+    const c = this.center();
+    return { x: c.x - this.gap() / 2, y: c.y };
   }
 
   private spawnHuman(world: World): void {
-    const h = world.spawnHuman(40, MAP_H / 2, this.weaponId);
+    const pos = this.humanPosition();
+    const h = world.spawnHuman(pos.x, pos.y, this.weaponId);
     h.facing = 0;
     h.post = -1;
     this.human = h;
   }
 
-  /** 靶子站位：按当前武器射程取 70%，既在射程内又留出弹道飞行距离 */
+  /** 靶子站位：与人类同一水平线，固定间距、整体居中 */
   private targetPosition(): { x: number; y: number } {
-    const range = effectiveWeapon(this.weaponId).range;
-    return {
-      x: 40 + Math.max(110, Math.min(range * 0.7, MAP_W - 40 - 60)),
-      y: MAP_H / 2,
-    };
+    const c = this.center();
+    return { x: c.x + this.gap() / 2, y: c.y };
   }
 
   private spawnTarget(world: World): void {
@@ -254,8 +325,9 @@ export class TuningPreview {
     // 靶子不移动、不反击：不调用 updateZombies，也不参与任何行为层
     z.speed = 0;
     // 朝向人类（让精灵面向左侧），但不执行 AI
-    z.tx = 40;
-    z.ty = MAP_H / 2;
+    const h = this.humanPosition();
+    z.tx = h.x;
+    z.ty = h.y;
     this.targetId = z.id;
     this.spawnTime = this.sessionTime;
   }
@@ -264,6 +336,7 @@ export class TuningPreview {
     if (!this.running) return;
     const elapsed = Math.min(0.2, (now - this.lastFrame) / 1000);
     this.lastFrame = now;
+    this.syncSize();
     this.acc += elapsed;
     let steps = 0;
     while (this.acc >= STEP && steps < 6) {
@@ -308,11 +381,12 @@ export class TuningPreview {
       }
     }
 
-    // 人类固定在左侧、靶子固定在右侧：这里只复用 AI 的索敌 / 开火，不让它走位
+    // 人类固定在中心左侧、靶子固定在中心右侧：这里只复用 AI 的索敌 / 开火，不让它走位
     const h = this.human;
     if (h) {
-      h.x = 40;
-      h.y = MAP_H / 2;
+      const hp = this.humanPosition();
+      h.x = hp.x;
+      h.y = hp.y;
       h.vx = 0;
       h.vy = 0;
     }
@@ -321,8 +395,8 @@ export class TuningPreview {
         const pos = this.targetPosition();
         z.x = pos.x;
         z.y = pos.y;
-        z.tx = 40;
-        z.ty = MAP_H / 2;
+        z.tx = h ? h.x : pos.x - this.gap();
+        z.ty = h ? h.y : pos.y;
         z.speed = 0;
       }
     }
@@ -380,27 +454,35 @@ export class TuningPreview {
   private draw(): void {
     const { ctx } = this;
     const world = this.world;
-    ctx.clearRect(0, 0, MAP_W, MAP_H);
+    const w = this.viewW;
+    const h = this.viewH;
+    ctx.clearRect(0, 0, w, h);
 
-    // 地面
-    const bg = ctx.createLinearGradient(0, 0, 0, MAP_H);
-    bg.addColorStop(0, "#0b101c");
-    bg.addColorStop(1, "#070a12");
+    // 地面：与对局草丛 / 地面同一色系，铺满整块画布，不露黑底
+    const bg = ctx.createLinearGradient(0, 0, 0, h);
+    bg.addColorStop(0, GROUND_TOP);
+    bg.addColorStop(1, GROUND_BOTTOM);
     ctx.fillStyle = bg;
-    ctx.fillRect(0, 0, MAP_W, MAP_H);
+    ctx.fillRect(0, 0, w, h);
 
-    ctx.strokeStyle = "rgba(120, 150, 210, 0.07)";
+    ctx.strokeStyle = GRID_COLOR;
     ctx.lineWidth = 1;
-    for (let x = 20; x < MAP_W; x += 40) {
+    for (let x = 24; x < w; x += 48) {
       ctx.beginPath();
       ctx.moveTo(x + 0.5, 0);
-      ctx.lineTo(x + 0.5, MAP_H);
+      ctx.lineTo(x + 0.5, h);
       ctx.stroke();
     }
-    ctx.strokeStyle = "rgba(120, 150, 210, 0.1)";
+    for (let y = 24; y < h; y += 48) {
+      ctx.beginPath();
+      ctx.moveTo(0, y + 0.5);
+      ctx.lineTo(w, y + 0.5);
+      ctx.stroke();
+    }
+    ctx.strokeStyle = GROUND_LINE;
     ctx.beginPath();
-    ctx.moveTo(0, MAP_H / 2 + 0.5);
-    ctx.lineTo(MAP_W, MAP_H / 2 + 0.5);
+    ctx.moveTo(0, Math.round(h / 2) + 0.5);
+    ctx.lineTo(w, Math.round(h / 2) + 0.5);
     ctx.stroke();
 
     if (!world) return;

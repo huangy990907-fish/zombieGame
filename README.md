@@ -244,6 +244,8 @@
 
 生成限制：僵尸不能生成在墙体或实体障碍里（点在实心处会被忽略）；人类会被夹到房间可行走范围内。僵尸可以生成在房间外，便于测试其从走廊冲入的行为。
 
+单位库显示的血量 / 速度 / 攻击力与实战同源（`effectiveZombie`，已合并 `#/tuning` 的玩家覆盖与关卡覆盖），不是注册表里的原始默认值。但生成时 `World.spawnZombie` 仍会按调参页的「僵尸抖动」（`zombie.jitter`，默认 25%）做一次正态浮动并夹在 20%–200% 之间，所以连续生成同一类僵尸时 `z.hp` 会围绕面板值波动（例如面板 103 时读到 93 / 140 都属于正常抽样）。要逐只核对固定血量，请选中单位后在编辑器里直接改血量。
+
 ### 属性编辑
 
 选中单位后，右侧编辑器直接写回该单位字段，立即生效：
@@ -338,7 +340,7 @@
 | 音频 | Web Audio API（`AudioBuffer` 预加载 + 全局限频） |
 | 路由 | 自写 hash 路由（`#/menu`、`#/levels`、`#/play`、`#/training`、`#/workshop`） |
 | 存档 | localStorage + File System Access API + JSON 导入导出 |
-| 测试 | `npm run regression`（Node + esbuild 加载真实模块跑 34 个场景）；行为仍以浏览器实跑为准 |
+| 测试 | `npm run regression`（Node + esbuild 加载真实模块跑 36 个场景）；行为仍以浏览器实跑为准 |
 | 桌面版 | Electron + electron-builder；主进程在回环地址起只读静态服务加载 `dist`，不使用 `file://` |
 
 逻辑采用固定步长 1/60 秒 + 累加器：渲染帧率波动不影响模拟；速度倍率通过「一帧多走几步」实现。空间查询使用空间哈希网格，寻路使用 BFS 流场，子弹与飘字使用对象池 / 数量上限控制内存与 GC 压力。
@@ -356,7 +358,7 @@ zombieGame/
 ├── scripts/
 │   ├── workshop-save-plugin.ts # 地图 / 关卡「保存、删除」dev 中间件（校验 / 名称唯一 / 备份 / manifest / 静态 JSON）
 │   ├── make-dmg.mjs        # 桌面版 dmg 封装（electron-builder 出 .app 后用 hdiutil 打包）
-│   └── regression/         # 回归脚本：run.mjs（esbuild 打包） + suite.ts（34 个场景）
+│   └── regression/         # 回归脚本：run.mjs（esbuild 打包） + suite.ts（36 个场景）
 ├── README.md               # 本文件
 ├── CHANGELOG.md            # 变更记录
 ├── AGENTS.md               # 项目索引（给后续接手的 AI：模块职责 / 改动映射 / 约定）
@@ -483,7 +485,7 @@ npm install
 npm run dev       # 开发服务器，默认 http://localhost:5173/
 npm run build     # tsc --noEmit 类型检查 + vite build，产物输出到 dist/
 npm run preview   # 本地预览 dist/ 构建产物
-npm run regression # Node + esbuild 回归脚本（34 个场景，失败返回非零退出码）
+npm run regression # Node + esbuild 回归脚本（36 个场景，失败返回非零退出码）
 npm run app:build # 先 build，再按当前平台打包桌面版（macOS 输出 dmg）
 npm run app:build:win # 在 Windows 上先 build，再出 NSIS 安装包
 ```

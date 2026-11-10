@@ -16,7 +16,7 @@
 import { HUMAN_BODY_DIAMETER } from "../data/humans";
 import { DEFAULT_MAP, resolveMap, type MapDef } from "../data/maps";
 import { TILE_SIZE } from "../data/maps/schema";
-import { effectiveWeapon } from "../data/settings/runtime";
+import { effectiveWeapon, effectiveZombie } from "../data/settings/runtime";
 import type { Rect } from "../data/types";
 import { WEAPON_LIST, getWeaponDef } from "../data/weapons";
 import { ZOMBIE_LIST, getZombieDef, zombieBodyDiameter } from "../data/zombies";
@@ -93,15 +93,26 @@ export interface HumanOption {
   cooldown: number;
 }
 
-/** 单位库：直接来自注册表，新增僵尸/武器类型会自动出现在面板里 */
-export const TRAIN_ZOMBIE_TYPES: ZombieOption[] = ZOMBIE_LIST.map((d) => ({
-  id: d.id,
-  name: d.name,
-  color: d.color,
-  hp: d.hp,
-  speed: d.speed,
-  damage: d.damage,
-}));
+/**
+ * 单位库：僵尸数值与实战同源，走 `effectiveZombie` 合并玩家 / 关卡 / 模式覆盖，
+ * 而不是注册表里的原始定义。面板每次进入训练场都重建，调参改动即时可见。
+ *
+ * 注意：这里显示的是**生成均值**。`World.spawnZombie` 还会按
+ * `settings().zombie.jitter` 做一次正态浮动，所以实际 `z.hp` 会围绕该值波动。
+ */
+export function trainZombieTypes(): ZombieOption[] {
+  return ZOMBIE_LIST.map((d) => {
+    const def = effectiveZombie(d.id);
+    return {
+      id: d.id,
+      name: d.name,
+      color: d.color,
+      hp: def.hp,
+      speed: def.speed,
+      damage: def.damage,
+    };
+  });
+}
 
 export const TRAIN_HUMAN_TYPES: HumanOption[] = WEAPON_LIST.map((w) => ({
   id: w.id,

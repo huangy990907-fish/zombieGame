@@ -94,7 +94,7 @@ npm install
 npm run dev       # 开发服务器（默认 5173，可 --port 指定）
 npm run build     # tsc --noEmit + vite build，产物 dist/
 npm run preview   # 预览构建产物
-npm run regression # Node + esbuild 回归脚本（34 个场景，失败返回非零退出码）
+npm run regression # Node + esbuild 回归脚本（36 个场景，失败返回非零退出码）
 npx tsc --noEmit  # 单项类型检查
 npm run app:build # 先 build，再按当前平台打包桌面版（macOS 出 .app 后用 hdiutil 封 dmg，产物在 release/）
 npm run app:build:win # 在 Windows 上先 build，再出 NSIS 安装包

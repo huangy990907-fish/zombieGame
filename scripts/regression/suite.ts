@@ -31,6 +31,7 @@ import {
 } from "../../src/data/survival/config";
 import { compileTilesToMapDef } from "../../src/data/maps/compile";
 import { validateMapJson } from "../../src/data/maps/schema";
+import type { MapJson } from "../../src/data/maps/schema";
 import { validateLevelJson } from "../../src/data/levels/schema";
 import { registerRuntimeMap } from "../../src/data/maps";
 import { World, type Zombie } from "../../src/core/world";
@@ -39,6 +40,15 @@ import { blastFalloff, damageZombie, explode, spawnBullet, tryFire, updateCombat
 import { openingNetWidth } from "../../src/systems/flowField";
 import { isBlockedForBody } from "../../src/systems/collision";
 import { SurvivalSession } from "../../src/survival/session";
+import { trainZombieTypes } from "../../src/training/session";
+import {
+  TILE_CODES,
+  createBlankDoc,
+  fromMapJson,
+  getTile,
+  setTile,
+  toMapJson,
+} from "../../src/workshop/doc";
 
 const ROOT = process.env.REGRESSION_ROOT ?? process.cwd();
 const AREA: SpawnRegion = { x0: 0, y0: 0, x1: 1184, y1: 720 };
@@ -1127,6 +1137,61 @@ scenario("数值调参：关卡覆盖只作用于本局，清空后不残留", (
     effectiveWeapon(WEAPON_IDS.sniper).pierce!.maxTargets === WEAPONS[WEAPON_IDS.sniper].pierce!.maxTargets,
     "退出本局后武器子配置应回退基础定义",
   );
+});
+
+scenario("训练场单位库与实战同源：面板值读覆盖层，抖动为 0 时生成血量等于面板值", () => {
+  clearOverrides();
+  clearLevelOverrides();
+  // 模拟调参页把普通僵尸血量改成 103（用户走查里面板显示的数值来源）
+  setSetting("zombie.normal.hp", 103);
+  const listed = trainZombieTypes().find((t) => t.id === ZOMBIE_IDS.normal);
+  assert(listed !== undefined, "单位库应包含普通僵尸");
+  assert(listed!.hp === 103, `单位库应显示覆盖值 103，实际 ${listed!.hp}`);
+  assert(listed!.hp === effectiveZombie(ZOMBIE_IDS.normal).hp, "单位库必须与 effectiveZombie 同源");
+  assert(
+    listed!.hp !== ZOMBIE_DEFS[ZOMBIE_IDS.normal].hp,
+    "单位库不应再取注册表原始定义（否则就是面板与实战不同源）",
+  );
+
+  // 关掉抖动后，生成血量应精确等于面板值；抖动开启时只在面板值附近波动
+  setSetting("zombie.jitter", 0);
+  const world = new World(mapDef({ id: "t-train-hp" }));
+  const spawned = world.spawnZombie(400, 400, ZOMBIE_IDS.normal);
+  assert(spawned.hp === 103, `抖动为 0 时生成血量应等于面板值 103，实际 ${spawned.hp}`);
+
+  setSetting("zombie.jitter", 0.25);
+  const sampled = world.spawnZombie(420, 400, ZOMBIE_IDS.normal);
+  assert(
+    sampled.hp >= listed!.hp * 0.2 && sampled.hp <= listed!.hp * 2,
+    `抖动生成血量应夹在 20%–200% 内，实际 ${sampled.hp}`,
+  );
+  clearOverrides();
+});
+
+scenario("工坊地形持久化：草丛 / 水池写入 tiles 后可从 JSON 原样读回", () => {
+  const doc = createBlankDoc();
+  doc.id = "terrain-roundtrip";
+  doc.name = "地形回归图";
+  doc.humanZones = [{ x: 20, y: 20, w: 4, h: 4 }];
+  doc.spawnZones = [{ x: 40, y: 40, w: 4, h: 4 }];
+  // 与工坊画笔同一入口：批量写瓦片
+  for (let y = 10; y < 13; y++) for (let x = 10; x < 14; x++) setTile(doc, x, y, TILE_CODES.grass);
+  for (let y = 20; y < 23; y++) for (let x = 30; x < 33; x++) setTile(doc, x, y, TILE_CODES.water);
+
+  const json = toMapJson(doc);
+  assert(validateMapJson(json).length === 0, "含草丛 / 水池的工坊地图应通过校验");
+  assert(json.tiles[11].slice(10, 14) === "gggg", `草丛应落成 g 字符，实际「${json.tiles[11].slice(10, 14)}」`);
+  assert(json.tiles[21].slice(30, 33) === "~~~", `水池应落成 ~ 字符，实际「${json.tiles[21].slice(30, 33)}」`);
+
+  // 模拟保存后重新进入工坊：JSON 文本往返 → fromMapJson
+  const text = JSON.stringify(json);
+  const back = fromMapJson(JSON.parse(text) as MapJson);
+  assert(getTile(back, 11, 11) === TILE_CODES.grass, "读回后 (11,11) 应为草丛");
+  assert(getTile(back, 13, 12) === TILE_CODES.grass, "读回后 (13,12) 应为草丛");
+  assert(getTile(back, 31, 21) === TILE_CODES.water, "读回后 (31,21) 应为水池");
+  assert(getTile(back, 32, 22) === TILE_CODES.water, "读回后 (32,22) 应为水池");
+  assert(getTile(back, 12, 15) === TILE_CODES.empty, "未绘制处不应变成地形");
+  assert(back.humanZones.length === 1 && back.spawnZones.length === 1, "区域应随 JSON 一起读回");
 });
 
 scenario("数值调参：非开发者环境默认无权进入", () => {

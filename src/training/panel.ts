@@ -15,8 +15,8 @@ import { ZOMBIE_LIST, getZombieDef } from "../data/zombies";
 import type { Human, Zombie } from "../core/world";
 import {
   TRAIN_HUMAN_TYPES,
-  TRAIN_ZOMBIE_TYPES,
   TrainingSession,
+  trainZombieTypes,
   type SelectedUnit,
 } from "./session";
 
@@ -122,6 +122,8 @@ export class TrainingPanel {
     this.active = true;
     this.root.classList.add("open");
     this.editorKey = "";
+    // 进入训练场时重建单位库：僵尸数值走 effectiveZombie，调参页改动即时反映
+    this.buildLibraries();
     this.refreshMapOptions();
     this.refresh(1);
   }
@@ -164,6 +166,7 @@ export class TrainingPanel {
       <div class="tp-section">
         <h3>僵尸单位</h3>
         <div class="tp-lib" id="tpZombieLib"></div>
+        <div class="tp-hint" id="tpZombieNote"></div>
         <h3>人类单位</h3>
         <div class="tp-lib" id="tpHumanLib"></div>
         <div class="tp-hint" id="tpHint"></div>
@@ -277,13 +280,22 @@ export class TrainingPanel {
 
   private buildLibraries(): void {
     const zombieLib = this.el("tpZombieLib");
-    zombieLib.innerHTML = TRAIN_ZOMBIE_TYPES.map(
-      (t) => `<button class="tp-lib-btn" data-kind="zombie" data-id="${t.id}">
+    zombieLib.innerHTML = trainZombieTypes()
+      .map(
+        (t) => `<button class="tp-lib-btn" data-kind="zombie" data-id="${t.id}">
         <span class="tp-dot" style="background:${hexColor(t.color)}"></span>
         <span class="tp-lib-name">${t.name}</span>
         <span class="tp-lib-sub">${t.hp} HP · ${t.speed} 速 · ${t.damage} 攻</span>
       </button>`,
-    ).join("");
+      )
+      .join("");
+
+    // 面板值是生成均值；实战血量还会按调参页的 jitter 正态浮动，这里写清楚
+    const jitter = settings().zombie.jitter;
+    this.el("tpZombieNote").textContent =
+      jitter > 0
+        ? `基础值（已含调参覆盖）；生成时按抖动 ${Math.round(jitter * 100)}% 正态浮动，夹在 20%–200% 之间`
+        : "基础值（已含调参覆盖）；当前抖动为 0，生成血量与面板一致";
 
     const humanLib = this.el("tpHumanLib");
     humanLib.innerHTML = TRAIN_HUMAN_TYPES.map(
@@ -409,7 +421,7 @@ export class TrainingPanel {
   private refreshHint(): void {
     const armed = this.session.armed;
     if (armed) {
-      const list = armed.kind === "zombie" ? TRAIN_ZOMBIE_TYPES : TRAIN_HUMAN_TYPES;
+      const list = armed.kind === "zombie" ? trainZombieTypes() : TRAIN_HUMAN_TYPES;
       const name = list.find((t) => t.id === armed.id)?.name ?? armed.id;
       this.hintEl.textContent = `已选「${name}」：点击战场空地连续生成（再次点类型可换）`;
       return;

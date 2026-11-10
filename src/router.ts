@@ -22,11 +22,14 @@ const VALID_ROUTES: Record<string, Route> = {
 };
 
 export type RouteListener = (route: Route, old: Route) => void;
+/** 离开守卫：返回 false 表示拦下本次跳转（hash 会退回原处，不派发） */
+export type RouteGuard = (next: Route, old: Route) => boolean;
 
 class Router {
   private current: Route = "menu";
   private lastHash = "";
   private listeners: RouteListener[] = [];
+  private guard: RouteGuard | null = null;
 
   constructor() {
     window.addEventListener("hashchange", () => this.parseAndDispatch());
@@ -43,10 +46,21 @@ class Router {
     const next = VALID_ROUTES[this.pathOf()] ?? "menu";
     // 同路由但查询串变化（如 #/play?level=a → b）也要重新应用
     if (!force && next === this.current && hash === this.lastHash) return;
+    // 离开守卫（调参页有未保存草稿时确认）：拦下后把 hash 退回，不派发路由事件
+    if (!force && this.guard && next !== this.current && !this.guard(next, this.current)) {
+      const back = this.lastHash;
+      if (back && window.location.hash !== back) window.location.hash = back;
+      return;
+    }
     const old = this.current;
     this.current = next;
     this.lastHash = hash;
     for (const fn of this.listeners) fn(next, old);
+  }
+
+  /** 安装 / 卸载离开守卫 */
+  setGuard(fn: RouteGuard | null): void {
+    this.guard = fn;
   }
 
   /** 读取当前 hash 查询串（`#/play?level=level-1` → level-1） */

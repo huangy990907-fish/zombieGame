@@ -15,8 +15,22 @@
  * menu/levels/workshop 路由下 ticker 继续跑（保证 Pixi 渲染帧稳定），
  * 但 game.tick() 不被调用——战斗逻辑停止，画面冻结成静态背景。
  */
-import { getSetting, setSetting, clearLevelOverrides } from "./data/settings/runtime";
+import {
+  beginDraft,
+  clearLevelOverrides,
+  commitDraft,
+  endDraft,
+  getDraftSnapshot,
+  getSetting,
+  mergeDraft,
+  resetDraft,
+  setDraftSetting,
+  setSetting,
+} from "./data/settings/runtime";
 import { SLIDERS } from "./data/settings/sliders";
+import { ZOMBIE_DEFS, getZombieDef } from "./data/zombies";
+import { WEAPONS, getWeaponDef } from "./data/weapons";
+import { TuningPreview } from "./tuning/preview";
 import { loadBuiltinMaps, getMap, isReadOnlyMap, registerRuntimeMap, MAP_LIST } from "./data/maps";
 import { SURVIVAL } from "./data/survival/config";
 import { SurvivalSession } from "./survival/session";
@@ -38,11 +52,10 @@ import {
   clearSaveDir,
   exportToFile,
   getSaveDir,
-  importFromFile,
   loadProgress,
   loadSettings,
+  readSettingsFile,
   recordBeaten,
-  resetToDefaults,
   saveSettings,
   selectSaveDir,
 } from "./core/storage";
@@ -238,94 +251,342 @@ async function boot(): Promise<void> {
 
   // ============================================================
   // 数值调参页（开发者专属独立路由 #/tuning）
+  // 布局：顶部固定实时预览带 + 左侧分类导航 + 中间参数 + 右侧操作
+  // 保存模型：编辑只写草稿，点「保存」才提交覆盖层并落盘
   // ============================================================
 
-  /** 一个可折叠分区：僵尸 / 武器按实体拆分，避免单列过长 */
-  interface TuningSection {
-    key: string;
-    title: string;
-    note?: string;
-    items: SliderDef[];
+  type TuningCategory = "wave" | "human" | "zombie" | "weapons" | "opening" | "audio";
+
+  const TUNING_CATEGORIES: Array<{ key: TuningCategory; label: string }> = [
+    { key: "wave", label: "波次" },
+    { key: "human", label: "人类" },
+    { key: "zombie", label: "僵尸" },
+    { key: "weapons", label: "武器" },
+    { key: "opening", label: "门窗" },
+    { key: "audio", label: "音频" },
+  ];
+
+  /** 僵尸导航里的「全局」伪实体：jitter 这类跨类型参数 */
+  const GLOBAL_ZOMBIE = "__global";
+
+  interface TuningEntityOption {
+    id: string;
+    name: string;
   }
 
-  const SECTION_TITLES: Record<string, string> = {
-    wave: "波次 / 规模",
-    human: "人类配置",
-    zombie: "僵尸·全局",
-    opening: "门窗配置",
-    audio: "音频",
+  const zombieOptions: TuningEntityOption[] = [
+    { id: GLOBAL_ZOMBIE, name: "全局参数" },
+    ...Object.keys(ZOMBIE_DEFS).map((id) => ({ id, name: getZombieDef(id).name })),
+  ];
+  const weaponOptions: TuningEntityOption[] = Object.keys(WEAPONS).map((id) => ({
+    id,
+    name: getWeaponDef(id).name,
+  }));
+
+  const tuningNavEl = document.getElementById("tuningNav") as HTMLElement;
+  const tuningHeadingEl = document.getElementById("tuningHeading") as HTMLElement;
+  const tuningSaveStateEl = document.getElementById("tuningSaveState") as HTMLElement;
+  const tuningMatchEl = document.getElementById("tuningPreviewMatch") as HTMLElement;
+  const tpTtkEl = document.getElementById("tpTtk") as HTMLElement;
+  const tpAvgDpsEl = document.getElementById("tpAvgDps") as HTMLElement;
+  const tpNowDpsEl = document.getElementById("tpNowDps") as HTMLElement;
+  const tuningLeaveOverlay = document.getElementById("tuningLeaveOverlay") as HTMLElement;
+  const tuningPreview = new TuningPreview(
+    document.getElementById("tuningPreviewCanvas") as HTMLCanvasElement,
+  );
+
+  let tuningCategory: TuningCategory = "zombie";
+  /** 每个实体分类上次选中的项：切分类时沿用，不互相覆盖 */
+  const tuningSelection: Record<"zombie" | "weapons", string> = {
+    zombie: "normal",
+    weapons: "mg",
+  };
+  /** 草稿是否有未保存改动（路由守卫 / 返回确认 / 保存按钮共用） */
+  let tuningDirty = false;
+  let tuningPageActive = false;
+  let tuningStatsRaf = 0;
+  let pendingRoute: Route | null = null;
+
+  const setTuningSaveState = (text: string, tone: "idle" | "dirty" | "saved" = "idle"): void => {
+    tuningSaveStateEl.textContent = text;
+    tuningSaveStateEl.classList.toggle("dirty", tone === "dirty");
+    tuningSaveStateEl.classList.toggle("saved", tone === "saved");
   };
 
-  const sectionOf = (s: SliderDef): { key: string; title: string; note?: string } => {
-    const parts = s.path.split(".");
-    const name = s.label.split("·")[0];
-    if (parts[0] === "zombie" && parts.length > 2) {
-      return { key: `zombie.${parts[1]}`, title: `僵尸·${name}`, note: "对新生成单位生效" };
+  const markDirty = (): void => {
+    tuningDirty = true;
+    setTuningSaveState("● 有未保存的改动", "dirty");
+  };
+
+  /** 预览标题里的「武器 × 僵尸」 */
+  const refreshPreviewMatch = (): void => {
+    tuningMatchEl.textContent = `${getWeaponDef(tuningSelection.weapons).name} × ${
+      getZombieDef(tuningSelection.zombie).name
+    }`;
+  };
+
+  /** 预览始终跟随上一次选中的武器 / 僵尸，切换实体时重建场景 */
+  const applyPreviewSelection = (): void => {
+    tuningPreview.setWeapon(tuningSelection.weapons);
+    tuningPreview.setZombie(tuningSelection.zombie);
+    refreshPreviewMatch();
+  };
+
+  /** 当前分类下要展示的滑块 */
+  const slidersForSelection = (): SliderDef[] => {
+    if (tuningCategory === "zombie") {
+      const id = tuningSelection.zombie;
+      return SLIDERS.filter((s) => {
+        const parts = s.path.split(".");
+        if (parts[0] !== "zombie") return false;
+        return id === GLOBAL_ZOMBIE ? parts.length === 2 : parts[1] === id;
+      });
     }
-    if (parts[0] === "weapons" && parts.length > 2) {
-      return { key: `weapons.${parts[1]}`, title: `武器·${name}` };
+    if (tuningCategory === "weapons") {
+      const id = tuningSelection.weapons;
+      return SLIDERS.filter((s) => {
+        const parts = s.path.split(".");
+        return parts[0] === "weapons" && parts[1] === id;
+      });
     }
-    return {
-      key: parts[0],
-      title: SECTION_TITLES[parts[0]] ?? parts[0],
-      note: parts[0] === "opening" ? "血量项需重开本局" : undefined,
+    return SLIDERS.filter((s) => s.path.split(".")[0] === tuningCategory);
+  };
+
+  /** 实体参数去掉「实体名·」前缀，只留字段名 */
+  const shortLabel = (s: SliderDef): string => {
+    const i = s.label.indexOf("·");
+    return i >= 0 ? s.label.slice(i + 1) : s.label;
+  };
+
+  const headingForSelection = (): { title: string; note?: string } => {
+    switch (tuningCategory) {
+      case "wave":
+        return { title: "波次 / 规模" };
+      case "human":
+        return { title: "人类配置" };
+      case "opening":
+        return { title: "门窗配置", note: "血量项需重开本局" };
+      case "audio":
+        return { title: "音频", note: "保存后应用到音效" };
+      case "zombie": {
+        if (tuningSelection.zombie === GLOBAL_ZOMBIE) {
+          return { title: "僵尸 · 全局", note: "对新生成单位生效" };
+        }
+        return {
+          title: `僵尸 · ${getZombieDef(tuningSelection.zombie).name}`,
+          note: "对新生成单位生效",
+        };
+      }
+      case "weapons":
+        return { title: `武器 · ${getWeaponDef(tuningSelection.weapons).name}` };
+    }
+  };
+
+  const renderTuningNav = (): void => {
+    const entityList = (options: TuningEntityOption[], type: "zombie" | "weapons"): string => {
+      let html = `<div class="tuning-entity-list">`;
+      for (const opt of options) {
+        const active = tuningSelection[type] === opt.id ? " active" : "";
+        html += `<button class="tuning-entity${active}" data-entity="${opt.id}" data-etype="${type}">${opt.name}</button>`;
+      }
+      return `${html}</div>`;
     };
+
+    let html = "";
+    for (const cat of TUNING_CATEGORIES) {
+      html += `<button class="tuning-cat${cat.key === tuningCategory ? " active" : ""}" data-cat="${cat.key}">${cat.label}</button>`;
+      if (cat.key === "zombie" && tuningCategory === "zombie") html += entityList(zombieOptions, "zombie");
+      if (cat.key === "weapons" && tuningCategory === "weapons") html += entityList(weaponOptions, "weapons");
+    }
+    html += `<p class="tuning-nav-note">选中具体僵尸 / 武器后，中间只显示该实体的参数。碰撞半径只读。</p>`;
+    tuningNavEl.innerHTML = html;
+
+    tuningNavEl.querySelectorAll<HTMLButtonElement>("[data-cat]").forEach((btn) => {
+      btn.onclick = () => {
+        tuningCategory = btn.dataset.cat as TuningCategory;
+        renderTuningNav();
+        renderTuningParams();
+        applyPreviewSelection();
+      };
+    });
+    tuningNavEl.querySelectorAll<HTMLButtonElement>("[data-entity]").forEach((btn) => {
+      btn.onclick = () => {
+        const type = btn.dataset.etype as "zombie" | "weapons";
+        tuningSelection[type] = btn.dataset.entity!;
+        renderTuningNav();
+        renderTuningParams();
+        applyPreviewSelection();
+      };
+    });
   };
 
-  const buildTuningPanel = (): void => {
-    const sections = new Map<string, TuningSection>();
-    for (const s of SLIDERS) {
-      const meta = sectionOf(s);
-      const sec = sections.get(meta.key) ?? { ...meta, items: [] };
-      sec.items.push(s);
-      sections.set(meta.key, sec);
+  /** 只渲染当前选中实体的参数，不再平铺全部 151 个滑块 */
+  const renderTuningParams = (): void => {
+    const meta = headingForSelection();
+    tuningHeadingEl.innerHTML = `⚙ ${meta.title}${
+      meta.note ? ` <span class="group-note">· ${meta.note}</span>` : ""
+    }`;
+
+    const items = slidersForSelection();
+    if (items.length === 0) {
+      tuningBody.innerHTML = `<p class="tuning-nav-note">该实体暂无可调参数。</p>`;
+      return;
     }
 
     let html = "";
-    for (const sec of sections.values()) {
-      html += `<section class="tuning-group"><h3>${sec.title}${
-        sec.note ? ` <span class="group-note">· ${sec.note}</span>` : ""
-      }</h3>`;
-      for (const s of sec.items) {
-        if (s.readonly) {
-          html += `<div class="settings-row readonly" data-path="${s.path}" data-step="${s.step}">
-            <label>${s.label}</label>
-            <span class="val" data-val="${s.path}"></span>
-          </div>`;
-          continue;
-        }
-        html += `<div class="settings-row" data-path="${s.path}" data-step="${s.step}">
-          <label>${s.label}</label>
-          <input type="range"
-                 data-path="${s.path}"
-                 data-step="${s.step}"
-                 min="${s.min}"
-                 max="${s.max}"
-                 step="${s.step}" />
+    for (const s of items) {
+      if (s.readonly) {
+        html += `<div class="settings-row readonly" data-path="${s.path}" data-step="${s.step}">
+          <label>${shortLabel(s)}</label>
           <span class="val" data-val="${s.path}"></span>
-          ${s.note ? `<span class="row-note">${s.note}</span>` : ""}
         </div>`;
+        continue;
       }
-      html += `</section>`;
+      html += `<div class="settings-row" data-path="${s.path}" data-step="${s.step}">
+        <label>${shortLabel(s)}</label>
+        <input type="range"
+               data-path="${s.path}"
+               data-step="${s.step}"
+               min="${s.min}"
+               max="${s.max}"
+               step="${s.step}" />
+        <span class="val" data-val="${s.path}"></span>
+        ${s.note ? `<span class="row-note">${s.note}</span>` : ""}
+      </div>`;
     }
     tuningBody.innerHTML = html;
 
-    const inputs = tuningBody.querySelectorAll<HTMLInputElement>('input[type="range"]');
-    for (const input of inputs) {
+    tuningBody.querySelectorAll<HTMLInputElement>('input[type="range"]').forEach((input) => {
       const path = input.dataset.path!;
       const row = input.parentElement!;
       const valSpan = row.querySelector<HTMLSpanElement>(".val")!;
       input.addEventListener("input", () => {
         const v = Number(input.value);
-        setSetting(path, v);
+        // 只改草稿：不落盘、不进入玩法读取路径；预览会立刻读到
+        setDraftSetting(path, v);
         valSpan.textContent = formatVal(v, Number(input.dataset.step!));
-        void saveSettings();
-        // 音量滑块变化时即时同步到 AudioManager
-        if (path === "audio.master") sound.setMaster(v);
-        else if (path === "audio.sfx") sound.setSfx(v);
+        markDirty();
       });
-    }
+    });
     refreshPanelValues();
+  };
+
+  /** 顶部预览的读数刷新循环：离开页面必须停掉 */
+  const updatePreviewStats = (): void => {
+    if (!tuningPageActive) return;
+    const stats = tuningPreview.getStats();
+    tpTtkEl.textContent = stats.ttk === null ? "—" : `${stats.ttk.toFixed(2)} s`;
+    tpAvgDpsEl.textContent = stats.avgDps > 0 ? stats.avgDps.toFixed(1) : "—";
+    tpNowDpsEl.textContent = stats.recentDps > 0 ? stats.recentDps.toFixed(1) : "—";
+    tuningStatsRaf = requestAnimationFrame(updatePreviewStats);
+  };
+
+  const enterTuningPage = (): void => {
+    beginDraft();
+    tuningDirty = false;
+    setTuningSaveState("尚未修改");
+    renderTuningNav();
+    renderTuningParams();
+    applyPreviewSelection();
+    tuningPreview.start();
+    tuningPageActive = true;
+    // 窄屏整页滚动时，重新进入页面从顶部开始（下一帧 overlay 已显示）
+    requestAnimationFrame(() => {
+      tuningOverlay.scrollTop = 0;
+      window.scrollTo(0, 0);
+    });
+    if (tuningStatsRaf) cancelAnimationFrame(tuningStatsRaf);
+    tuningStatsRaf = requestAnimationFrame(updatePreviewStats);
+    void refreshStorageStatus();
+  };
+
+  /** 离开调参页：停 ticker、清预览场景与临时纹理、丢弃草稿 */
+  const leaveTuningPage = (): void => {
+    tuningPageActive = false;
+    if (tuningStatsRaf) cancelAnimationFrame(tuningStatsRaf);
+    tuningStatsRaf = 0;
+    tuningPreview.dispose();
+    endDraft();
+    tuningLeaveOverlay.classList.add("hidden");
+    tuningDirty = false;
+    pendingRoute = null;
+  };
+
+  /** 路由守卫：草稿未保存时拦下跳转（返回按钮走同一套确认） */
+  router.setGuard((next) => {
+    if (router.get() !== "tuning" || !tuningDirty) return true;
+    pendingRoute = next;
+    tuningLeaveOverlay.classList.remove("hidden");
+    return false;
+  });
+
+  document.getElementById("btnTuningLeaveCancel")!.onclick = () => {
+    tuningLeaveOverlay.classList.add("hidden");
+    pendingRoute = null;
+  };
+  document.getElementById("btnTuningLeaveConfirm")!.onclick = () => {
+    tuningLeaveOverlay.classList.add("hidden");
+    tuningDirty = false;
+    const target = pendingRoute ?? "menu";
+    pendingRoute = null;
+    router.go(target);
+  };
+
+  const saveTuningDraft = async (): Promise<void> => {
+    commitDraft();
+    await saveSettings();
+    // 音量属于玩法设置：保存后才真正应用到 AudioManager
+    sound.setMaster(getSetting("audio.master"));
+    sound.setSfx(getSetting("audio.sfx"));
+    tuningDirty = false;
+    const time = new Date().toLocaleTimeString("zh-CN", { hour12: false });
+    setTuningSaveState(`✅ 已保存 ${time}`, "saved");
+  };
+
+  const resetTuningDraft = (): void => {
+    resetDraft();
+    renderTuningParams();
+    markDirty();
+    setTuningSaveState("● 已恢复默认（未保存）", "dirty");
+  };
+
+  const importTuningDraft = async (): Promise<void> => {
+    const raw = await readSettingsFile();
+    if (!raw) return;
+    mergeDraft(raw);
+    renderTuningParams();
+    markDirty();
+    setTuningSaveState("● 已导入到草稿（未保存）", "dirty");
+    await refreshStorageStatus();
+  };
+
+  document.getElementById("btnTuningSave")!.onclick = () => {
+    sound.play(SFX.UI_CLICK);
+    void saveTuningDraft();
+  };
+  document.getElementById("btnTuningBack")!.onclick = () => {
+    sound.play(SFX.UI_CLICK);
+    if (tuningDirty) {
+      pendingRoute = "menu";
+      tuningLeaveOverlay.classList.remove("hidden");
+      return;
+    }
+    router.go("menu");
+  };
+  document.getElementById("btnResetDefaults")!.onclick = async () => {
+    if (!confirm("确定把草稿恢复为出厂默认？仍需点「保存」才会真正生效。")) return;
+    sound.play(SFX.UI_CLICK);
+    resetTuningDraft();
+  };
+  document.getElementById("btnImportSettings")!.onclick = async () => {
+    sound.play(SFX.UI_CLICK);
+    await importTuningDraft();
+  };
+  document.getElementById("btnExportSettings")!.onclick = async () => {
+    sound.play(SFX.UI_CLICK);
+    // 导出所见即所得：导出当前草稿快照
+    await exportToFile(getDraftSnapshot());
+    await refreshStorageStatus();
   };
 
   const refreshStorageStatus = async (): Promise<void> => {
@@ -367,6 +628,9 @@ async function boot(): Promise<void> {
       const v = getSetting(path);
       const valSpan = row.querySelector<HTMLSpanElement>(".val");
       if (valSpan) valSpan.textContent = formatVal(v, Number(row.dataset.step ?? "1"));
+      // 滑块位置也要跟随当前值（重建面板 / 恢复默认 / 导入草稿后）
+      const input = row.querySelector<HTMLInputElement>('input[type="range"]');
+      if (input) input.value = String(v);
     });
   };
 
@@ -693,6 +957,7 @@ async function boot(): Promise<void> {
     document.body.classList.remove("survival");
     heldKeys.clear();
     // 数值调参页只在 #/tuning 显示，其余路由一律收起
+    if (route !== "tuning" && tuningPageActive) leaveTuningPage();
     tuningOverlay.classList.remove("active");
     tuningOverlay.classList.add("hidden");
     // 离开选关页时关闭关卡编辑器弹层，避免覆盖其它页面
@@ -798,10 +1063,9 @@ async function boot(): Promise<void> {
           router.go("menu");
           break;
         }
-        buildTuningPanel();
+        enterTuningPage();
         tuningOverlay.classList.remove("hidden");
         requestAnimationFrame(() => tuningOverlay.classList.add("active"));
-        void refreshStorageStatus();
         sound.pause();
         break;
       }
@@ -989,29 +1253,12 @@ async function boot(): Promise<void> {
 
   backMenuBtn.onclick = () => router.go("menu");
 
-  // ====== 存档系统按钮 ======
+  // ====== 存档系统按钮（恢复默认 / 导入 / 导出已由调参页草稿逻辑接管） ======
   const pickDirBtn = document.getElementById("btnPickDir") as HTMLButtonElement;
   const clearDirBtn = document.getElementById("btnClearDir") as HTMLButtonElement;
-  const resetBtn = document.getElementById("btnResetDefaults") as HTMLButtonElement;
-  const exportBtn = document.getElementById("btnExportSettings") as HTMLButtonElement;
-  const importBtn = document.getElementById("btnImportSettings") as HTMLButtonElement;
 
   pickDirBtn.onclick = async () => { await selectSaveDir(); await refreshStorageStatus(); };
   clearDirBtn.onclick = async () => { await clearSaveDir(); await refreshStorageStatus(); };
-  resetBtn.onclick = async () => {
-    if (!confirm("确定恢复所有参数为出厂默认值？")) return;
-    await resetToDefaults();
-    refreshPanelValues();
-    await refreshStorageStatus();
-  };
-  exportBtn.onclick = async () => { await exportToFile(); await refreshStorageStatus(); };
-  importBtn.onclick = async () => {
-    const ok = await importFromFile();
-    if (ok) {
-      refreshPanelValues();
-      await refreshStorageStatus();
-    }
-  };
 
   // ====== 主菜单按钮 ======
   const placementBtn = document.getElementById("btnPlacement") as HTMLButtonElement;

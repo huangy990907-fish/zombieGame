@@ -87,7 +87,7 @@
           <button class="menu-btn" id="btnSurvival">🧟 尸潮求生</button>
           <button class="menu-btn training" id="btnTraining">🧪 训练场</button>
           <button class="menu-btn workshop hidden" id="btnWorkshop">🛠 地图工坊</button>
-          <button class="menu-btn tuning hidden" id="btnTuning">⚙ 数值调参（开发者）</button>
+          <button class="menu-btn tuning hidden" id="btnTuning">⚙ 数值调参</button>
           <button class="menu-btn" id="btnMenuSettings">⚙ 设置</button>
         </div>
         <p class="menu-footer">放置人类守住房间 · 尸潮求生单角色 Roguelike · 训练场可自由生成单位</p>
@@ -262,23 +262,66 @@
     <!-- ===== 数值调参 —— 开发者专属独立页面（#/tuning），游玩界面不再提供入口 ===== -->
     <div id="tuningOverlay" class="overlay tuning-overlay hidden">
       <div class="tuning-shell">
-        <div class="tuning-head">
-          <button class="back-btn" id="btnTuningBack">← 返回主菜单</button>
-          <h2 class="tuning-title">⚙ 数值调参</h2>
-          <div class="storage-btns">
-            <button class="storage-btn" id="btnPickDir" title="选择本地存档文件夹，之后自动读写（需要 Chrome/Edge + localhost 或 HTTPS）">📁 选存档目录</button>
-            <button class="storage-btn" id="btnClearDir" disabled title="清除已授权的存档目录（保留 localStorage 兜底）">🧹 清除目录</button>
-            <button class="storage-btn" id="btnExportSettings" title="导出当前设置为 JSON 文件，跨设备分享">⬇ 导出</button>
-            <button class="storage-btn" id="btnImportSettings" title="从 JSON 文件导入设置">⬆ 导入</button>
-            <button class="storage-btn danger" id="btnResetDefaults" title="恢复所有参数为出厂默认值">↺ 恢复默认</button>
+        <!-- 顶部固定预览带：不随参数区滚动 -->
+        <section class="tuning-preview" id="tuningPreview">
+          <div class="tuning-preview-head">
+            <span class="tuning-preview-title">实时预览</span>
+            <span class="tuning-preview-match" id="tuningPreviewMatch">机枪 × 普通僵尸</span>
+            <span class="tuning-preview-hint">预览读取草稿值 · 未保存也立即反映</span>
           </div>
+          <div class="tuning-preview-stage">
+            <canvas id="tuningPreviewCanvas"></canvas>
+          </div>
+          <div class="tuning-preview-stats">
+            <span>击杀耗时 <b id="tpTtk">—</b></span>
+            <span>平均 DPS <b id="tpAvgDps">—</b></span>
+            <span>近 3 秒 DPS <b id="tpNowDps">—</b></span>
+          </div>
+        </section>
+
+        <div class="tuning-main">
+          <!-- 左侧分类导航：分类 → 具体实体 -->
+          <nav class="tuning-nav" id="tuningNav"></nav>
+
+          <!-- 中间参数区：只显示当前选中实体的参数 -->
+          <div class="tuning-param-col">
+            <div class="tuning-head">
+              <h2 class="tuning-title" id="tuningHeading">⚙ 数值调参</h2>
+              <div class="tuning-save-state" id="tuningSaveState">尚未修改</div>
+            </div>
+            <div id="tuningBody" class="tuning-body"></div>
+          </div>
+
+          <!-- 右侧操作区 -->
+          <aside class="tuning-actions">
+            <div id="storageStatus" class="storage-status">💾 加载中…</div>
+            <button class="menu-btn primary" id="btnTuningSave">💾 保存</button>
+            <button class="menu-btn" id="btnTuningBack">← 返回主菜单</button>
+            <button class="menu-btn" id="btnResetDefaults">↺ 恢复默认</button>
+            <button class="menu-btn" id="btnImportSettings">⬆ 导入</button>
+            <button class="menu-btn" id="btnExportSettings">⬇ 导出</button>
+            <div class="storage-btns tuning-storage">
+              <button class="storage-btn" id="btnPickDir" title="选择本地存档文件夹，之后自动读写（需要 Chrome/Edge + localhost 或 HTTPS）">📁 选存档目录</button>
+              <button class="storage-btn" id="btnClearDir" disabled title="清除已授权的存档目录（保留 localStorage 兜底）">🧹 清除目录</button>
+            </div>
+            <p class="foot">
+              保存后才生效 · 僵尸属性只作用于之后新生成的单位 · 门窗血量需重开本局才应用<br />
+              僵尸碰撞半径只读：它同时决定碰撞、区域图与开口净宽，改动会让地图通行失真<br />
+              存档格式 v1 · 保存时写入 localStorage 与已授权目录
+            </p>
+          </aside>
         </div>
-        <div id="storageStatus" class="storage-status">💾 加载中…</div>
-        <div id="tuningBody" class="tuning-body"></div>
-        <div class="foot">
-          保存即生效 · 僵尸属性只作用于之后新生成的单位 · 门窗血量需重开本局才应用<br />
-          僵尸碰撞半径只读：它同时决定碰撞、区域图与开口净宽，改动会让地图通行失真<br />
-          存档格式 v1 · 每次修改自动写 localStorage · 选了文件夹再额外自动写盘
+      </div>
+    </div>
+
+    <!-- ===== 调参页离开确认：有未保存草稿时拦截返回 / 路由切换 ===== -->
+    <div id="tuningLeaveOverlay" class="overlay menu-modal hidden">
+      <div class="menu-modal-card small">
+        <h2>有未保存的改动</h2>
+        <p class="menu-modal-desc">离开后草稿会丢弃，这些改动不会生效。确定放弃吗？</p>
+        <div class="menu-modal-actions">
+          <button class="menu-btn" id="btnTuningLeaveCancel">继续编辑</button>
+          <button class="menu-btn danger" id="btnTuningLeaveConfirm">放弃改动</button>
         </div>
       </div>
     </div>

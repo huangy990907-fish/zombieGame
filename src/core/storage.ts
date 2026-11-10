@@ -215,8 +215,8 @@ export async function loadFromDir(): Promise<boolean> {
 // ============================================================
 
 /** 导出：把当前 SETTINGS 打包成 JSON 给用户存到任意位置 */
-export async function exportToFile(): Promise<void> {
-  const content = buildSavePayload();
+export async function exportToFile(snapshot = getOverridesSnapshot()): Promise<void> {
+  const content = buildSavePayload(snapshot);
   if (FSA_SUPPORTED) {
     try {
       const handle = await (window as unknown as { showSaveFilePicker: () => Promise<FileSystemFileHandle> }).showSaveFilePicker();
@@ -241,46 +241,58 @@ export async function exportToFile(): Promise<void> {
   }
 }
 
-/** 导入：读 JSON 文件，校验版本，合并到 SETTINGS 并自动保存 */
-export async function importFromFile(): Promise<boolean> {
-  let text: string | null = null;
+/** 让用户挑一个 JSON 文件并读成文本；取消 / 失败返回 null */
+async function pickFileText(): Promise<string | null> {
   if (FSA_SUPPORTED) {
     try {
       const handles = await (window as unknown as { showOpenFilePicker: () => Promise<FileSystemFileHandle[]> }).showOpenFilePicker();
       const file = await handles[0].getFile();
-      text = await file.text();
+      return await file.text();
     } catch (e) {
-      if ((e as { name?: string })?.name !== "AbortError") console.warn("importFromFile failed", e);
-      return false;
+      if ((e as { name?: string })?.name !== "AbortError") console.warn("pickFileText failed", e);
+      return null;
     }
-  } else {
-    // 降级：隐藏 input[type=file]
-    text = await new Promise((resolve) => {
-      const input = document.createElement("input");
-      input.type = "file";
-      input.accept = "application/json,.json";
-      input.onchange = () => {
-        const f = input.files?.[0];
-        if (!f) {
-          resolve(null);
-          return;
-        }
-        const reader = new FileReader();
-        reader.onload = () => resolve(reader.result as string);
-        reader.onerror = () => resolve(null);
-        reader.readAsText(f);
-      };
-      input.click();
-    });
-    if (!text) return false;
   }
-  if (!text) return false; // 兜底，TypeScript 收窄不到这一步
+  // 降级：隐藏 input[type=file]
+  return new Promise((resolve) => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = "application/json,.json";
+    input.onchange = () => {
+      const f = input.files?.[0];
+      if (!f) {
+        resolve(null);
+        return;
+      }
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result as string);
+      reader.onerror = () => resolve(null);
+      reader.readAsText(f);
+    };
+    input.click();
+  });
+}
+
+/** 导入：读 JSON 文件，校验版本，合并到 SETTINGS 并自动保存 */
+export async function importFromFile(): Promise<boolean> {
+  const text = await pickFileText();
+  if (!text) return false;
   const ok = applySaveJSON(text);
   if (ok) {
     saveToLocal();
     await saveToDir();
   }
   return ok;
+}
+
+/**
+ * 读取存档文件的 settings 内容但不合并、不落盘。
+ * 数值调参页「导入」只作用于草稿，因此需要先拿到纯数据。
+ */
+export async function readSettingsFile(): Promise<unknown | null> {
+  const text = await pickFileText();
+  if (!text) return null;
+  return parseSaveJSON(text);
 }
 
 /** localStorage key：存进度（解锁关卡、已通关关卡） */
@@ -403,37 +415,44 @@ export async function resetToDefaults(): Promise<void> {
 // 内部：payload 构造 & 版本校验 & 合并
 // ============================================================
 
-function buildSavePayload(): string {
+function buildSavePayload(snapshot = getOverridesSnapshot()): string {
   const payload = {
     _version: SAVE_VERSION,
     _exportedAt: new Date().toISOString(),
-    settings: getOverridesSnapshot(),
+    settings: snapshot,
   };
   return JSON.stringify(payload, null, 2);
 }
 
-/** 校验 JSON 结构 + 合并到 SETTINGS。版本不匹配会弹 warning */
-function applySaveJSON(text: string): boolean {
+/** 校验 JSON 结构并取出 settings（不合并、不落盘） */
+function parseSaveJSON(text: string): unknown | null {
   let data: { _version?: unknown; settings?: unknown } | null = null;
   try {
     data = JSON.parse(text);
   } catch {
     console.warn("存档 JSON 解析失败");
-    return false;
+    return null;
   }
-  if (!data || typeof data !== "object") return false;
+  if (!data || typeof data !== "object") return null;
   if (data._version !== undefined && data._version !== SAVE_VERSION) {
     // 版本号不一致（比如用户读了个未来版本 / 老版本）—— 弹 warning 但尽量兼容
     const ok = confirm(
       `存档版本是 v${data._version}，当前游戏格式是 v${SAVE_VERSION}。\n\n` +
         `继续导入可能导致部分字段丢失或使用默认值。是否继续？`,
     );
-    if (!ok) return false;
+    if (!ok) return null;
   }
   if (!data.settings || typeof data.settings !== "object") {
     console.warn("存档缺 settings 字段");
-    return false;
+    return null;
   }
-  mergeOverrides(data.settings);
+  return data.settings;
+}
+
+/** 校验 JSON 结构 + 合并到 SETTINGS。版本不匹配会弹 warning */
+function applySaveJSON(text: string): boolean {
+  const settings = parseSaveJSON(text);
+  if (!settings) return false;
+  mergeOverrides(settings);
   return true;
 }

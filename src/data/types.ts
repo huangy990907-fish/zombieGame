@@ -39,7 +39,7 @@ export type ZombiePursuitMode = "breach" | "direct";
 
 /**
  * 飞扑者的行为参数。
- * 蓄力完成后按 3 倍移速直线扑向目标；扑中进入压制，扑空进入硬直。
+ * 蓄力完成后按 3 倍移速直线扑向目标；扑中附身压制，扑空进入冷却（只移动不攻击）。
  */
 export interface ZombieLeapConfig {
   /** 触发蓄力的范围（像素），只对“可见”人类生效 */
@@ -55,14 +55,23 @@ export interface ZombieLeapConfig {
   /** 飞扑最短 / 最长时间（秒），按起跳距离换算后夹在这个区间 */
   leapMinTime: number;
   leapMaxTime: number;
-  /** 扑空后的硬直时长（秒） */
+  /** 扑空 / 挣脱后的冷却时长（秒），冷却期间只移动、不蓄力不飞扑 */
   missStun: number;
   /** 压制持续时长（秒） */
   pinDuration: number;
-  /** 被压制人类的移速倍率 */
+  /** 被压制人类的移速倍率（0 = 完全不能移动） */
   pinMoveMul: number;
   /** 被压制人类每秒掉血 */
   pinDps: number;
+  /** 挣脱时把飞扑者弹开的距离（像素） */
+  pinKnockback?: number;
+  /**
+   * 求生模式：连点方向键每次缩短的压制时间（秒）。
+   * 未设置时方向键不会缩短挣脱时间（放置模式保持纯计时）。
+   */
+  pinTapStep?: number;
+  /** 连点缩短的下限（秒），防止瞬间挣脱 */
+  pinTapMin?: number;
 }
 
 /** 腐蚀者的远程吐毒与死亡留毒参数 */

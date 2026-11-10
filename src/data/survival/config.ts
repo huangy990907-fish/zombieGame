@@ -244,13 +244,14 @@ export const SURVIVAL_WEAPON_POOL: readonly string[] = [
 /**
  * 求生模式的僵尸数值覆盖表 —— 求生与其它模式的平衡互不影响，基础定义文件不动。
  * 缺失字段回退 `src/data/zombies/*.ts` 的基础值：
- *  - 飞扑者压制：基础 3s / 8 DPS → 求生 1.5s / 4 DPS
+ *  - 飞扑者压制：基础 5s / 4 DPS，求生可连点方向键缩短到 1.5s
  *  - 腐蚀者毒液：基础 6 DPS → 求生 4 DPS（单角色没有队友分摊，远程伤害更致命）
  * 以后某模式需要不同的血量 / 承伤 / 移速，也在这张表里给对应 id 加字段即可。
  */
 export const SURVIVAL_ZOMBIE_OVERRIDES: ZombieModeOverrideTable = {
   [ZOMBIE_IDS.leaper]: {
-    leap: { pinDuration: 1.5, pinDps: 4 },
+    // 玩家是唯一人类：被扑后只能靠连点方向键缩短挣脱，最少压到 1.5 秒
+    leap: { pinDuration: 5, pinDps: 4, pinTapStep: 0.25, pinTapMin: 1.5 },
   },
   [ZOMBIE_IDS.corroder]: {
     spit: { dps: 4 },

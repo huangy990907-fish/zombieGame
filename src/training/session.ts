@@ -617,6 +617,7 @@ export class TrainingSession {
     this.world.bullets.length = 0;
     this.world.effects.length = 0;
     this.world.poison.length = 0;
+    this.world.poisonShots.length = 0;
     this.floaters.length = 0;
     this.spawnTimes.clear();
     this.selectedId = null;

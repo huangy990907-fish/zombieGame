@@ -129,6 +129,8 @@ export class Renderer {
   private arcLayer = new Graphics();
   /** 高速弹道曳光：独立 Graphics 层，每帧按弹丸位置重画短线 */
   private tracerLayer = new Graphics();
+  /** 腐蚀者毒液弹：画抛物线轨迹与落点阴影，位于单位之上、特效之下 */
+  private poisonShotLayer = new Graphics();
   private selectionLayer = new Graphics();
   private textLayer = new Container();
   private dot!: Texture;
@@ -213,6 +215,7 @@ export class Renderer {
       this.deathLayer,
       this.unitLayer,
       this.tracerLayer,
+      this.poisonShotLayer,
       this.fxLayer,
       this.arcLayer,
       this.openingLayer,
@@ -502,6 +505,42 @@ export class Renderer {
         const by = p.y + Math.sin(ang) * rr + Math.sin(this.t * 2.4 + k) * 2;
         g.circle(bx, by, 2 + (k % 2) * 0.8).fill({ color: 0xd9f99d, alpha: 0.55 * fade });
       }
+    }
+
+    // 飞行中的毒液弹：地面阴影 + 抛物线弧线 + 毒液球，和落地毒圈区分开
+    const sg = this.poisonShotLayer;
+    sg.clear();
+    for (let i = 0; i < world.poisonShots.length; i++) {
+      const s = world.poisonShots[i];
+      const p = Math.min(1, s.t / s.dur);
+      const dist = Math.hypot(s.tx - s.x0, s.ty - s.y0);
+      const arcH = 18 + Math.min(34, dist * 0.09);
+      const lift = Math.sin(Math.PI * p) * arcH;
+      // 落点阴影：提前画出目标位置，人类可以据此走位
+      sg.ellipse(s.tx, s.ty, s.radius * 0.5, s.radius * 0.26).fill({
+        color: 0x365314,
+        alpha: 0.22,
+      });
+      sg.circle(s.tx, s.ty, s.radius * 0.5).stroke({ width: 1, color: 0xa3e635, alpha: 0.3 });
+      // 抛物线轨迹：沿飞行路径采样 6 段，越靠近弹体越亮
+      for (let k = 5; k >= 1; k--) {
+        const q = Math.max(0, p - k * 0.045);
+        const tx = s.x0 + (s.tx - s.x0) * q;
+        const ty = s.y0 + (s.ty - s.y0) * q;
+        const th = Math.sin(Math.PI * q) * arcH;
+        sg.circle(tx, ty - th, 1.8 + (5 - k) * 0.35).fill({
+          color: 0x84cc16,
+          alpha: 0.1 + (5 - k) * 0.06,
+        });
+      }
+      // 弹体：深绿球 + 高光，飞得越高地面阴影越小
+      const shrink = 1 - (lift / (arcH + 1)) * 0.35;
+      sg.circle(s.x, s.y - lift, 4.6 * shrink).fill({ color: 0x4d7c0f, alpha: 0.95 });
+      sg.circle(s.x, s.y - lift, 4.6 * shrink).stroke({ width: 1, color: 0xecfccb, alpha: 0.7 });
+      sg.circle(s.x - 1.2, s.y - lift - 1.2, 1.5 * shrink).fill({
+        color: 0xd9f99d,
+        alpha: 0.9,
+      });
     }
   }
 

@@ -55,6 +55,30 @@ export interface PoisonEffect {
   speedMul: number;
 }
 
+/**
+ * 腐蚀者吐出的抛物线毒液弹。
+ * 飞行途中只有视觉表现：不造成伤害、不伤僵尸、不挡子弹与视线；
+ * 落地（t >= dur）才在落点生成一团 PoisonPool。
+ */
+export interface PoisonShot {
+  /** 起点（吐出瞬间腐蚀者位置） */
+  x0: number;
+  y0: number;
+  /** 当前坐标（每帧按线性插值推进；高度由渲染层按抛物线补） */
+  x: number;
+  y: number;
+  /** 锁定落点（吐出瞬间人类所在位置，之后不再追踪） */
+  tx: number;
+  ty: number;
+  /** 已飞行时间 / 总飞行时间（秒） */
+  t: number;
+  dur: number;
+  radius: number;
+  duration: number;
+  dps: number;
+  speedMul: number;
+}
+
 export interface Human {
   id: number;
   x: number;
@@ -204,12 +228,18 @@ export interface Zombie {
   /** 漫游是否处于停顿段 */
   wanderRest: boolean;
   /**
-   * 飞扑者状态机：0 无 / 1 蓄力 / 2 飞扑 / 3 落地硬直。
+   * 飞扑者状态机：0 无 / 1 蓄力 / 2 飞扑。扑空或挣脱后回到 0，
+   * 由 leapCooldown 控制攻击冷却（冷却期间照常移动）。
    * 非飞扑者恒为 0，不参与任何判定。
    */
-  leapPhase: 0 | 1 | 2 | 3;
-  /** 当前蓄力 / 飞扑 / 硬直的剩余时间（秒） */
+  leapPhase: 0 | 1 | 2;
+  /** 当前蓄力 / 飞扑状态的剩余时间（秒） */
   leapTimer: number;
+  /**
+   * 扑空或挣脱后的攻击冷却（秒）：>0 时照常移动，但不会蓄力 / 飞扑。
+   * 非飞扑者恒为 0。
+   */
+  leapCooldown: number;
   /** 蓄力时锁定的目标人类 id；null 表示没有目标 */
   leapTargetId: number | null;
   /** 飞扑方向（单位向量），起跳瞬间锁定，保证直线扑出 */
@@ -358,6 +388,8 @@ export class World {
   zombies: Zombie[] = [];
   bullets: Bullet[] = [];
   effects: Effect[] = [];
+  /** 飞行中的腐蚀毒液弹；落地后转成 poison 池 */
+  poisonShots: PoisonShot[] = [];
   /** 本局的门窗实例 —— 重开时按地图默认值 + 玩家覆盖值重建 */
   openings: Opening[];
   /** 防守岗哨点，由 Game.assignPosts() 开局分配 */
@@ -519,6 +551,87 @@ export class World {
       }
     }
     this.tickPoison(dt);
+    this.tickPoisonShots(dt);
+  }
+
+  /**
+   * 吐出一发抛物线毒液弹。落点在吐出瞬间锁定，飞行途中不追踪，
+   * 所以人类可以在 0.6–0.8 秒的飞行时间里走位躲开。
+   * 飞行本身不结算任何伤害，落地后由 tickPoisonShots 生成毒液池。
+   */
+  spitPoison(
+    x0: number,
+    y0: number,
+    tx: number,
+    ty: number,
+    radius: number,
+    duration: number,
+    dps: number,
+    speedMul: number,
+  ): void {
+    const dist = Math.hypot(tx - x0, ty - y0);
+    // 飞行时长按距离换算并夹在 0.6–0.8 秒：太近也要看得见飞行过程
+    const dur = Math.max(0.6, Math.min(0.8, dist / 300));
+    this.poisonShots.push({
+      x0,
+      y0,
+      x: x0,
+      y: y0,
+      tx,
+      ty,
+      t: 0,
+      dur,
+      radius,
+      duration,
+      dps,
+      speedMul,
+    });
+  }
+
+  /** 推进毒液弹；落地瞬间生成毒液池并留下溅射特效 */
+  private tickPoisonShots(dt: number): void {
+    if (this.poisonShots.length === 0) return;
+    let write = 0;
+    for (let i = 0; i < this.poisonShots.length; i++) {
+      const s = this.poisonShots[i];
+      s.t += dt;
+      const p = Math.min(1, s.t / s.dur);
+      s.x = s.x0 + (s.tx - s.x0) * p;
+      s.y = s.y0 + (s.ty - s.y0) * p;
+      if (p < 1) {
+        this.poisonShots[write++] = s;
+        continue;
+      }
+      this.addPoison(s.tx, s.ty, s.radius, s.duration, s.dps, s.speedMul);
+      // 落地溅射：一圈扩散环 + 几团绿色小雾，与飞行中的毒液弹明显区分
+      this.effects.push({
+        kind: "ring",
+        x: s.tx,
+        y: s.ty,
+        angle: 0,
+        radius: s.radius * 0.6,
+        color: 0x84cc16,
+        age: 0,
+        life: 0.3,
+      });
+      for (let k = 0; k < 5; k++) {
+        const a = (k / 5) * Math.PI * 2 + Math.random() * 0.4;
+        const speed = 40 + Math.random() * 30;
+        this.effects.push({
+          kind: "ember",
+          x: s.tx + Math.cos(a) * s.radius * 0.35,
+          y: s.ty + Math.sin(a) * s.radius * 0.35,
+          angle: a,
+          radius: 2.2 + Math.random() * 1.4,
+          color: 0xa3e635,
+          vx: Math.cos(a) * speed,
+          vy: Math.sin(a) * speed,
+          age: 0,
+          life: 0.2 + Math.random() * 0.12,
+        });
+      }
+    }
+    this.poisonShots.length = write;
   }
 
   /**
@@ -843,6 +956,7 @@ export class World {
       wanderRest: false,
       leapPhase: 0,
       leapTimer: 0,
+      leapCooldown: 0,
       leapTargetId: null,
       leapDX: 0,
       leapDY: 0,

@@ -1170,6 +1170,8 @@ async function boot(): Promise<void> {
       if (moveKeys.includes(e.code)) {
         e.preventDefault();
         heldKeys.add(e.code);
+        // 连点方向键可缩短飞扑者附身时间（长按的重复事件不计，必须真“连点”）
+        if (!e.repeat) survival.tapEscape();
         return;
       }
       if (e.code === "Space" || e.key === " ") {

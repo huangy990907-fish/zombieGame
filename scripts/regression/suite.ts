@@ -591,7 +591,7 @@ scenario("狙击枪：穿透 2 个目标，第二目标吃 60%，单条弹道不
   assert(world.effects.some((e) => e.kind === "blood"), "狙击枪命中应产生血雾特效");
 });
 
-scenario("飞扑者：蓄力受击只延长不打断，扑中压制 3 秒后自动挣脱", () => {
+scenario("飞扑者：蓄力受击只延长不打断，扑中附身 5 秒后自动挣脱", () => {
   // 受击延长：0.6 + 0.12 = 0.72；连续受击夹在 2.0 秒上限
   const chargeWorld = new World(mapDef({ id: "t-leaper-charge" }));
   const cz = chargeWorld.spawnZombie(100, 100, ZOMBIE_IDS.leaper);
@@ -614,6 +614,7 @@ scenario("飞扑者：蓄力受击只延长不打断，扑中压制 3 秒后自�
   h.ammo = 0;
   h.reloadTimer = 999;
   const z = world.spawnZombie(660, 360, ZOMBIE_IDS.leaper);
+  assert(z.bodyDiameter === 11 && z.radius === 5.5, "飞扑者碰撞体应为半径 5.5 / 直径 11");
   z.hp = z.maxHp = 100000;
   z.speed = 150;
   world.rebuildGrids();
@@ -629,10 +630,24 @@ scenario("飞扑者：蓄力受击只延长不打断，扑中压制 3 秒后自�
   }
   assert(pinned, "飞扑者应在 3 秒内扑中并压制目标");
   assert(h.pinBy === z.id, "压制者应是该飞扑者");
+  // 附身期间：人类不能移动、不能开火
   const hpAtPin = h.hp;
+  const xAtPin = h.x;
+  h.moveX = 1;
+  for (let f = 0; f < 60; f++) {
+    updateHumans(world, 1 / 60);
+    updateZombies(world, 1 / 60);
+  }
+  assert(Math.abs(h.x - xAtPin) < 0.01, `附身期间人类不应移动，实际位移 ${(h.x - xAtPin).toFixed(2)}`);
+  assert(z.pinTargetId === h.id, "附身期间飞扑者应持续贴在目标身上");
+  assert(
+    Math.hypot(z.x - h.x, z.y - h.y) < 12,
+    "附身期间飞扑者应吸附在人类身上（不会留在原地）",
+  );
+  h.moveX = 0;
 
   let released = false;
-  for (let f = 0; f < 240; f++) {
+  for (let f = 0; f < 360; f++) {
     updateHumans(world, 1 / 60);
     updateZombies(world, 1 / 60);
     if (h.pinTimer <= 0) {
@@ -640,11 +655,74 @@ scenario("飞扑者：蓄力受击只延长不打断，扑中压制 3 秒后自�
       break;
     }
   }
-  assert(released, "压制应在约 3 秒后自动挣脱");
+  assert(released, "压制应在约 5 秒后自动挣脱");
   assert(z.pinTargetId === null, "挣脱后飞扑者应清除压制目标");
   assert(h.pinBy === null, "挣脱后人类应清除压制来源");
   const lost = hpAtPin - h.hp;
-  assert(lost >= 20 && lost <= 28, `3 秒压制应掉约 24 血，实际 ${lost.toFixed(1)}`);
+  assert(lost >= 17 && lost <= 22, `5 秒压制应按 4 DPS 掉约 20 血，实际 ${lost.toFixed(1)}`);
+  assert(z.leapCooldown > 2.5, `挣脱后飞扑者应进入 3 秒攻击冷却，实际 ${z.leapCooldown.toFixed(2)}`);
+  assert(
+    Math.hypot(z.x - h.x, z.y - h.y) > 8,
+    "挣脱时飞扑者应被弹开一段距离",
+  );
+
+  // 冷却期间只移动不攻击：把目标放回触发半径内，冷却结束前不应重新蓄力
+  h.pinTimer = 0;
+  h.pinBy = null;
+  z.leapCooldown = 3;
+  z.x = h.x + 40;
+  z.y = h.y;
+  for (let f = 0; f < 120; f++) {
+    updateHumans(world, 1 / 60);
+    updateZombies(world, 1 / 60);
+  }
+  assert(z.leapPhase === 0, "冷却期间不应进入蓄力 / 飞扑");
+  assert(z.leapCooldown > 0.9, `冷却应仍在计时，实际 ${z.leapCooldown.toFixed(2)}`);
+
+  // 扑空：同样进入 3 秒攻击冷却，且立刻回到可移动状态
+  const missWorld = new World(mapDef({ id: "t-leaper-miss" }));
+  const mz = missWorld.spawnZombie(600, 360, ZOMBIE_IDS.leaper);
+  mz.leapPhase = 2;
+  mz.leapTimer = 0.001;
+  mz.leapTargetId = null;
+  mz.leapDX = 1;
+  mz.leapDY = 0;
+  updateZombies(missWorld, 1 / 60);
+  assert(mz.leapPhase === 0, "扑空后应退出飞扑状态");
+  assert(mz.leapCooldown > 2.9, `扑空应进入 3 秒冷却，实际 ${mz.leapCooldown.toFixed(2)}`);
+
+  // 击杀压制者：人类立刻解除，不需要等计时
+  const killWorld = new World(mapDef({ id: "t-leaper-kill" }));
+  const kh = killWorld.spawnHuman(600, 360, "mg");
+  kh.manual = true;
+  const kz = killWorld.spawnZombie(606, 360, ZOMBIE_IDS.leaper);
+  kh.pinTimer = 5;
+  kh.pinBy = kz.id;
+  kz.pinTargetId = kh.id;
+  damageZombie(killWorld, kz, kz.hp + 10);
+  killWorld.rebuildGrids();
+  updateHumans(killWorld, 1 / 60);
+  assert(kh.pinTimer === 0 && kh.pinBy === null, "击杀压制者后人类应立即解除附身");
+});
+
+scenario("求生飞扑附身：连点方向键把挣脱时间压到 1.5 秒下限", () => {
+  const s = new SurvivalSession();
+  s.start();
+  const p = s.player!;
+  const z = s.world.spawnZombie(p.x + 20, p.y, ZOMBIE_IDS.leaper);
+  p.pinTimer = 5;
+  p.pinBy = z.id;
+  z.pinTargetId = p.id;
+
+  s.tapEscape();
+  assert(Math.abs(p.pinTimer - 4.75) < 1e-9, `每次连点应缩短 0.25 秒，实际剩 ${p.pinTimer}`);
+  for (let i = 0; i < 30; i++) s.tapEscape();
+  assert(Math.abs(p.pinTimer - 1.5) < 1e-9, `连点最多只能压到 1.5 秒，实际 ${p.pinTimer}`);
+  // 未被压制时连点不产生任何效果
+  p.pinTimer = 0;
+  p.pinBy = null;
+  s.tapEscape();
+  assert(p.pinTimer === 0, "未附身时连点方向键不应影响计时");
 });
 
 scenario("腐蚀毒液：持续伤害 / 减速 / 不叠加 / 不伤僵尸 / 不挡子弹与视线", () => {
@@ -705,16 +783,41 @@ scenario("腐蚀者：射程内吐毒，死亡在尸体位置留下大毒团", (
   world.rebuildGrids();
 
   updateZombies(world, 1 / 60);
-  assert(world.poison.length === 1, "腐蚀者应在 200px 射程内立即吐毒");
+  assert(world.poison.length === 0, "吐毒瞬间不应直接在地图生成毒圈");
+  assert(world.poisonShots.length === 1, "腐蚀者应吐出一发飞行中的毒液弹");
+  const shot = world.poisonShots[0];
+  assert(
+    Math.abs(shot.tx - h.x) < 1 && Math.abs(shot.ty - h.y) < 1,
+    `落点应锁定吐出瞬间人类的位置，实际 (${shot.tx.toFixed(1)}, ${shot.ty.toFixed(1)})`,
+  );
+  assert(shot.dur >= 0.6 - 1e-6 && shot.dur <= 0.8 + 1e-6, `飞行时长应在 0.6–0.8 秒，实际 ${shot.dur}`);
+
+  // 飞行期间：不落地、不造成伤害；落点锁定后人类走开也照样落在原处
+  const hpInFlight = h.hp;
+  h.x += 40;
+  for (let f = 0; f < 30; f++) world.tickTerrain(1 / 60);
+  assert(world.poison.length === 0, "飞行 0.5 秒时不应落地生成毒圈");
+  assert(h.hp === hpInFlight, "飞行途中不应造成伤害");
+  assert(
+    world.poisonShots[0] && Math.abs(world.poisonShots[0].tx - shot.tx) < 1e-6,
+    "落点应在吐出瞬间锁定，不追踪走位",
+  );
+  assert(!world.solidAt(shot.tx, shot.ty, 0, 11), "飞行中的毒液不应阻挡单位");
+  assert(!world.bulletBlocked(shot.x0, shot.y0, shot.tx, shot.ty), "飞行中的毒液不应挡子弹");
+  assert(!world.sightBlocked(shot.x0, shot.y0, shot.tx, shot.ty), "飞行中的毒液不应挡视线");
+
+  for (let f = 0; f < 30; f++) world.tickTerrain(1 / 60);
+  assert(world.poisonShots.length === 0, "飞行结束后毒液弹应消失");
+  assert(world.poison.length === 1, "落地后才应生成毒圈");
   const pool = world.poison[0];
   assert(
-    Math.abs(pool.x - h.x) < 1 && Math.abs(pool.y - h.y) < 1,
-    `毒液落点应贴近目标人类，实际 (${pool.x.toFixed(1)}, ${pool.y.toFixed(1)})`,
+    Math.abs(pool.x - shot.tx) < 1 && Math.abs(pool.y - shot.ty) < 1,
+    `毒圈应落在锁定的落点，实际 (${pool.x.toFixed(1)}, ${pool.y.toFixed(1)})`,
   );
   assert(
     pool.radius === spit.radius &&
       pool.dps === spit.dps &&
-      Math.abs(pool.remaining - spit.duration) < 1e-6,
+      Math.abs(pool.remaining - spit.duration) < 0.5,
     "吐出毒液的半径 / 伤害 / 持续时间应与定义文件一致",
   );
   assert(z.spit > spit.cooldown - 0.1, "吐毒后应进入完整冷却");
@@ -743,6 +846,75 @@ function stepZombies(world: World, seconds: number): void {
 function childCount(world: World, mother: Zombie): number {
   return world.zombies.filter((z) => z.alive && z.spawnedBy === mother.id).length;
 }
+
+scenario("特殊僵尸距离维持：腐蚀者 120/200、尖叫者逃跑优先、母体 350 与边缘不卡死", () => {
+  const dist = (z: Zombie, h: { x: number; y: number }): number => Math.hypot(z.x - h.x, z.y - h.y);
+
+  // —— 腐蚀者：>200 靠近；160–200 站定；<120 后退 ——
+  const far = new World(mapDef({ id: "t-range-corroder-far" }));
+  const hf = far.spawnHuman(300, 360, "mg");
+  hf.manual = true;
+  const cf = far.spawnZombie(650, 360, ZOMBIE_IDS.corroder);
+  far.rebuildGrids();
+  const d0 = dist(cf, hf);
+  stepZombies(far, 2);
+  assert(dist(cf, hf) < d0 - 10, `腐蚀者 >200 应靠近，实际 ${d0.toFixed(0)} → ${dist(cf, hf).toFixed(0)}`);
+
+  const mid = new World(mapDef({ id: "t-range-corroder-mid" }));
+  const hm = mid.spawnHuman(300, 360, "mg");
+  hm.manual = true;
+  const cm = mid.spawnZombie(480, 360, ZOMBIE_IDS.corroder);
+  mid.rebuildGrids();
+  const mx = cm.x;
+  stepZombies(mid, 1.5);
+  assert(Math.abs(cm.x - mx) < 0.5, `腐蚀者在 160–200 应站定吐毒，实际移动了 ${(cm.x - mx).toFixed(1)}px`);
+
+  const close = new World(mapDef({ id: "t-range-corroder-close" }));
+  const hc = close.spawnHuman(300, 360, "mg");
+  hc.manual = true;
+  const cc = close.spawnZombie(400, 360, ZOMBIE_IDS.corroder);
+  close.rebuildGrids();
+  const dc0 = dist(cc, hc);
+  stepZombies(close, 2);
+  assert(dist(cc, hc) > dc0 + 10, `腐蚀者 <120 应后退，实际 ${dc0.toFixed(0)} → ${dist(cc, hc).toFixed(0)}`);
+
+  // —— 尖叫者：人类逼近时优先逃跑，即使同伴在反方向 ——
+  const sw = new World(mapDef({ id: "t-range-screamer" }));
+  const hs = sw.spawnHuman(300, 360, "mg");
+  hs.manual = true;
+  const sc = sw.spawnZombie(400, 360, ZOMBIE_IDS.screamer);
+  // 同伴在人类一侧：若追同伴就会迎着人类走，安全优先应当向反方向退
+  sw.spawnZombie(200, 360, ZOMBIE_IDS.normal);
+  sw.rebuildGrids();
+  const sx = sc.x;
+  stepZombies(sw, 2);
+  assert(sc.x > sx + 10, `尖叫者应先远离人类（x 应增大），实际 ${sx} → ${sc.x.toFixed(1)}`);
+
+  // —— 母体：维持 350；被攻击不加速；地图边缘就地停下并继续产卵 ——
+  const mw = new World(mapDef({ id: "t-range-matriarch" }));
+  const hmm = mw.spawnHuman(300, 360, "mg");
+  hmm.manual = true;
+  const mm = mw.spawnZombie(500, 360, ZOMBIE_IDS.matriarch);
+  mw.rebuildGrids();
+  const md0 = dist(mm, hmm);
+  stepZombies(mw, 3);
+  assert(dist(mm, hmm) > md0 + 20, `母体应退到 350 外，实际 ${md0.toFixed(0)} → ${dist(mm, hmm).toFixed(0)}`);
+  const sp0 = mm.speed;
+  damageZombie(mw, mm, 10);
+  assert(mm.speed === sp0, "母体被攻击不应获得加速");
+
+  const ew = new World(mapDef({ id: "t-range-matriarch-edge" }));
+  const he = ew.spawnHuman(110, 360, "mg");
+  he.manual = true;
+  he.hp = he.maxHp = 100000;
+  const me = ew.spawnZombie(22, 360, ZOMBIE_IDS.matriarch);
+  ew.rebuildGrids();
+  stepZombies(ew, 1.5);
+  assert(me.x <= 26, `母体退到地图边缘应就地停下，实际 x=${me.x.toFixed(1)}`);
+  me.spawnerTimer = 0.1;
+  stepZombies(ew, 7);
+  assert(childCount(ew, me) > 0, "母体在边缘停下后应继续产卵");
+});
 
 scenario("母体：产卵节奏、子体同屏上限与不撕咬人类", () => {
   const world = new World(mapDef({ id: "t-matriarch" }));
@@ -837,13 +1009,17 @@ scenario("求生池守卫：所有僵尸 / 武器均已登记，模式覆盖表�
     );
   }
 
-  // 覆盖表：求生飞扑者压制 1.5 秒 / 4 DPS，腐蚀者毒液 4 DPS；切回基础模式回退定义值
+  // 覆盖表：求生飞扑者压制 5 秒 / 4 DPS，可连点到 1.5 秒；腐蚀者毒液 4 DPS
   setZombieModeOverrides(SURVIVAL_ZOMBIE_OVERRIDES);
   try {
     const leap = effectiveZombie(ZOMBIE_IDS.leaper).leap!;
     assert(
-      leap.pinDuration === 1.5 && leap.pinDps === 4,
-      `求生飞扑者压制应为 1.5 秒 / 4 DPS，实际 ${leap.pinDuration} / ${leap.pinDps}`,
+      leap.pinDuration === 5 && leap.pinDps === 4,
+      `求生飞扑者压制应为 5 秒 / 4 DPS，实际 ${leap.pinDuration} / ${leap.pinDps}`,
+    );
+    assert(
+      leap.pinTapStep === 0.25 && leap.pinTapMin === 1.5,
+      `求生连点参数应为每次 0.25 秒 / 下限 1.5 秒，实际 ${leap.pinTapStep} / ${leap.pinTapMin}`,
     );
     const spit = effectiveZombie(ZOMBIE_IDS.corroder).spit!;
     assert(spit.dps === 4, `求生腐蚀者毒液应为 4 DPS，实际 ${spit.dps}`);
@@ -853,9 +1029,10 @@ scenario("求生池守卫：所有僵尸 / 武器均已登记，模式覆盖表�
   }
   const leapBase = effectiveZombie(ZOMBIE_IDS.leaper).leap!;
   assert(
-    leapBase.pinDuration === 3 && leapBase.pinDps === 8,
-    `基础模式应回退 3 秒 / 8 DPS，实际 ${leapBase.pinDuration} / ${leapBase.pinDps}`,
+    leapBase.pinDuration === 5 && leapBase.pinDps === 4,
+    `基础模式应为 5 秒 / 4 DPS，实际 ${leapBase.pinDuration} / ${leapBase.pinDps}`,
   );
+  assert(leapBase.pinTapStep === undefined, "基础模式不应有连点缩短挣脱");
   assert(effectiveZombie(ZOMBIE_IDS.corroder).spit!.dps === 6, "基础模式毒液应回退 6 DPS");
 });
 

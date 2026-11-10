@@ -9,7 +9,7 @@
  */
 import { HUMAN_DEF } from "../data/humans";
 import { resolveMap, type MapDef } from "../data/maps";
-import { effectiveHuman, effectiveWeapon, setZombieModeOverrides } from "../data/settings/runtime";
+import { effectiveHuman, effectiveWeapon, effectiveZombie, setZombieModeOverrides } from "../data/settings/runtime";
 import {
   SURVIVAL,
   SURVIVAL_BOSS_POOL,
@@ -190,6 +190,26 @@ export class SurvivalSession {
   setInput(x: number, y: number): void {
     this.inputX = clamp(x, -1, 1);
     this.inputY = clamp(y, -1, 1);
+  }
+
+  /**
+   * 被飞扑者压制时连点方向键缩短挣脱时间（仅求生模式，放置模式没有 tap 参数）。
+   * 每次按键扣一小段，但不低于 pinTapMin，避免瞬间秒挣脱。
+   */
+  tapEscape(): void {
+    const p = this.player;
+    if (!p || p.pinTimer <= 0 || p.pinBy === null) return;
+    let pinner: Zombie | null = null;
+    for (let i = 0; i < this.world.zombies.length; i++) {
+      if (this.world.zombies[i].id === p.pinBy) {
+        pinner = this.world.zombies[i];
+        break;
+      }
+    }
+    if (!pinner) return;
+    const cfg = effectiveZombie(pinner.kind).leap;
+    if (!cfg?.pinTapStep) return;
+    p.pinTimer = Math.max(cfg.pinTapMin ?? 0, p.pinTimer - cfg.pinTapStep);
   }
 
   togglePause(): void {

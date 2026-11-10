@@ -6,7 +6,7 @@
 
 浏览器 2D 关卡制自动对抗小游戏：玩家在关卡里的人类区放置不同武器的人类（各自有库存与恢复），抵御从门/窗涌入的丧尸；开发者可在选关页新建 / 编辑关卡。玩家不直接操控单位，通过放置、切行为模式与速度观察战局；「尸潮求生」则是单角色 Roguelike 生存，玩家自己移动、自动开火、吃经验升级，只计失败；另有独立训练场做单位与武器回归。技术栈 **PixiJS 8 + TypeScript 5.7 + Vite 6**，像素美术与音效全部内置于仓库，无外部 CDN / 在线美术依赖。
 
-当前版本 **0.8.3**。路由只有 6 个：`#/menu`（主菜单）、`#/levels`（选关与关卡编辑入口，`?level=<id>` 进关；`#/levels/edit?id=<id>` 是编辑器直达别名，映射到本路由且仅开发者模式可打开）、`#/play`（对局）、`#/survival`（尸潮求生，单角色 Roguelike 生存）、`#/training`（训练场）、`#/workshop`（工坊编辑器，仅开发者模式可见，玩家模式直达会被挡回主菜单）。
+当前版本 **0.8.3**。路由只有 7 个：`#/menu`（主菜单）、`#/levels`（选关与关卡编辑入口，`?level=<id>` 进关；`#/levels/edit?id=<id>` 是编辑器直达别名，映射到本路由且仅开发者模式可打开）、`#/play`（对局）、`#/survival`（尸潮求生，单角色 Roguelike 生存）、`#/training`（训练场）、`#/workshop`（工坊编辑器，仅开发者模式可见，玩家模式直达会被挡回主菜单）、`#/tuning`（数值调参，仅开发者模式可见，玩家模式直达会被挡回主菜单）。**数值调整统一走独立的 `#/tuning` 栏目，游玩界面不再提供设置入口。**
 
 ## 顶层目录职责
 
@@ -59,7 +59,7 @@
 | 改工坊编辑器 | `src/workshop/doc.ts`（瓦片/区域/实施例）、`src/workshop/editor.ts`（画布与输入）、`src/workshop/page.ts`（整页 UI 与校验/存读档）、`src/workshop/storage.ts`（草稿与试玩预览） | `src/data/maps/schema.ts`（校验规则）、`index.html` + `src/style.css`（覆盖层 DOM 与样式）、`src/router.ts` + `src/main.ts`（路由、`?map=workshop-draft` 注册、开发者模式守卫） |
 | 工坊「保存到项目 / 删除地图」 | `scripts/workshop-save-plugin.ts`（dev 中间件）、`src/workshop/devSave.ts` / `src/workshop/devDelete.ts`（请求封装）、`src/workshop/page.ts`（dev-only 按钮与流程）、`src/levels.ts`（`getMapReferences()` 引用保护与未来模式登记点） | `vite.config.ts`（注册插件）、`.gitignore`（`.bak/` 与 `*.tmp`）、`src/workshop/storage.ts`（`resetWorkshopCatalog`）、`src/main.ts` + `src/training/panel.ts`（热刷新下拉 / 删除当前训练图回退 `arena`） |
 | 改地图名称 / id | `src/workshop/doc.ts`（`generateWorkshopId`、名称回退）、`src/workshop/page.ts`（名称输入）、`scripts/workshop-save-plugin.ts`（服务端二次校验）、`src/workshop/storage.ts`（目录显示名 / `hasName`） | `src/data/maps/schema.ts`（name 校验）、`src/data/maps/compile.ts`（无 name 回退 id）、`src/training/panel.ts`（下拉显示名称） |
-| 改设置面板 | `src/data/settings/sliders.ts`、`src/data/settings/defaults.ts`、`src/data/settings/runtime.ts` | `src/main.ts`（渲染/读写滑块）、`index.html` + `src/style.css`（面板与主菜单设置弹窗）、`src/core/devMode.ts`（开发者模式区块） |
+| 改数值调参页 | `src/data/settings/sliders.ts`（滑块清单，含僵尸子配置与武器扩展字段）、`src/data/settings/defaults.ts`、`src/data/settings/runtime.ts`（覆盖值 / 本局关卡值 / 模式值三层合并与路径读写） | `src/main.ts`（`#/tuning` 渲染与读写）、`index.html` + `src/style.css`（调参页 DOM / 样式）、`src/router.ts`（路由）、`src/core/devMode.ts`（开发者入口显隐与守卫） |
 | 新增 / 改关卡数据 | `public/levels/<id>.json` + `public/levels/manifest.json`、`src/data/levels/schema.ts`（结构与校验）、`src/data/levels/index.ts`（加载 / 回退 / 注册表） | `src/data/levels/level-1.ts`（TS 兜底）、`src/levels.ts`（展示投影与引用登记）、`src/main.ts`（启动 `loadLevels()`）、README/CHANGELOG |
 | 改选关 / 解锁 | `src/main.ts`（`refreshLevelsPage` / `isLevelUnlocked` / `#/play?level=`）、`src/core/storage.ts`（`recordBeaten` / `loadProgress`） | `src/data/levels/index.ts`（顺序与只读集合）、`src/router.ts`（查询串）、`index.html` + `src/style.css`（列表与锁定态） |
 | 改放置 / 库存 / 胜负 | `src/core/game.ts`（`PlacementResult` / `placeHuman` / `beginBattle` / `regenInventory` / 胜负判定）、`src/ui/inventory.ts`、`src/render/renderer.ts`（`setPlacementZones`） | `src/core/world.ts`（`spawnHuman` 血量覆盖、`solidAt` / `findFreeSpot`）、`index.html` + `src/style.css`（库存面板）、`src/ui/hud.ts`（波次 / 人数读数） |
@@ -94,7 +94,7 @@ npm install
 npm run dev       # 开发服务器（默认 5173，可 --port 指定）
 npm run build     # tsc --noEmit + vite build，产物 dist/
 npm run preview   # 预览构建产物
-npm run regression # Node + esbuild 回归脚本（18 个场景，失败返回非零退出码）
+npm run regression # Node + esbuild 回归脚本（29 个场景，失败返回非零退出码）
 npx tsc --noEmit  # 单项类型检查
 npm run app:build # 先 build，再按当前平台打包桌面版（macOS 出 .app 后用 hdiutil 封 dmg，产物在 release/）
 npm run app:build:win # 在 Windows 上先 build，再出 NSIS 安装包
@@ -171,9 +171,9 @@ npm run app:build:win # 在 Windows 上先 build，再出 NSIS 安装包
 - 地形只在地图瓦片层生效：草丛 / 水池需在地图 JSON 或工坊 / 训练场画出，正式对局不能运行时新增；草丛燃烧 / 休眠 / 重生计时全局统一（1.5 / 10 / 1 秒），没有逐格差异。水池按设计不挡子弹与视线，只阻挡单位与寻路。
 - 飞扑者只按「看得见」判断蓄力与扑击，不做区域路径规划：目标隔完整门窗时仍可能起跳，撞墙即扑空并硬直 1 秒；扑击途中不绕路。同一人类同时只能被 1 只压制，第二名飞扑者扑到已压制目标按扑空处理。飞扑者不撕咬人类，但仍会啃门窗。
 - 压制伤害与毒液伤害不计入训练场「人类被咬次数 / 掉血」统计（该口径只统计丧尸撕咬与人类武器输出）；观察时以头顶血条与实际掉血为准。
-- 飞扑者 / 腐蚀者没有专属设置滑块：基础模式的蓄力时长、扑击倍率、压制时长与 DPS、毒液半径 / 持续 / DPS / 减速都在 `src/data/zombies/leaper.ts` / `corroder.ts`，求生模式的差异值在 `src/data/survival/config.ts` 的 `SURVIVAL_ZOMBIE_OVERRIDES`；训练场只能逐单位调血量 / 移速 / 咬人间隔 / 攻击力。腐蚀者 `damage=15` 只用于它自己的撕咬。
+- 飞扑者 / 腐蚀者的专属参数在 `#/tuning` 的「僵尸·飞扑者 / 腐蚀者」分区可调（蓄力时长、扑击倍率、压制时长与 DPS、毒液半径 / 持续 / DPS / 减速等），基础默认值仍在 `src/data/zombies/leaper.ts` / `corroder.ts`；求生模式的差异值在 `src/data/survival/config.ts` 的 `SURVIVAL_ZOMBIE_OVERRIDES`（优先级高于基础定义）。训练场只能逐单位调血量 / 移速 / 咬人间隔 / 攻击力。腐蚀者 `damage=15` 只用于它自己的撕咬。
 - 毒液按连续伤害结算（每帧 `dps × dt`），没有逐秒跳字；不伤害丧尸、不影响僵尸寻路与索敌；不能在对局运行时手动添加（只能由腐蚀者吐毒 / 死亡或调试代码产生）。求生出怪池已接入飞扑者（2 级起）与腐蚀者（4 级起），求生的压制 / 毒液数值走 `SURVIVAL_ZOMBIE_OVERRIDES`。
-- 母体 / 尖叫者没有专属设置滑块：产卵间隔 / 数量 / 上限 / 死亡产卵 / 子体经验、尖叫间隔 / 半径 / 持续 / 三项倍率都在 `src/data/zombies/matriarch.ts` / `screamer.ts`，求生差异走 `SURVIVAL_ZOMBIE_OVERRIDES`；训练场只能逐单位调血量 / 移速 / 咬人间隔 / 攻击力。两者 `damage=0` 且 `noAttack`，训练场观察不到它们撕咬人类。
+- 母体 / 尖叫者的专属参数在 `#/tuning` 的对应分区可调（产卵间隔 / 数量 / 上限 / 死亡产卵 / 子体经验、尖叫间隔 / 半径 / 持续 / 三项倍率），基础默认值仍在 `src/data/zombies/matriarch.ts` / `screamer.ts`，求生差异走 `SURVIVAL_ZOMBIE_OVERRIDES`；训练场只能逐单位调血量 / 移速 / 咬人间隔 / 攻击力。两者 `damage=0` 且 `noAttack`，训练场观察不到它们撕咬人类。
 - 母体产卵受落点限制：环形 4 圈 ×16 角度全部被墙 / 单位占满时本轮一只都不产，不会叠在墙里或母体身上。子体上限只统计「由该母体产出且存活」的个体，死亡产卵的 12 只不受该上限约束；多只母体各自独立计时与计数。母体半径 20 只走门，16px 窗即使破损也过不去。
 - 多只母体时顶部血条只展示当前血量最高的一只并在名称后标总数，不并列显示多条；血条是 DOM 覆盖层，不随 Pixi 镜头缩放，也不响应点击。菜单 / 选关的冻结渲染通过 `hideBossBar` 隐藏。
 - 尖叫强化是快照倍率、不叠加：多只尖叫者只取最强的一组并刷新 6 秒计时；不强化 BOSS 与自身；离开半径不会立刻失效，会持续到 6 秒结束。强化标识是粉紫染色 + 脚下脉动粉环，没有数字 / 图标提示。
@@ -182,8 +182,8 @@ npm run app:build:win # 在 Windows 上先 build，再出 NSIS 安装包
 - 局内布局在窗口宽度 ≤ 900px 时库存面板改为底部横排；880×720 这类更小的窗口需要纵向滚动才能看到完整面板。
 - 工坊「未保存改动」以 `dirty` 标记为准（自上次载入 / 显式保存后是否有编辑），自动写入 localStorage 的草稿不算“已保存”；切图确认后草稿会被新图覆盖。
 - 人类会真实掉血，但血量归零不会立刻死亡，而是进入约 2.8 秒的转化倒计时；训练场可调人类血量与僵尸攻击力来观察。
-- 电击枪首个目标的单体加成按“96px 内是否有其他存活僵尸”判断，不检查它们是否被墙挡住；链式参数只有 `src/data/weapons/tesla.ts` 一处，没有全局滑块。
-- 僵尸攻击力目前只有训练场按单位调整，全局滑块表未登记 `damage`；默认值在 `src/data/zombies/*.ts`。
+- 电击枪首个目标的单体加成按“96px 内是否有其他存活僵尸”判断，不检查它们是否被墙挡住；链式参数默认值只在 `src/data/weapons/tesla.ts`，可在 `#/tuning` 的「武器·电击枪」分区覆盖。
+- 僵尸血量 / 移速 / 啃咬间隔 / 攻击力全部在 `#/tuning` 的 7 个僵尸分区可调，默认值在 `src/data/zombies/*.ts`；僵尸碰撞半径只读展示，避免影响碰撞、区域图与开口净宽。
 - breach 追击的区域层级只看“门窗通不通”，破拆耗时按 `剩余hp / buildBiteDamage * bite` 估算，未计入多只僵尸同时啃食加速，也没有“拥挤排队”惩罚（多只僵尸仍可能同时选到同一扇最便宜的门）；区域内距离用 4 邻域网格步长近似，斜向会略高估。`direct` 模式仍是旧的全局最近人类直扑。
 - 无 BGM；只有一次性音效，且同一事件全局限频，**没有随机音效变体**（音高/时长变化）。
 - `weapon-reload` 已接入 `beginReload()`（弹匣打空 / 待机空仓 / 电击枪打空）；`human-hurt` 已声明、文件已备好，但当前没有调用点。
@@ -192,13 +192,13 @@ npm run app:build:win # 在 Windows 上先 build，再出 NSIS 安装包
 - 胜负：放置模式胜利 = 打完全部配置波次，失败 = 已放置过人类后场上无人类；尸潮求生只有失败（玩家血量归零），没有胜利条件。其它模式的胜负规则只预留了引用 / 进度 key。
 - 编辑器不能改关卡 id，也不能编辑内置关卡的 `settings` 兼容块（需手改 JSON）。
 - 关卡编辑器的保存 / 删除在 `npm run preview` / `dist` 下接口 404、按钮不存在；`VITE_WORKSHOP_ALLOW_REMOTE=1` 会把关卡写接口暴露给局域网，仅限可信网络。
-- 开口参数折中：`#/play` 下 `level-1` 的 `doorHp=450 / winHp=100 / winPassSpeed=0.45` 会覆盖 `test-multi` 的逐扇默认值（优先级规则见「规则」段中的出怪与逐扇参数）；`level-2` 刻意不写 `settings.opening`，直接使用 `corrupted-block.json` 的逐扇 `maxHp / passSpeed`，但同一会话先跑 `level-1` 时旧的全局覆盖仍会残留。逐扇独立覆盖 UI 属于后续阶段。
+- 开口参数优先级：玩家在 `#/tuning` 的覆盖值 > 本局关卡 `settings` > 每扇门窗 JSON 自身的 `maxHp / passSpeed`。关卡值走独立的 `levelOverrides` 层，`Game.start()` 写入、离开 `#/play` 时由 `clearLevelOverrides()` 清空，不会残留到数值面板或下一关。逐扇独立覆盖 UI 属于后续阶段。
 - 求生页不提供地图编辑器：新建 / 编辑地图仍要回工坊。
 - 主菜单「清空存档」只清玩法进度（放置抵抗关卡进度、尸潮求生最佳记录、预留的 `zombieGame.challenge.*`），保留音量偏好与参数覆盖值。
 - 工坊「保存到项目 / 删除地图」只在 `npm run dev` 可用：`npm run preview` / `dist` 没有接口和按钮；默认只接受 loopback，`npm run dev --host` 暴露给局域网后保存 / 删除会 403，除非显式设 `VITE_WORKSHOP_ALLOW_REMOTE=1`（此时任何能访问 dev server 的人都能写 / 删 `public/maps` 与 `public/levels`，仅限可信网络）。
 - 工坊保存只写 `public/maps/<id>.json` 与 manifest，**不创建关卡**；关卡编辑器保存只写 `public/levels/<id>.json` 与 manifest，**不创建新的模式入口**。新地图要进正式对局需给关卡 JSON 写 `mapId`。
 - 备份只在本机 `public/maps/.bak/` 与 `public/levels/.bak/`，每个 id 留最近 5 份且被 git 忽略；`vite.config.ts` 的 build-only 插件会在构建后删除 `dist` 内的 `.bak`。保存 / 删除都不 reload 当前训练会话，覆盖或删除当前训练图时要切走再切回（删除当前训练图会自动切回 `arena` 并重建 World）。
-- `npm run regression` 覆盖 18 个逻辑场景（开口通行 / 碰撞 / breach / 求生经验与目标 / JSON 校验 / 地形 / 双武器 / 额外投射物 / 狙击穿透与减速 / 飞扑蓄力与压制 / 腐蚀毒液 / 腐蚀者吐毒与死亡留毒 / 母体产卵节奏与上限与不撕咬 / 母体死亡产卵与子体经验折算 / 尖叫强化与不强化 BOSS 与自身 / 求生池守卫），但不覆盖渲染、输入与 DOM；`npm run build` 只保证类型与打包，行为正确性仍需浏览器实跑。
+- `npm run regression` 覆盖 29 个逻辑场景（开口通行 / 碰撞 / breach / 求生经验与目标 / JSON 校验 / 地形 / 双武器 / 额外投射物 / 狙击穿透与减速 / 飞扑蓄力与压制 / 腐蚀毒液 / 腐蚀者吐毒与死亡留毒 / 母体产卵节奏与上限与不撕咬 / 母体死亡产卵与子体经验折算 / 尖叫强化与不强化 BOSS 与自身 / 求生池守卫 / 覆盖层提升后基础值不变 / 子配置与武器扩展字段可覆盖 / 关卡覆盖只作用于本局 / 非开发者默认无权进入 / 求生 ESC 暂停 / 暂停菜单退出不结算），但不覆盖渲染、输入与 DOM；`npm run build` 只保证类型与打包，行为正确性仍需浏览器实跑。
 - 美术只有朝上的单套帧，运行时按朝向旋转，任意角度会有轻微锯齿；特效/场景装饰仍由 Pixi 代码绘制。
 - 碰撞只按躯干圆处理：人类武器枪管、丧尸头饰等装饰不参与碰撞，贴墙时可能少量越入墙面；这是美术层表现，不影响移动与通行。
 - 桌面版（Electron）产物未签名、未公证，macOS 首次启动需 Control + 打开或到「隐私与安全性 → 仍要打开」，Windows 需 SmartScreen「仍要运行」；正式分发前必须签名 + 公证。

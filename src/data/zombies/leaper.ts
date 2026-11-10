@@ -10,7 +10,7 @@ import type { ZombieDef } from "../types";
 export const leaper: ZombieDef = {
   id: "leaper",
   name: "飞扑者",
-  hp: 28,
+  hp: 30,
   speed: 150,
   // 身体直径 11（半径 5.5）：插图按新体型重画，通行净宽 / 区域图都按它推导
   radius: 5.5,

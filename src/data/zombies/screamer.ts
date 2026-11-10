@@ -8,7 +8,7 @@ import type { ZombieDef } from "../types";
 export const screamer: ZombieDef = {
   id: "screamer",
   name: "尖叫者",
-  hp: 40,
+  hp: 50,
   speed: 60,
   radius: 5.5,
   color: 0xf472b6,

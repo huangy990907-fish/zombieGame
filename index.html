@@ -34,7 +34,6 @@
           <button id="btnSpeed">1x</button>
           <button id="btnRestart">重开</button>
           <button id="btnBackMenu">🏠 主菜单</button>
-          <button id="btnSettings" class="btn-settings">⚙ 设置</button>
           <span class="hint">空格 暂停 · 1–6 选择人类 · R 重开</span>
         </div>
       </div>
@@ -88,6 +87,7 @@
           <button class="menu-btn" id="btnSurvival">🧟 尸潮求生</button>
           <button class="menu-btn training" id="btnTraining">🧪 训练场</button>
           <button class="menu-btn workshop hidden" id="btnWorkshop">🛠 地图工坊</button>
+          <button class="menu-btn tuning hidden" id="btnTuning">⚙ 数值调参（开发者）</button>
           <button class="menu-btn" id="btnMenuSettings">⚙ 设置</button>
         </div>
         <p class="menu-footer">放置人类守住房间 · 尸潮求生单角色 Roguelike · 训练场可自由生成单位</p>
@@ -209,7 +209,19 @@
         <span id="svTier">强度 1</span>
       </div>
       <div class="sv-weapons" id="svWeapons"></div>
-      <div class="sv-paused hidden" id="svPaused">已暂停 · 空格继续</div>
+    </div>
+
+    <!-- ===== 尸潮求生：暂停菜单（独立交互层，HUD 本身不吃鼠标） ===== -->
+    <div id="survivalPause" class="overlay survival-pause hidden">
+      <div class="survival-pause-card">
+        <h2>已暂停</h2>
+        <p class="survival-subtitle">空格 / ESC 继续</p>
+        <div class="menu-modal-actions">
+          <button class="menu-btn primary" id="btnSurvivalResume">继续</button>
+          <button class="menu-btn" id="btnSurvivalRestart">重开</button>
+          <button class="menu-btn danger" id="btnSurvivalQuit">退出</button>
+        </div>
+      </div>
     </div>
 
     <!-- ===== 尸潮求生：升级三选一 ===== -->
@@ -247,27 +259,27 @@
       </div>
     </div>
 
-    <div id="settingsPanel" class="settings-panel">
-      <div class="top-row">
-        <span class="title">⚙ 参数控制台</span>
-        <button class="close-btn" id="btnSettingsClose">关闭</button>
-      </div>
-
-      <div id="settingsHeader" class="settings-header">
-        <div id="storageStatus" class="storage-status">💾 加载中…</div>
-        <div class="storage-btns">
-          <button class="storage-btn" id="btnPickDir" title="选择本地存档文件夹，之后自动读写（需要 Chrome/Edge + localhost 或 HTTPS）">📁 选存档目录</button>
-          <button class="storage-btn" id="btnClearDir" disabled title="清除已授权的存档目录（保留 localStorage 兜底）">🧹 清除目录</button>
-          <button class="storage-btn" id="btnExportSettings" title="导出当前设置为 JSON 文件，跨设备分享">⬇ 导出</button>
-          <button class="storage-btn" id="btnImportSettings" title="从 JSON 文件导入设置">⬆ 导入</button>
-          <button class="storage-btn danger" id="btnResetDefaults" title="恢复所有参数为出厂默认值">↺ 恢复默认</button>
+    <!-- ===== 数值调参 —— 开发者专属独立页面（#/tuning），游玩界面不再提供入口 ===== -->
+    <div id="tuningOverlay" class="overlay tuning-overlay hidden">
+      <div class="tuning-shell">
+        <div class="tuning-head">
+          <button class="back-btn" id="btnTuningBack">← 返回主菜单</button>
+          <h2 class="tuning-title">⚙ 数值调参</h2>
+          <div class="storage-btns">
+            <button class="storage-btn" id="btnPickDir" title="选择本地存档文件夹，之后自动读写（需要 Chrome/Edge + localhost 或 HTTPS）">📁 选存档目录</button>
+            <button class="storage-btn" id="btnClearDir" disabled title="清除已授权的存档目录（保留 localStorage 兜底）">🧹 清除目录</button>
+            <button class="storage-btn" id="btnExportSettings" title="导出当前设置为 JSON 文件，跨设备分享">⬇ 导出</button>
+            <button class="storage-btn" id="btnImportSettings" title="从 JSON 文件导入设置">⬆ 导入</button>
+            <button class="storage-btn danger" id="btnResetDefaults" title="恢复所有参数为出厂默认值">↺ 恢复默认</button>
+          </div>
         </div>
-      </div>
-
-      <div id="settingsBody"></div>
-      <div class="foot">
-        调整后点"重开"生效 · 僵尸属性按正态分布在 ±随机幅度内个体差异<br />
-        存档格式 v1 · 每次修改自动写 localStorage · 选了文件夹再额外自动写盘
+        <div id="storageStatus" class="storage-status">💾 加载中…</div>
+        <div id="tuningBody" class="tuning-body"></div>
+        <div class="foot">
+          保存即生效 · 僵尸属性只作用于之后新生成的单位 · 门窗血量需重开本局才应用<br />
+          僵尸碰撞半径只读：它同时决定碰撞、区域图与开口净宽，改动会让地图通行失真<br />
+          存档格式 v1 · 每次修改自动写 localStorage · 选了文件夹再额外自动写盘
+        </div>
       </div>
     </div>
 

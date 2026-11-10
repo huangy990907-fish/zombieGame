@@ -8,7 +8,7 @@ import type { ZombieDef } from "../types";
 export const corroder: ZombieDef = {
   id: "corroder",
   name: "腐蚀者",
-  hp: 55,
+  hp: 80,
   speed: 38,
   radius: 5.5,
   color: 0x84cc16,

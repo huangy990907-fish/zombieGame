@@ -9,7 +9,7 @@ import type { ZombieDef } from "../types";
 export const fat: ZombieDef = {
   id: "fat",
   name: "胖子",
-  hp: 300,
+  hp: 255,
   speed: 32,
   radius: 11,
   color: 0xb06a7f,

@@ -19,6 +19,7 @@ import type { HumanMode, Rect, SpawnRegion, ZombieMode } from "../data/types";
 import { FlowField, openingNetWidth } from "../systems/flowField";
 import { findFreePoint, isBlockedForBody } from "../systems/collision";
 import { RegionMap } from "../systems/regions";
+import { sound, SFX } from "../audio/manager";
 import { gaussClamped, randRange, segRectHit } from "../utils/math";
 import { SpatialHash } from "../utils/spatialHash";
 
@@ -603,6 +604,8 @@ export class World {
         continue;
       }
       this.addPoison(s.tx, s.ty, s.radius, s.duration, s.dps, s.speedMul);
+      // 落地音效：只在这一刻响，抛出时静音（120ms 限频，多枚同时落地不会叠炸）
+      sound.play(SFX.ZOMBIE_SPLAT, 0.85);
       // 落地溅射：一圈扩散环 + 几团绿色小雾，与飞行中的毒液弹明显区分
       this.effects.push({
         kind: "ring",

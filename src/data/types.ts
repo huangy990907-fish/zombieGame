@@ -163,7 +163,12 @@ export interface WeaponDef {
 }
 
 /** 武器定义里允许被玩家覆盖的数值字段 */
-export type WeaponTunables = Omit<WeaponDef, "id" | "name" | "kind" | "color">;
+export type WeaponTunables = Omit<WeaponDef, "id" | "name" | "kind" | "color" | "tesla" | "pierce"> & {
+  /** 电击链参数的可覆盖层 */
+  tesla?: Partial<TeslaConfig>;
+  /** 穿透参数的可覆盖层 */
+  pierce?: Partial<PierceConfig>;
+};
 
 export interface ZombieDef {
   /** 代码里唯一使用的身份，例如 "normal" */
@@ -234,6 +239,14 @@ export interface ZombieTunables {
   speed: number;
   bite: number;
   damage: number;
+  /** 飞扑者参数的可覆盖层（只写与基础定义不同的字段） */
+  leap?: Partial<ZombieLeapConfig>;
+  /** 腐蚀者吐毒参数的可覆盖层 */
+  spit?: Partial<ZombieSpitConfig>;
+  /** 母体产卵参数的可覆盖层 */
+  spawner?: Partial<ZombieSpawnerConfig>;
+  /** 尖叫者强化参数的可覆盖层 */
+  scream?: Partial<ZombieScreamConfig>;
 }
 
 /**
@@ -337,19 +350,14 @@ export interface MapDef {
 // ============================================================
 
 export interface WaveSettings {
-  count: number;
-  base: number;
-  growth: number;
   spawnBase: number;
   spawnPerWave: number;
   spawnMax: number;
   maxAlive: number;
-  reinforce: number;
 }
 
-/** 人类相关的有效设置：前两项是场景参数，后四项来自人类定义或覆盖值 */
+/** 人类相关的有效设置：cap 是场景参数，其余来自人类定义或覆盖值 */
 export interface HumanSettings {
-  start: number;
   cap: number;
   hp: number;
   speed: number;
@@ -394,7 +402,7 @@ export interface RuntimeSettings {
   audio: AudioSettings;
 }
 
-export type SliderGroup = "wave" | "human" | "zombie" | "opening" | "audio";
+export type SliderGroup = "wave" | "human" | "zombie" | "weapons" | "opening" | "audio";
 
 export interface SliderDef {
   key: string;
@@ -403,6 +411,10 @@ export interface SliderDef {
   min: number;
   max: number;
   step: number;
-  /** 设置路径，支持点路径如 "zombie.normal.hp" */
+  /** 设置路径，支持点路径如 "zombie.normal.hp" / "weapons.tesla.tesla.chainRadius" */
   path: string;
+  /** 只读展示（如僵尸碰撞半径：改动会影响碰撞 / 区域图 / 开口净宽，不开放调整） */
+  readonly?: boolean;
+  /** 面板上的补充说明（如「对新生效」「需重开本局」） */
+  note?: string;
 }

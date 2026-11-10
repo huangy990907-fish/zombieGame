@@ -26,18 +26,44 @@ import type {
 } from "../types";
 import { DEFAULT_BASE_SETTINGS } from "./defaults";
 
-const WAVE_KEYS = [
-  "count",
-  "base",
-  "growth",
-  "spawnBase",
-  "spawnPerWave",
-  "spawnMax",
-  "maxAlive",
-  "reinforce",
-] as const;
-const HUMAN_KEYS = ["start", "cap", "hp", "speed", "sight", "turnTime"] as const;
+const WAVE_KEYS = ["spawnBase", "spawnPerWave", "spawnMax", "maxAlive"] as const;
+const HUMAN_KEYS = ["cap", "hp", "speed", "sight", "turnTime"] as const;
 const ZOMBIE_KEYS = ["hp", "speed", "bite", "damage"] as const;
+const LEAP_KEYS = [
+  "triggerRadius",
+  "chargeTime",
+  "hitExtend",
+  "chargeMax",
+  "leapSpeedMul",
+  "leapMinTime",
+  "leapMaxTime",
+  "missStun",
+  "pinDuration",
+  "pinMoveMul",
+  "pinDps",
+  "pinKnockback",
+  "pinTapStep",
+  "pinTapMin",
+] as const;
+const SPIT_KEYS = [
+  "range",
+  "cooldown",
+  "radius",
+  "duration",
+  "dps",
+  "speedMul",
+  "deathRadius",
+  "deathDuration",
+] as const;
+const SPAWNER_KEYS = ["interval", "count", "cap", "deathCount", "childXpMul"] as const;
+const SCREAM_KEYS = [
+  "interval",
+  "radius",
+  "duration",
+  "speedMul",
+  "damageMul",
+  "damageTakenMul",
+] as const;
 const OPENING_KEYS = ["doorHp", "winHp", "winPassSpeed", "buildBiteDamage", "buildBiteSlow"] as const;
 const AUDIO_KEYS = ["master", "sfx"] as const;
 const WEAPON_KEYS = [
@@ -52,9 +78,31 @@ const WEAPON_KEYS = [
   "blast",
   "burst",
   "blastDamage",
+  "tracer",
+  "hitSlowMul",
 ] as const;
+const TESLA_KEYS = ["chainRadius", "chainMaxTargets", "chainFalloff", "singleBonus", "singleRadius"] as const;
+const PIERCE_KEYS = ["maxTargets", "falloff"] as const;
+
+/** 僵尸子配置 → 可覆盖字段白名单 */
+const ZOMBIE_SUB_KEYS = {
+  leap: LEAP_KEYS,
+  spit: SPIT_KEYS,
+  spawner: SPAWNER_KEYS,
+  scream: SCREAM_KEYS,
+} as const;
+type ZombieSubKey = keyof typeof ZOMBIE_SUB_KEYS;
+
+/** 武器子配置 → 可覆盖字段白名单 */
+const WEAPON_SUB_KEYS = { tesla: TESLA_KEYS, pierce: PIERCE_KEYS } as const;
+type WeaponSubKey = keyof typeof WEAPON_SUB_KEYS;
 
 let overrides: SettingsOverrides = {};
+/**
+ * 关卡自带的本局覆盖值。和玩家覆盖值分开存放：
+ * 关卡值只作用于这一局，退出 / 换关即清空，不会残留在数值面板上。
+ */
+let levelOverrides: SettingsOverrides = {};
 let cache: RuntimeSettings | null = null;
 /** 当前场景使用的地图；settings() / openingTuning() 的默认口径跟随它，而不是固定默认图 */
 let activeMap: MapDef = DEFAULT_MAP;
@@ -119,20 +167,23 @@ function mergeNumbers<T extends object>(base: T, src: Partial<Record<keyof T, nu
 /** 把设置解析成当前有效值（读取时合并覆盖值） */
 function build(map: MapDef): RuntimeSettings {
   return {
-    wave: mergeNumbers(DEFAULT_BASE_SETTINGS.wave, overrides.wave),
+    wave: mergeNumbers(
+      mergeNumbers(DEFAULT_BASE_SETTINGS.wave, levelOverrides.wave),
+      overrides.wave,
+    ),
     human: {
-      start: overrides.human?.start ?? DEFAULT_BASE_SETTINGS.human.start,
-      cap: overrides.human?.cap ?? DEFAULT_BASE_SETTINGS.human.cap,
-      hp: overrides.human?.hp ?? HUMAN_DEF.hp,
-      speed: overrides.human?.speed ?? HUMAN_DEF.speed,
-      sight: overrides.human?.sight ?? HUMAN_DEF.sight,
-      turnTime: overrides.human?.turnTime ?? HUMAN_DEF.turnTime,
+      cap: overrides.human?.cap ?? levelOverrides.human?.cap ?? DEFAULT_BASE_SETTINGS.human.cap,
+      hp: overrides.human?.hp ?? levelOverrides.human?.hp ?? HUMAN_DEF.hp,
+      speed: overrides.human?.speed ?? levelOverrides.human?.speed ?? HUMAN_DEF.speed,
+      sight: overrides.human?.sight ?? levelOverrides.human?.sight ?? HUMAN_DEF.sight,
+      turnTime: overrides.human?.turnTime ?? levelOverrides.human?.turnTime ?? HUMAN_DEF.turnTime,
     },
     zombie: {
-      jitter: overrides.zombie?.jitter ?? DEFAULT_BASE_SETTINGS.zombie.jitter,
+      jitter:
+        overrides.zombie?.jitter ?? levelOverrides.zombie?.jitter ?? DEFAULT_BASE_SETTINGS.zombie.jitter,
     },
     opening: openingTuning(map),
-    audio: mergeNumbers(DEFAULT_BASE_SETTINGS.audio, overrides.audio),
+    audio: mergeNumbers(mergeNumbers(DEFAULT_BASE_SETTINGS.audio, levelOverrides.audio), overrides.audio),
   };
 }
 
@@ -158,11 +209,14 @@ export function openingTuning(map: MapDef = activeMap): OpeningTuning {
   const win = map.openings.find((o) => o.kind === "window") ?? map.openings[0];
   const value: OpeningTuning = {
     // 「空旷地」这类没有门窗的图：缺省值取 0 / 1，不参与任何门窗结算
-    doorHp: overrides.opening?.doorHp ?? door?.maxHp ?? 0,
-    winHp: overrides.opening?.winHp ?? win?.maxHp ?? 0,
-    winPassSpeed: overrides.opening?.winPassSpeed ?? win?.passSpeed ?? 1,
-    buildBiteDamage: overrides.opening?.buildBiteDamage ?? map.buildBiteDamage,
-    buildBiteSlow: overrides.opening?.buildBiteSlow ?? map.buildBiteSlow,
+    doorHp: overrides.opening?.doorHp ?? levelOverrides.opening?.doorHp ?? door?.maxHp ?? 0,
+    winHp: overrides.opening?.winHp ?? levelOverrides.opening?.winHp ?? win?.maxHp ?? 0,
+    winPassSpeed:
+      overrides.opening?.winPassSpeed ?? levelOverrides.opening?.winPassSpeed ?? win?.passSpeed ?? 1,
+    buildBiteDamage:
+      overrides.opening?.buildBiteDamage ?? levelOverrides.opening?.buildBiteDamage ?? map.buildBiteDamage,
+    buildBiteSlow:
+      overrides.opening?.buildBiteSlow ?? levelOverrides.opening?.buildBiteSlow ?? map.buildBiteSlow,
   };
   openingCache = { map, value };
   return value;
@@ -175,10 +229,12 @@ export function openingTuning(map: MapDef = activeMap): OpeningTuning {
 export function openingInstance(def: OpeningDef): { maxHp: number; passSpeed: number } {
   const maxHp =
     def.kind === "door"
-      ? overrides.opening?.doorHp ?? def.maxHp
-      : overrides.opening?.winHp ?? def.maxHp;
+      ? overrides.opening?.doorHp ?? levelOverrides.opening?.doorHp ?? def.maxHp
+      : overrides.opening?.winHp ?? levelOverrides.opening?.winHp ?? def.maxHp;
   const passSpeed =
-    def.kind === "window" ? overrides.opening?.winPassSpeed ?? def.passSpeed : def.passSpeed;
+    def.kind === "window"
+      ? overrides.opening?.winPassSpeed ?? levelOverrides.opening?.winPassSpeed ?? def.passSpeed
+      : def.passSpeed;
   return { maxHp, passSpeed };
 }
 
@@ -193,25 +249,29 @@ export function setZombieModeOverrides(table: ZombieModeOverrideTable | null): v
 
 /**
  * 合并过覆盖值的僵尸定义（unknown id 回落 normal）。
- * 优先级：玩家覆盖值 > 当前模式覆盖表 > 基础定义；嵌套的 leap / spit 只在定义已存在时合并。
+ * 优先级：玩家覆盖值 > 关卡覆盖值 > 当前模式覆盖表 > 基础定义；
+ * 嵌套的 leap / spit / spawner / scream 只在定义已存在时逐字段合并。
  */
 export function effectiveZombie(id: string): ZombieDef {
   const def = getZombieDef(id);
   const hit = zombieCache.get(def.id);
   if (hit) return hit;
   const o = overrides.zombie?.types?.[def.id];
+  const lo = levelOverrides.zombie?.types?.[def.id];
   const mo = modeZombieOverrides[def.id];
   const value: ZombieDef = {
     ...def,
-    hp: o?.hp ?? mo?.hp ?? def.hp,
-    speed: o?.speed ?? mo?.speed ?? def.speed,
-    bite: o?.bite ?? mo?.bite ?? def.bite,
-    damage: o?.damage ?? mo?.damage ?? def.damage,
+    hp: o?.hp ?? lo?.hp ?? mo?.hp ?? def.hp,
+    speed: o?.speed ?? lo?.speed ?? mo?.speed ?? def.speed,
+    bite: o?.bite ?? lo?.bite ?? mo?.bite ?? def.bite,
+    damage: o?.damage ?? lo?.damage ?? mo?.damage ?? def.damage,
   };
-  if (def.leap) value.leap = { ...def.leap, ...(mo?.leap ?? {}) };
-  if (def.spit) value.spit = { ...def.spit, ...(mo?.spit ?? {}) };
-  if (def.spawner) value.spawner = { ...def.spawner, ...(mo?.spawner ?? {}) };
-  if (def.scream) value.scream = { ...def.scream, ...(mo?.scream ?? {}) };
+  if (def.leap) value.leap = { ...def.leap, ...(mo?.leap ?? {}), ...(lo?.leap ?? {}), ...(o?.leap ?? {}) };
+  if (def.spit) value.spit = { ...def.spit, ...(mo?.spit ?? {}), ...(lo?.spit ?? {}), ...(o?.spit ?? {}) };
+  if (def.spawner)
+    value.spawner = { ...def.spawner, ...(mo?.spawner ?? {}), ...(lo?.spawner ?? {}), ...(o?.spawner ?? {}) };
+  if (def.scream)
+    value.scream = { ...def.scream, ...(mo?.scream ?? {}), ...(lo?.scream ?? {}), ...(o?.scream ?? {}) };
   zombieCache.set(def.id, value);
   return value;
 }
@@ -221,10 +281,10 @@ export function effectiveHuman(): HumanDef {
   if (humanCache) return humanCache;
   humanCache = {
     ...HUMAN_DEF,
-    hp: overrides.human?.hp ?? HUMAN_DEF.hp,
-    speed: overrides.human?.speed ?? HUMAN_DEF.speed,
-    sight: overrides.human?.sight ?? HUMAN_DEF.sight,
-    turnTime: overrides.human?.turnTime ?? HUMAN_DEF.turnTime,
+    hp: overrides.human?.hp ?? levelOverrides.human?.hp ?? HUMAN_DEF.hp,
+    speed: overrides.human?.speed ?? levelOverrides.human?.speed ?? HUMAN_DEF.speed,
+    sight: overrides.human?.sight ?? levelOverrides.human?.sight ?? HUMAN_DEF.sight,
+    turnTime: overrides.human?.turnTime ?? levelOverrides.human?.turnTime ?? HUMAN_DEF.turnTime,
   };
   return humanCache;
 }
@@ -235,13 +295,17 @@ export function effectiveWeapon(id: string): WeaponDef {
   const hit = weaponCache.get(def.id);
   if (hit) return hit;
   const o = overrides.weapons?.[def.id];
+  const lo = levelOverrides.weapons?.[def.id];
   const out: Record<string, unknown> = { ...def };
-  if (o) {
+  for (const src of [lo, o]) {
+    if (!src) continue;
     for (const key of WEAPON_KEYS) {
-      const v = num((o as Record<string, unknown>)[key]);
+      const v = num((src as Record<string, unknown>)[key]);
       if (v !== undefined) out[key] = v;
     }
   }
+  if (def.tesla) out.tesla = { ...def.tesla, ...(lo?.tesla ?? {}), ...(o?.tesla ?? {}) };
+  if (def.pierce) out.pierce = { ...def.pierce, ...(lo?.pierce ?? {}), ...(o?.pierce ?? {}) };
   const value = out as unknown as WeaponDef;
   weaponCache.set(def.id, value);
   return value;
@@ -251,41 +315,50 @@ export function effectiveWeapon(id: string): WeaponDef {
 // 路径读写（滑块 / 关卡覆盖 / 存档共用）
 // ============================================================
 
+/** 从嵌套对象里读一个有限数字，缺失返回 0 */
+function nestedNum(obj: unknown, key: string): number {
+  if (!obj || typeof obj !== "object") return 0;
+  const v = (obj as Record<string, unknown>)[key];
+  return isNum(v) ? v : 0;
+}
+
 /** 读取设置路径的有效值（覆盖值 ?? 定义默认值） */
 export function getSetting(path: string): number {
   const parts = path.split(".");
   const group = parts[0];
 
   if (group === "wave" && parts.length === 2) {
-    const key = parts[1] as keyof WaveSettings;
-    const v = overrides.wave?.[key] ?? DEFAULT_BASE_SETTINGS.wave[key];
+    const v = settings().wave[parts[1] as keyof WaveSettings];
     return isNum(v) ? v : 0;
   }
   if (group === "human" && parts.length === 2) {
-    const key = parts[1] as keyof HumanSettings;
-    const base = key === "start" || key === "cap" ? settings().human[key] : effectiveHuman()[key as keyof HumanDef];
-    return isNum(base) ? base : 0;
+    const v = settings().human[parts[1] as keyof HumanSettings];
+    return isNum(v) ? v : 0;
   }
   if (group === "zombie" && parts.length === 2 && parts[1] === "jitter") {
     return settings().zombie.jitter;
   }
   if (group === "zombie" && parts.length === 3) {
-    const def = effectiveZombie(parts[1]);
-    const v = (def as unknown as Record<string, unknown>)[parts[2]];
+    const v = (effectiveZombie(parts[1]) as unknown as Record<string, unknown>)[parts[2]];
     return isNum(v) ? v : 0;
+  }
+  if (group === "zombie" && parts.length === 4 && parts[2] in ZOMBIE_SUB_KEYS) {
+    return nestedNum((effectiveZombie(parts[1]) as unknown as Record<string, unknown>)[parts[2]], parts[3]);
   }
   if (group === "opening" && parts.length === 2) {
     const v = (openingTuning() as unknown as Record<string, unknown>)[parts[1]];
     return isNum(v) ? v : 0;
   }
   if (group === "audio" && parts.length === 2) {
-    const key = parts[1] as keyof AudioSettings;
-    const v = overrides.audio?.[key] ?? DEFAULT_BASE_SETTINGS.audio[key];
+    const v = settings().audio[parts[1] as keyof AudioSettings];
     return isNum(v) ? v : 0;
   }
   if (group === "weapons" && parts.length === 3) {
     const v = (effectiveWeapon(parts[1]) as unknown as Record<string, unknown>)[parts[2]];
     return isNum(v) ? v : 0;
+  }
+  if (group === "weapons" && parts.length === 4 && parts[2] in WEAPON_SUB_KEYS) {
+    return nestedNum((effectiveWeapon(parts[1]) as unknown as Record<string, unknown>)[parts[2]], parts[3]);
   }
   return 0;
 }
@@ -313,7 +386,19 @@ export function setSetting(path: string, value: number): void {
     if (!(ZOMBIE_KEYS as readonly string[]).includes(field)) return;
     const z = (overrides.zombie ??= {});
     z.types ??= {};
-    z.types[parts[1]] = { ...(z.types[parts[1] ?? ""] ?? {}), [field]: value } as Partial<ZombieTunables>;
+    z.types[parts[1]] = { ...(z.types[parts[1]] ?? {}), [field]: value } as Partial<ZombieTunables>;
+  } else if (
+    group === "zombie" &&
+    parts.length === 4 &&
+    hasOwn(ZOMBIE_DEFS, parts[1]) &&
+    parts[2] in ZOMBIE_SUB_KEYS
+  ) {
+    const sub = parts[2] as ZombieSubKey;
+    if (!(ZOMBIE_SUB_KEYS[sub] as readonly string[]).includes(parts[3])) return;
+    const z = (overrides.zombie ??= {});
+    z.types ??= {};
+    const entry = (z.types[parts[1]] ??= {}) as ZombieTunables;
+    entry[sub] = { ...(entry[sub] ?? {}), [parts[3]]: value } as never;
   } else if (group === "opening" && parts.length === 2 && (OPENING_KEYS as readonly string[]).includes(parts[1])) {
     setGroupValue("opening", parts[1], value);
   } else if (group === "audio" && parts.length === 2 && (AUDIO_KEYS as readonly string[]).includes(parts[1])) {
@@ -325,6 +410,17 @@ export function setSetting(path: string, value: number): void {
       ...(overrides.weapons[parts[1]] ?? {}),
       [parts[2]]: value,
     } as Partial<WeaponTunables>;
+  } else if (
+    group === "weapons" &&
+    parts.length === 4 &&
+    hasOwn(WEAPONS, parts[1]) &&
+    parts[2] in WEAPON_SUB_KEYS
+  ) {
+    const sub = parts[2] as WeaponSubKey;
+    if (!(WEAPON_SUB_KEYS[sub] as readonly string[]).includes(parts[3])) return;
+    overrides.weapons ??= {};
+    const entry = (overrides.weapons[parts[1]] ??= {}) as WeaponTunables;
+    entry[sub] = { ...(entry[sub] ?? {}), [parts[3]]: value } as never;
   } else {
     return;
   }
@@ -334,6 +430,37 @@ export function setSetting(path: string, value: number): void {
 // ============================================================
 // 关卡覆盖 / 存档
 // ============================================================
+
+/** 解析单只僵尸的覆盖对象：扁平 4 字段 + leap/spit/spawner/scream 子配置 */
+function parseZombieEntry(value: unknown): Partial<ZombieTunables> | null {
+  if (!value || typeof value !== "object") return null;
+  const parsed: Record<string, unknown> = pickNumbers(value, ZOMBIE_KEYS);
+  for (const sub of Object.keys(ZOMBIE_SUB_KEYS) as ZombieSubKey[]) {
+    const nested = pickNumbers((value as Record<string, unknown>)[sub], ZOMBIE_SUB_KEYS[sub]);
+    if (Object.keys(nested).length > 0) parsed[sub] = nested;
+  }
+  return Object.keys(parsed).length > 0 ? (parsed as Partial<ZombieTunables>) : null;
+}
+
+/** 解析单把武器的覆盖对象：扁平字段 + tesla/pierce 子配置 */
+function parseWeaponEntry(value: unknown): Partial<WeaponTunables> | null {
+  if (!value || typeof value !== "object") return null;
+  const parsed: Record<string, unknown> = pickNumbers(value, WEAPON_KEYS);
+  for (const sub of Object.keys(WEAPON_SUB_KEYS) as WeaponSubKey[]) {
+    const nested = pickNumbers((value as Record<string, unknown>)[sub], WEAPON_SUB_KEYS[sub]);
+    if (Object.keys(nested).length > 0) parsed[sub] = nested;
+  }
+  return Object.keys(parsed).length > 0 ? (parsed as Partial<WeaponTunables>) : null;
+}
+
+/** 把两层子配置合并（后层覆盖前层，未出现的字段保留） */
+function mergeSub(
+  prev: Record<string, unknown> | undefined,
+  next: Record<string, unknown> | undefined,
+): Record<string, unknown> | undefined {
+  if (!prev && !next) return undefined;
+  return { ...(prev ?? {}), ...(next ?? {}) };
+}
 
 /** 解析任意来源（新格式 / 旧 SETTINGS 快照 / 脏数据）为安全覆盖值 */
 export function parseOverrides(raw: unknown): SettingsOverrides {
@@ -361,15 +488,15 @@ export function parseOverrides(raw: unknown): SettingsOverrides {
     for (const [id, value] of Object.entries(zo)) {
       if (id === "jitter" || id === "types") continue;
       if (!hasOwn(ZOMBIE_DEFS, id)) continue;
-      const parsed = pickNumbers(value, ZOMBIE_KEYS);
-      if (Object.keys(parsed).length > 0) types[id] = parsed as Partial<ZombieTunables>;
+      const parsed = parseZombieEntry(value);
+      if (parsed) types[id] = parsed;
     }
     // 新格式：zombie.types.<id>
     if (zo.types && typeof zo.types === "object") {
       for (const [id, value] of Object.entries(zo.types as Record<string, unknown>)) {
         if (!hasOwn(ZOMBIE_DEFS, id)) continue;
-        const parsed = pickNumbers(value, ZOMBIE_KEYS);
-        if (Object.keys(parsed).length > 0) types[id] = parsed as Partial<ZombieTunables>;
+        const parsed = parseZombieEntry(value);
+        if (parsed) types[id] = parsed;
       }
     }
     const jitter = num(zo.jitter);
@@ -383,8 +510,8 @@ export function parseOverrides(raw: unknown): SettingsOverrides {
     const weapons: Record<string, Partial<WeaponTunables>> = {};
     for (const [id, value] of Object.entries(wsrc as Record<string, unknown>)) {
       if (!hasOwn(WEAPONS, id)) continue;
-      const parsed = pickNumbers(value, WEAPON_KEYS);
-      if (Object.keys(parsed).length > 0) weapons[id] = parsed as Partial<WeaponTunables>;
+      const parsed = parseWeaponEntry(value);
+      if (parsed) weapons[id] = parsed;
     }
     if (Object.keys(weapons).length > 0) out.weapons = weapons;
   }
@@ -403,20 +530,48 @@ function mergeParsed(src: SettingsOverrides): void {
     if (src.zombie.types) {
       z.types ??= {};
       for (const [id, value] of Object.entries(src.zombie.types)) {
-        z.types[id] = { ...(z.types[id] ?? {}), ...value };
+        const prev = z.types[id] as Record<string, unknown> | undefined;
+        const next = value as Record<string, unknown>;
+        z.types[id] = {
+          ...(prev ?? {}),
+          ...next,
+          leap: mergeSub(prev?.leap as Record<string, unknown>, next.leap as Record<string, unknown>),
+          spit: mergeSub(prev?.spit as Record<string, unknown>, next.spit as Record<string, unknown>),
+          spawner: mergeSub(prev?.spawner as Record<string, unknown>, next.spawner as Record<string, unknown>),
+          scream: mergeSub(prev?.scream as Record<string, unknown>, next.scream as Record<string, unknown>),
+        } as Partial<ZombieTunables>;
       }
     }
   }
   if (src.weapons) {
     overrides.weapons ??= {};
     for (const [id, value] of Object.entries(src.weapons)) {
-      overrides.weapons[id] = { ...(overrides.weapons[id] ?? {}), ...value };
+      const prev = overrides.weapons[id] as Record<string, unknown> | undefined;
+      const next = value as Record<string, unknown>;
+      overrides.weapons[id] = {
+        ...(prev ?? {}),
+        ...next,
+        tesla: mergeSub(prev?.tesla as Record<string, unknown>, next.tesla as Record<string, unknown>),
+        pierce: mergeSub(prev?.pierce as Record<string, unknown>, next.pierce as Record<string, unknown>),
+      } as Partial<WeaponTunables>;
     }
   }
   invalidate();
 }
 
-/** 合并一组覆盖值（关卡 settings、导入存档用） */
+/** 应用一局的关卡覆盖值（替换而非合并，退出 / 换关由 clearLevelOverrides 清空） */
+export function setLevelOverrides(partial: SettingsOverrides | undefined): void {
+  levelOverrides = parseOverrides(partial);
+  invalidate();
+}
+
+/** 清空本局关卡覆盖值（离开战斗路由 / 换关时调用） */
+export function clearLevelOverrides(): void {
+  levelOverrides = {};
+  invalidate();
+}
+
+/** 合并一组覆盖值（导入存档用；不再用于关卡，避免污染全局面板） */
 export function applySettings(partial: SettingsOverrides | undefined): void {
   if (!partial) return;
   mergeParsed(parseOverrides(partial));
@@ -433,9 +588,10 @@ export function mergeOverrides(raw: unknown): void {
   mergeParsed(parseOverrides(raw));
 }
 
-/** 清空全部覆盖值，回到定义默认值 */
+/** 清空全部覆盖值（含本局关卡值），回到定义默认值 */
 export function clearOverrides(): void {
   overrides = {};
+  levelOverrides = {};
   invalidate();
 }
 

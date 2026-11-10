@@ -13,7 +13,7 @@ import { updateCombat } from "../systems/combat";
 import { sound, SFX } from "../audio/manager";
 import { HUMAN_BODY_DIAMETER } from "../data/humans";
 import { DEFAULT_MAP, resolveMap, type MapDef } from "../data/maps";
-import { applySettings, settings } from "../data/settings/runtime";
+import { setLevelOverrides, settings } from "../data/settings/runtime";
 import type { HumanMode, SettingsOverrides, SpawnRegion } from "../data/types";
 import { ZOMBIE_IDS, getZombieDef, zombieBodyDiameter } from "../data/zombies";
 import type { LevelWave } from "../data/levels/schema";
@@ -120,7 +120,8 @@ export class Game {
     // 优先级：显式选择（构造参数）> 关卡 mapId > 当前地图（保留未注册的自定义图）
     const level = this.levelId ? findLevel(this.levelId) : undefined;
     this.applyMap(this.preferredMap ?? this.preferredMapId ?? level?.mapId ?? this.map);
-    if (levelSettings) applySettings(levelSettings);
+    // 关卡数值只作用于本局：写入独立层，退出 / 换关即清空，不污染玩家覆盖值
+    setLevelOverrides(levelSettings);
 
     this.world = createWorld(this.map);
     this.level = level;

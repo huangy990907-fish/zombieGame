@@ -310,37 +310,55 @@ body {
   }
 }
 
-/* ===== 设置面板 ===== */
-.btn-settings {
-  background: #151728 !important;
-  border-color: #2f3a5a !important;
-}
-
-.settings-panel {
-  position: fixed;
-  top: 0;
-  right: 0;
-  height: 100vh;
-  width: 360px;
-  background: rgba(8, 10, 20, 0.97);
-  border-left: 1px solid #1f2638;
-  z-index: 20;
-  padding: 20px 22px 28px;
+/* ===== 数值调参（开发者专属独立页） ===== */
+.tuning-overlay {
+  align-items: flex-start;
+  justify-content: center;
   overflow-y: auto;
-  color: #dfe6f0;
-  font-size: 13px;
-  box-shadow: -12px 0 36px rgba(0, 0, 0, 0.5);
-  transform: translateX(100%);
-  transition: transform 0.25s ease-out;
+  padding: 42px 24px 70px;
+  background:
+    radial-gradient(900px 420px at 50% -10%, rgba(80, 60, 160, 0.28), transparent 70%),
+    #070911;
 }
 
-.settings-panel.open {
-  transform: translateX(0);
+.tuning-shell {
+  width: min(1080px, 100%);
 }
 
-.settings-panel h3 {
+.tuning-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px 18px;
+  margin-bottom: 10px;
+}
+
+.tuning-title {
+  margin: 0;
+  font-size: 20px;
+  letter-spacing: 2px;
+  color: #eaf1ff;
+}
+
+.tuning-head .storage-btns {
+  margin-left: auto;
+}
+
+.tuning-body {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(390px, 1fr));
+  gap: 6px 36px;
+  align-items: start;
+  margin-top: 12px;
+}
+
+.tuning-group {
+  margin-bottom: 20px;
+}
+
+.tuning-group h3 {
   font-size: 14px;
-  margin: 22px 0 8px;
+  margin: 0 0 10px;
   padding-bottom: 5px;
   border-bottom: 1px solid #1f2638;
   color: #9aa6b8;
@@ -348,13 +366,16 @@ body {
   font-weight: 600;
 }
 
-.settings-panel h3:first-child {
-  margin-top: 0;
+.tuning-group h3 .group-note {
+  color: #6b7690;
+  font-weight: 400;
+  letter-spacing: 0;
+  font-size: 11px;
 }
 
 .settings-row {
   display: grid;
-  grid-template-columns: 130px 1fr 60px;
+  grid-template-columns: 138px 1fr 62px;
   align-items: center;
   gap: 10px;
   margin-bottom: 9px;
@@ -379,43 +400,26 @@ body {
   opacity: 0.9;
 }
 
-.settings-panel .foot {
-  margin-top: 20px;
+.settings-row.readonly .val {
+  grid-column: 2 / -1;
+  color: #8d99ad;
+  opacity: 1;
+}
+
+.settings-row .row-note {
+  grid-column: 2 / -1;
+  margin-top: -4px;
+  font-size: 10px;
+  color: #7b8596;
+}
+
+.tuning-shell .foot {
+  margin-top: 16px;
   padding-top: 14px;
   border-top: 1px solid #1f2638;
   font-size: 11px;
   color: #7b8596;
-  line-height: 1.6;
-}
-
-.settings-panel .top-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 8px;
-}
-
-.settings-panel .title {
-  font-size: 15px;
-  font-weight: 700;
-  letter-spacing: 1px;
-  color: #eaf1ff;
-}
-
-.settings-panel .close-btn {
-  background: transparent;
-  border: 1px solid #2f3a5a;
-  color: #9aa6b8;
-  border-radius: 4px;
-  padding: 2px 10px;
-  cursor: pointer;
-  font: inherit;
-  font-size: 12px;
-}
-
-.settings-panel .close-btn:hover {
-  color: #fff;
-  border-color: #4a5a80;
+  line-height: 1.7;
 }
 
 /* ====== 存档头部：状态条 + 按钮行 ====== */
@@ -3044,11 +3048,27 @@ body.survival .screen canvas {
   padding: 0 3px;
 }
 
-.sv-paused {
+.survival-pause {
+  z-index: 18;
+  background: rgba(3, 4, 10, 0.82);
+  backdrop-filter: blur(5px);
+}
+
+.survival-pause-card {
+  width: min(360px, 92vw);
+  padding: 30px 34px;
   text-align: center;
-  font-size: 12px;
-  letter-spacing: 2px;
-  color: #ffe14d;
+  background: #0a0a14;
+  border: 1px solid #6d5bb5;
+  border-radius: 12px;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.65);
+}
+
+.survival-pause-card h2 {
+  margin: 0 0 8px;
+  font-size: 24px;
+  letter-spacing: 4px;
+  color: #e9d5ff;
 }
 
 /* 换弹状态：只在换弹期间显示，紧贴血量条右侧 */
@@ -3089,9 +3109,8 @@ body.survival .screen canvas {
   font-variant-numeric: tabular-nums;
 }
 
-/* 这三个元素不在 overlay 体系里，需要单独声明 hidden 才真正隐藏 */
+/* 这两个元素不在 overlay 体系里，需要单独声明 hidden 才真正隐藏 */
 .survival-hud.hidden,
-.sv-paused.hidden,
 .sv-reload.hidden {
   display: none;
 }

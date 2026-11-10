@@ -9,9 +9,18 @@ import { join } from "node:path";
 import type { MapDef, OpeningDef, Rect, SpawnRegion } from "../../src/data/types";
 import { HUMAN_DEF } from "../../src/data/humans";
 import { TERRAIN } from "../../src/data/terrain";
-import { WEAPON_IDS, WEAPON_LIST } from "../../src/data/weapons";
-import { ZOMBIE_IDS, ZOMBIE_SLOW } from "../../src/data/zombies";
-import { effectiveWeapon, effectiveZombie, setZombieModeOverrides } from "../../src/data/settings/runtime";
+import { WEAPON_IDS, WEAPON_LIST, WEAPONS } from "../../src/data/weapons";
+import { ZOMBIE_DEFS, ZOMBIE_IDS, ZOMBIE_SLOW } from "../../src/data/zombies";
+import {
+  clearOverrides,
+  clearLevelOverrides,
+  effectiveWeapon,
+  effectiveZombie,
+  setLevelOverrides,
+  setSetting,
+  setZombieModeOverrides,
+} from "../../src/data/settings/runtime";
+import { isDevModeEnabled } from "../../src/core/devMode";
 import {
   SURVIVAL_BOSS_POOL,
   SURVIVAL_WEAPON_POOL,
@@ -1036,10 +1045,123 @@ scenario("求生池守卫：所有僵尸 / 武器均已登记，模式覆盖表�
   assert(effectiveZombie(ZOMBIE_IDS.corroder).spit!.dps === 6, "基础模式毒液应回退 6 DPS");
 });
 
+scenario("数值调参：覆盖层提升后基础值仍等于定义默认", () => {
+  clearOverrides();
+  // 僵尸：扁平 4 字段 + 四个子配置，全部回退到定义文件
+  for (const id of Object.values(ZOMBIE_IDS)) {
+    const def = ZOMBIE_DEFS[id];
+    const eff = effectiveZombie(id);
+    for (const key of ["hp", "speed", "bite", "damage"] as const) {
+      assert(eff[key] === def[key], `${id}.${key} 基础值不应被覆盖层改写：${eff[key]} ≠ ${def[key]}`);
+    }
+    for (const sub of ["leap", "spit", "spawner", "scream"] as const) {
+      const base = def[sub];
+      if (!base) continue;
+      const actual = eff[sub] as unknown as Record<string, number>;
+      for (const [key, value] of Object.entries(base)) {
+        assert(actual[key] === value, `${id}.${sub}.${key} 基础值不应被覆盖层改写：${actual[key]} ≠ ${value}`);
+      }
+    }
+  }
+  // 武器：所有扁平数值 + tesla / pierce 扩展字段
+  for (const id of Object.values(WEAPON_IDS)) {
+    const def = WEAPONS[id] as unknown as Record<string, unknown>;
+    const eff = effectiveWeapon(id) as unknown as Record<string, unknown>;
+    for (const [key, value] of Object.entries(def)) {
+      if (typeof value !== "number") continue;
+      assert(eff[key] === value, `${id}.${key} 基础值不应被覆盖层改写：${eff[key]} ≠ ${value}`);
+    }
+    for (const sub of ["tesla", "pierce"] as const) {
+      const base = def[sub] as Record<string, number> | undefined;
+      if (!base) continue;
+      const actual = eff[sub] as Record<string, number>;
+      for (const [key, value] of Object.entries(base)) {
+        assert(actual[key] === value, `${id}.${sub}.${key} 基础值不应被覆盖层改写：${actual[key]} ≠ ${value}`);
+      }
+    }
+  }
+});
+
+scenario("数值调参：子配置与武器扩展字段可写覆盖，且不影响其它字段", () => {
+  clearOverrides();
+  setSetting("zombie.leaper.leap.pinDuration", 9);
+  setSetting("zombie.corroder.spit.dps", 12);
+  setSetting("weapons.tesla.tesla.chainRadius", 150);
+  setSetting("weapons.sniper.pierce.maxTargets", 4);
+  setSetting("weapons.sniper.hitSlowMul", 0.5);
+  const leap = effectiveZombie(ZOMBIE_IDS.leaper).leap!;
+  assert(leap.pinDuration === 9, `飞扑压制时长应可覆盖，实际 ${leap.pinDuration}`);
+  assert(leap.chargeTime === 0.8, `未覆盖的蓄力时长应保持默认，实际 ${leap.chargeTime}`);
+  assert(effectiveZombie(ZOMBIE_IDS.corroder).spit!.dps === 12, "腐蚀者毒液 DPS 应可覆盖");
+  const tesla = effectiveWeapon(WEAPON_IDS.tesla);
+  assert(tesla.tesla!.chainRadius === 150, `电击链半径应可覆盖，实际 ${tesla.tesla!.chainRadius}`);
+  assert(tesla.tesla!.chainFalloff === 0.75, "未覆盖的链跳衰减应保持默认");
+  const sniper = effectiveWeapon(WEAPON_IDS.sniper);
+  assert(sniper.pierce!.maxTargets === 4, "狙击穿透目标数应可覆盖");
+  assert(sniper.hitSlowMul === 0.5, "狙击命中减速应可覆盖");
+  assert(sniper.damage === WEAPONS[WEAPON_IDS.sniper].damage, "未覆盖的伤害应保持默认");
+  clearOverrides();
+});
+
+scenario("数值调参：关卡覆盖只作用于本局，清空后不残留", () => {
+  clearOverrides();
+  setLevelOverrides({
+    zombie: { types: { normal: { hp: 999 } } },
+    weapons: { sniper: { damage: 99, pierce: { maxTargets: 9 } } },
+  });
+  assert(effectiveZombie(ZOMBIE_IDS.normal).hp === 999, "本局内应读关卡覆盖值");
+  assert(effectiveWeapon(WEAPON_IDS.sniper).damage === 99, "本局内武器应读关卡覆盖值");
+  assert(effectiveWeapon(WEAPON_IDS.sniper).pierce!.maxTargets === 9, "本局内子配置应读关卡覆盖值");
+
+  clearLevelOverrides();
+  assert(
+    effectiveZombie(ZOMBIE_IDS.normal).hp === ZOMBIE_DEFS[ZOMBIE_IDS.normal].hp,
+    "退出本局后僵尸数值应回退基础定义",
+  );
+  assert(
+    effectiveWeapon(WEAPON_IDS.sniper).damage === WEAPONS[WEAPON_IDS.sniper].damage,
+    "退出本局后武器数值应回退基础定义",
+  );
+  assert(
+    effectiveWeapon(WEAPON_IDS.sniper).pierce!.maxTargets === WEAPONS[WEAPON_IDS.sniper].pierce!.maxTargets,
+    "退出本局后武器子配置应回退基础定义",
+  );
+});
+
+scenario("数值调参：非开发者环境默认无权进入", () => {
+  assert(isDevModeEnabled() === false, "没有开发者存档时不应默认开启开发者模式");
+});
+
+scenario("求生：ESC 开关暂停，暂停态可回到游戏", () => {
+  const s = new SurvivalSession();
+  s.start();
+  assert(s.state === "playing", "开局应为 playing");
+  s.togglePause();
+  assert(s.state === "paused", "第一次切换应暂停");
+  s.togglePause();
+  assert(s.state === "playing", "第二次切换应恢复");
+  s.stop();
+});
+
+scenario("求生：暂停菜单退出只 stop，不写记录也不置失败", () => {
+  const s = new SurvivalSession();
+  s.start();
+  s.elapsed = 42;
+  s.level = 6;
+  s.record = { bestTime: 99, bestLevel: 8 };
+  s.togglePause();
+  s.stop();
+  assert(s.state === "idle", `退出应回到 idle，实际 ${s.state}`);
+  assert(s.state !== "defeat", "退出不应置为失败态");
+  assert(
+    s.record.bestTime === 99 && s.record.bestLevel === 8,
+    `退出不应改写最佳记录，实际 ${s.record.bestTime} / ${s.record.bestLevel}`,
+  );
+});
+
 // ============================================================
 // 入口
 // ============================================================
-
 export async function runScenarios(): Promise<number> {
   console.log(`\n[regression] 共 ${scenarios.length} 个场景\n`);
   let failed = 0;

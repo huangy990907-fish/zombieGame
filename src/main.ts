@@ -15,8 +15,8 @@
  * menu/levels/workshop 路由下 ticker 继续跑（保证 Pixi 渲染帧稳定），
  * 但 game.tick() 不被调用——战斗逻辑停止，画面冻结成静态背景。
  */
-import { getSetting, setSetting } from "./data/settings/runtime";
-import { SLIDER_GROUPS } from "./data/settings/sliders";
+import { getSetting, setSetting, clearLevelOverrides } from "./data/settings/runtime";
+import { SLIDERS } from "./data/settings/sliders";
 import { loadBuiltinMaps, getMap, isReadOnlyMap, registerRuntimeMap, MAP_LIST } from "./data/maps";
 import { SURVIVAL } from "./data/survival/config";
 import { SurvivalSession } from "./survival/session";
@@ -55,6 +55,7 @@ import { TrainingSession } from "./training/session";
 import { TrainingPanel } from "./training/panel";
 import { LEVELS, findLevel, refreshLevelDefs, type LevelDef } from "./levels";
 import { router, type Route } from "./router";
+import type { SliderDef } from "./data/types";
 
 const STEP = 1 / 60;
 
@@ -153,6 +154,13 @@ async function boot(): Promise<void> {
     onReplay: () => startSurvival(survival.map.id),
     onMenu: () => router.go("menu"),
     onWorkshop: () => router.go("workshop"),
+    // 暂停菜单：继续只是切回 playing；重开等同死亡页重开；退出直接回主菜单、不结算
+    onResume: () => {
+      (document.activeElement as HTMLElement | null)?.blur();
+      survival.togglePause();
+    },
+    onRestart: () => startSurvival(survival.map.id),
+    onQuit: () => router.go("menu"),
   });
 
   // ====== 放置：play 路由下点击人类区空地放下当前选中的人类 ======
@@ -198,10 +206,8 @@ async function boot(): Promise<void> {
   const restartBtn = document.getElementById("btnRestart") as HTMLButtonElement;
   const modeBtn = document.getElementById("btnMode") as HTMLButtonElement;
   const backMenuBtn = document.getElementById("btnBackMenu") as HTMLButtonElement;
-  const settingsBtn = document.getElementById("btnSettings") as HTMLButtonElement;
-  const settingsCloseBtn = document.getElementById("btnSettingsClose") as HTMLButtonElement;
-  const settingsPanel = document.getElementById("settingsPanel") as HTMLElement;
-  const settingsBody = document.getElementById("settingsBody") as HTMLElement;
+  const tuningOverlay = document.getElementById("tuningOverlay") as HTMLElement;
+  const tuningBody = document.getElementById("tuningBody") as HTMLElement;
   const storageStatusEl = document.getElementById("storageStatus") as HTMLElement;
 
   const menuOverlay = document.getElementById("menuOverlay") as HTMLElement;
@@ -224,15 +230,6 @@ async function boot(): Promise<void> {
   const menuVolSfx = document.getElementById("menuVolSfx") as HTMLInputElement;
   const menuVolSfxVal = document.getElementById("menuVolSfxVal") as HTMLElement;
 
-  // 面板标题映射：key = 分组名（和 SLIDERS.group 一致）
-  const GROUP_TITLES: Record<string, string> = {
-    wave: "波次 / 规模",
-    human: "人类配置",
-    zombie: "僵尸配置",
-    opening: "门窗配置",
-    audio: "音频",
-  };
-
   /** 当前选中关卡（选关页点中节点或结算弹窗的"重玩"都会更新这个值） */
   let currentLevel: LevelDef | null = null;
 
@@ -240,15 +237,64 @@ async function boot(): Promise<void> {
   let progress = loadProgress();
 
   // ============================================================
-  // 设置面板（原有逻辑保持不变）
+  // 数值调参页（开发者专属独立路由 #/tuning）
   // ============================================================
 
-  const buildSettingsPanel = (): void => {
+  /** 一个可折叠分区：僵尸 / 武器按实体拆分，避免单列过长 */
+  interface TuningSection {
+    key: string;
+    title: string;
+    note?: string;
+    items: SliderDef[];
+  }
+
+  const SECTION_TITLES: Record<string, string> = {
+    wave: "波次 / 规模",
+    human: "人类配置",
+    zombie: "僵尸·全局",
+    opening: "门窗配置",
+    audio: "音频",
+  };
+
+  const sectionOf = (s: SliderDef): { key: string; title: string; note?: string } => {
+    const parts = s.path.split(".");
+    const name = s.label.split("·")[0];
+    if (parts[0] === "zombie" && parts.length > 2) {
+      return { key: `zombie.${parts[1]}`, title: `僵尸·${name}`, note: "对新生成单位生效" };
+    }
+    if (parts[0] === "weapons" && parts.length > 2) {
+      return { key: `weapons.${parts[1]}`, title: `武器·${name}` };
+    }
+    return {
+      key: parts[0],
+      title: SECTION_TITLES[parts[0]] ?? parts[0],
+      note: parts[0] === "opening" ? "血量项需重开本局" : undefined,
+    };
+  };
+
+  const buildTuningPanel = (): void => {
+    const sections = new Map<string, TuningSection>();
+    for (const s of SLIDERS) {
+      const meta = sectionOf(s);
+      const sec = sections.get(meta.key) ?? { ...meta, items: [] };
+      sec.items.push(s);
+      sections.set(meta.key, sec);
+    }
+
     let html = "";
-    for (const [grp, sliders] of Object.entries(SLIDER_GROUPS)) {
-      html += `<h3>${GROUP_TITLES[grp] ?? grp}</h3>`;
-      for (const s of sliders) {
-        html += `<div class="settings-row" data-path="${s.path}">
+    for (const sec of sections.values()) {
+      html += `<section class="tuning-group"><h3>${sec.title}${
+        sec.note ? ` <span class="group-note">· ${sec.note}</span>` : ""
+      }</h3>`;
+      for (const s of sec.items) {
+        if (s.readonly) {
+          html += `<div class="settings-row readonly" data-path="${s.path}" data-step="${s.step}">
+            <label>${s.label}</label>
+            <span class="val" data-val="${s.path}"></span>
+          </div>`;
+          continue;
+        }
+        html += `<div class="settings-row" data-path="${s.path}" data-step="${s.step}">
           <label>${s.label}</label>
           <input type="range"
                  data-path="${s.path}"
@@ -257,12 +303,14 @@ async function boot(): Promise<void> {
                  max="${s.max}"
                  step="${s.step}" />
           <span class="val" data-val="${s.path}"></span>
+          ${s.note ? `<span class="row-note">${s.note}</span>` : ""}
         </div>`;
       }
+      html += `</section>`;
     }
-    settingsBody.innerHTML = html;
+    tuningBody.innerHTML = html;
 
-    const inputs = settingsBody.querySelectorAll<HTMLInputElement>('input[type="range"]');
+    const inputs = tuningBody.querySelectorAll<HTMLInputElement>('input[type="range"]');
     for (const input of inputs) {
       const path = input.dataset.path!;
       const row = input.parentElement!;
@@ -272,7 +320,7 @@ async function boot(): Promise<void> {
         setSetting(path, v);
         valSpan.textContent = formatVal(v, Number(input.dataset.step!));
         void saveSettings();
-        // 音量滑块变化时即时同步到 AudioManager（不用等重开）
+        // 音量滑块变化时即时同步到 AudioManager
         if (path === "audio.master") sound.setMaster(v);
         else if (path === "audio.sfx") sound.setSfx(v);
       });
@@ -313,19 +361,13 @@ async function boot(): Promise<void> {
   };
 
   const refreshPanelValues = (): void => {
-    settingsBody.querySelectorAll<HTMLInputElement>('input[type="range"]').forEach((input) => {
-      const v = getSetting(input.dataset.path!);
-      input.value = String(v);
-      const row = input.parentElement!;
-      const valSpan = row.querySelector<HTMLSpanElement>(".val")!;
-      valSpan.textContent = formatVal(v, Number(input.dataset.step!));
+    tuningBody.querySelectorAll<HTMLElement>(".settings-row").forEach((row) => {
+      const path = row.dataset.path;
+      if (!path) return;
+      const v = getSetting(path);
+      const valSpan = row.querySelector<HTMLSpanElement>(".val");
+      if (valSpan) valSpan.textContent = formatVal(v, Number(row.dataset.step ?? "1"));
     });
-  };
-
-  const toggleSettings = (force?: boolean): void => {
-    const next = force ?? !settingsPanel.classList.contains("open");
-    if (next) refreshPanelValues();
-    settingsPanel.classList.toggle("open", next);
   };
 
   const refreshButtons = (): void => {
@@ -644,10 +686,15 @@ async function boot(): Promise<void> {
     workshop.deactivate();
     // 生存模式离开路由即停止推进；镜头与 HUD 一律复位
     if (route !== "survival") survival.stop();
+    // 关卡覆盖值只属于本局：离开战斗路由立即清空，不残留到数值面板和其他关
+    if (route !== "play") clearLevelOverrides();
     survivalUi.hideAll();
     renderer.setCamera(null);
     document.body.classList.remove("survival");
     heldKeys.clear();
+    // 数值调参页只在 #/tuning 显示，其余路由一律收起
+    tuningOverlay.classList.remove("active");
+    tuningOverlay.classList.add("hidden");
     // 离开选关页时关闭关卡编辑器弹层，避免覆盖其它页面
     if (route !== "levels" && levelEditor?.isOpen) levelEditor.close();
 
@@ -656,14 +703,12 @@ async function boot(): Promise<void> {
         showOverlay("menu");
         topbar.classList.add("hidden");
         bottom.classList.add("hidden");
-        settingsPanel.classList.remove("open");
         sound.pause(); // 主菜单静音
         break;
       case "levels": {
         showOverlay("levels");
         topbar.classList.add("hidden");
         bottom.classList.add("hidden");
-        settingsPanel.classList.remove("open");
         refreshLevelsPage();
         // 直达 #/levels/edit：只有开发者模式能进编辑器，玩家模式挡回列表并提示
         if (isLevelEditPath()) {
@@ -714,7 +759,6 @@ async function boot(): Promise<void> {
         // play 路由：库存面板固定在右侧一栏，画布按剩余宽度缩放
         document.body.classList.add("placement");
         refreshButtons();
-        refreshPanelValues();
         sound.resumeAudio(); // 进入战斗场景恢复声音（AudioContext resume 在这里发生）
         break;
       }
@@ -722,7 +766,6 @@ async function boot(): Promise<void> {
         showOverlay(null);
         topbar.classList.add("hidden");
         bottom.classList.add("hidden");
-        settingsPanel.classList.remove("open");
         // 每次进入都是全新沙盒：不继承上一次的单位、统计和改动
         training.reset();
         reportMapFallback(training.mapFallback, training.requestedMapId, training.world.map.name);
@@ -736,7 +779,6 @@ async function boot(): Promise<void> {
         showOverlay(null);
         topbar.classList.add("hidden");
         bottom.classList.add("hidden");
-        settingsPanel.classList.remove("open");
         // 界面层拦截：玩家模式下不允许直达 #/workshop（不是安全边界，见 README）
         if (!isDevModeEnabled()) {
           showMapNotice("地图工坊需要先在设置里开启开发者模式");
@@ -746,11 +788,27 @@ async function boot(): Promise<void> {
         workshop.activate();
         sound.pause();
         break;
+      case "tuning": {
+        showOverlay(null);
+        topbar.classList.add("hidden");
+        bottom.classList.add("hidden");
+        // 界面层拦截：数值调参只对开发者模式开放（与工坊同口径，不是安全边界）
+        if (!isDevModeEnabled()) {
+          showMapNotice("数值调参仅对开发者模式开放");
+          router.go("menu");
+          break;
+        }
+        buildTuningPanel();
+        tuningOverlay.classList.remove("hidden");
+        requestAnimationFrame(() => tuningOverlay.classList.add("active"));
+        void refreshStorageStatus();
+        sound.pause();
+        break;
+      }
       case "survival": {
         showOverlay(null);
         topbar.classList.add("hidden");
         bottom.classList.add("hidden");
-        settingsPanel.classList.remove("open");
         document.body.classList.add("survival");
         // 进入先选图：默认展示「空旷地」，实际开局由玩家选择
         renderer.setMap(getMap(SURVIVAL.defaultMapId));
@@ -931,9 +989,6 @@ async function boot(): Promise<void> {
 
   backMenuBtn.onclick = () => router.go("menu");
 
-  settingsBtn.onclick = () => toggleSettings();
-  settingsCloseBtn.onclick = () => toggleSettings(false);
-
   // ====== 存档系统按钮 ======
   const pickDirBtn = document.getElementById("btnPickDir") as HTMLButtonElement;
   const clearDirBtn = document.getElementById("btnClearDir") as HTMLButtonElement;
@@ -963,6 +1018,7 @@ async function boot(): Promise<void> {
   const survivalBtn = document.getElementById("btnSurvival") as HTMLButtonElement;
   const trainingBtn = document.getElementById("btnTraining") as HTMLButtonElement;
   const workshopBtn = document.getElementById("btnWorkshop") as HTMLButtonElement;
+  const tuningBtn = document.getElementById("btnTuning") as HTMLButtonElement;
   const menuSettingsBtn = document.getElementById("btnMenuSettings") as HTMLButtonElement;
   const menuMuteBtn = document.getElementById("btnMenuMute") as HTMLButtonElement;
   const devModeStatusEl = document.getElementById("devModeStatus") as HTMLElement;
@@ -1036,15 +1092,17 @@ async function boot(): Promise<void> {
   const syncDevModeUI = (message = "", ok = false): void => {
     const on = isDevModeEnabled();
     workshopBtn.classList.toggle("hidden", !on);
+    tuningBtn.classList.toggle("hidden", !on);
     devModeStatusEl.textContent = on
-      ? "已开启：主菜单显示「地图工坊」入口，可直接访问 #/workshop。"
-      : "未开启。开启后主菜单会显示「地图工坊」入口。";
+      ? "已开启：主菜单显示「地图工坊」与「数值调参」入口，可直接访问 #/workshop、#/tuning。"
+      : "未开启。开启后主菜单会显示「地图工坊」与「数值调参」入口。";
     devModeAuthRow.classList.toggle("hidden", on);
     devModeDisableBtn.classList.toggle("hidden", !on);
     devModeFeedbackEl.textContent = message;
     devModeFeedbackEl.classList.toggle("ok", ok);
-    // 关掉开发者模式时若还停在工坊页 / 关卡编辑器，立刻退出
+    // 关掉开发者模式时若还停在工坊页 / 数值调参页 / 关卡编辑器，立刻退出
     if (!on && router.get() === "workshop") router.go("menu");
+    if (!on && router.get() === "tuning") router.go("menu");
     if (!on && levelEditor?.isOpen) levelEditor.close();
     // 开发者模式切换会改变选关列表的可玩范围与操作按钮
     if (router.get() === "levels") refreshLevelsPage();
@@ -1075,12 +1133,21 @@ async function boot(): Promise<void> {
   devModeDisableBtn.onclick = () => {
     setDevModeEnabled(false);
     sound.play(SFX.UI_CLICK);
-    syncDevModeUI("已退出开发者模式，主菜单入口与 #/workshop 均已关闭", true);
+    syncDevModeUI("已退出开发者模式，主菜单入口与 #/workshop、#/tuning 均已关闭", true);
   };
   workshopBtn.onclick = () => {
     sound.resume();
     sound.play(SFX.UI_CLICK);
     router.go("workshop");
+  };
+  tuningBtn.onclick = () => {
+    sound.resume();
+    sound.play(SFX.UI_CLICK);
+    router.go("tuning");
+  };
+  document.getElementById("btnTuningBack")!.onclick = () => {
+    sound.play(SFX.UI_CLICK);
+    router.go("menu");
   };
   syncDevModeUI();
 
@@ -1163,6 +1230,12 @@ async function boot(): Promise<void> {
         trainingPanel.refresh(1);
       }
     } else if (router.get() === "survival") {
+      // ESC / 空格都开关暂停菜单；暂停时逻辑真的不走（tick 只看 playing）
+      if (e.code === "Escape") {
+        e.preventDefault();
+        survival.togglePause();
+        return;
+      }
       const moveKeys = [
         "KeyW", "KeyA", "KeyS", "KeyD",
         "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight",
@@ -1196,7 +1269,6 @@ async function boot(): Promise<void> {
   // ============================================================
 
   refreshButtons();
-  buildSettingsPanel();
   await refreshStorageStatus();
 
   // 初始化完成：解除 critical CSS 的首屏隐藏（index.html 里还有 3 秒兜底）

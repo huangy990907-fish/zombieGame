@@ -4,7 +4,7 @@ import type { ZombieDef } from "../types";
 export const runner: ZombieDef = {
   id: "runner",
   name: "狂奔",
-  hp: 45,
+  hp: 62,
   speed: 90,
   radius: 4.5,
   color: 0xc77dff,

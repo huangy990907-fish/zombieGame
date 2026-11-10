@@ -24,6 +24,7 @@ export const SFX = {
   ZOMBIE_SCREAM: "zombie-scream", // 尖叫者范围强化
   ZOMBIE_LEAP: "zombie-leap",    // 飞扑者起跳
   ZOMBIE_SPIT: "zombie-spit",    // 腐蚀者吐毒
+  ZOMBIE_SPLAT: "zombie-splat",  // 毒液弹落地溅开
   ZOMBIE_BITE: "zombie-bite",    // 啃咬（人类或门窗）
   ZOMBIE_HIT: "zombie-hit",      // 被子弹命中扣血
   ZOMBIE_KILL: "zombie-kill",    // 倒地击杀
@@ -64,6 +65,7 @@ export const SFX_MAP: Record<SfxKey, string> = {
   [SFX.ZOMBIE_SCREAM]: "audio/zombie-scream.mp3",
   [SFX.ZOMBIE_LEAP]: "audio/zombie-leap.mp3",
   [SFX.ZOMBIE_SPIT]: "audio/zombie-spit.mp3",
+  [SFX.ZOMBIE_SPLAT]: "audio/zombie-splat.mp3",
   [SFX.ZOMBIE_BITE]: "audio/zombie-bite.mp3",
   [SFX.ZOMBIE_HIT]: "audio/zombie-hit.mp3",
   [SFX.ZOMBIE_KILL]: "audio/zombie-kill.mp3",
@@ -99,6 +101,7 @@ export const SFX_THROTTLE: Record<SfxKey, number> = {
   [SFX.ZOMBIE_SCREAM]: 1200,
   [SFX.ZOMBIE_LEAP]: 300,
   [SFX.ZOMBIE_SPIT]: 350,
+  [SFX.ZOMBIE_SPLAT]: 120,
   [SFX.ZOMBIE_BITE]: 400,
   [SFX.ZOMBIE_HIT]: 80,
   [SFX.ZOMBIE_KILL]: 60,

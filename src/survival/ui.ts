@@ -29,6 +29,10 @@ interface SurvivalUiCallbacks {
   onReplay(): void;
   onMenu(): void;
   onWorkshop(): void;
+  /** 暂停菜单：继续 / 重开 / 退出（退出不结算） */
+  onResume(): void;
+  onRestart(): void;
+  onQuit(): void;
 }
 
 function escapeHtml(s: string): string {
@@ -71,7 +75,7 @@ export class SurvivalUi {
   private timeEl = document.getElementById("svTime") as HTMLElement;
   private killsEl = document.getElementById("svKills") as HTMLElement;
   private tierEl = document.getElementById("svTier") as HTMLElement;
-  private pausedEl = document.getElementById("svPaused") as HTMLElement;
+  private pauseEl = document.getElementById("survivalPause") as HTMLElement;
   private reloadEl = document.getElementById("svReload") as HTMLElement;
   private reloadFill = document.getElementById("svReloadFill") as HTMLElement;
   private reloadText = document.getElementById("svReloadText") as HTMLElement;
@@ -93,6 +97,9 @@ export class SurvivalUi {
     document.getElementById("btnSurvivalBack")?.addEventListener("click", () => cbs.onMenu());
     document.getElementById("btnSurvivalMenu")?.addEventListener("click", () => cbs.onMenu());
     document.getElementById("btnSurvivalReplay")?.addEventListener("click", () => cbs.onReplay());
+    document.getElementById("btnSurvivalResume")?.addEventListener("click", () => cbs.onResume());
+    document.getElementById("btnSurvivalRestart")?.addEventListener("click", () => cbs.onRestart());
+    document.getElementById("btnSurvivalQuit")?.addEventListener("click", () => cbs.onQuit());
     this.workshopBtn.addEventListener("click", () => cbs.onWorkshop());
     this.startBtn.addEventListener("click", () => {
       if (this.selectedMapId) cbs.onStart(this.selectedMapId);
@@ -138,6 +145,8 @@ export class SurvivalUi {
     this.defeatEl.classList.remove("active");
     this.upgradeEl.classList.add("hidden");
     this.upgradeEl.classList.remove("active");
+    this.pauseEl.classList.add("hidden");
+    this.pauseEl.classList.remove("active");
     this.hudEl.classList.add("hidden");
     this.selectEl.classList.remove("hidden");
     // 下一帧再激活，让 CSS opacity 过渡生效
@@ -152,6 +161,8 @@ export class SurvivalUi {
     this.upgradeEl.classList.remove("active");
     this.defeatEl.classList.add("hidden");
     this.defeatEl.classList.remove("active");
+    this.pauseEl.classList.add("hidden");
+    this.pauseEl.classList.remove("active");
     this.lastChoicesKey = "";
     this.lastWeaponsKey = "";
     this.lastDefeatKey = "";
@@ -166,6 +177,8 @@ export class SurvivalUi {
     this.upgradeEl.classList.add("hidden");
     this.defeatEl.classList.remove("active");
     this.defeatEl.classList.add("hidden");
+    this.pauseEl.classList.remove("active");
+    this.pauseEl.classList.add("hidden");
     this.hudEl.classList.add("hidden");
   }
 
@@ -193,7 +206,13 @@ export class SurvivalUi {
     this.timeEl.textContent = formatSurvivalTime(s.elapsed);
     this.killsEl.textContent = `击杀 ${s.kills}`;
     this.tierEl.textContent = `强度 ${s.tier + 1}`;
-    this.pausedEl.classList.toggle("hidden", s.state !== "paused");
+    if (s.state === "paused") {
+      this.pauseEl.classList.remove("hidden");
+      this.pauseEl.classList.add("active");
+    } else if (!this.pauseEl.classList.contains("hidden")) {
+      this.pauseEl.classList.remove("active");
+      this.pauseEl.classList.add("hidden");
+    }
 
     // 武器栏：主武器 + 副武器（双持时用色块图标列出第二把）
     const weaponsKey = s.weapons.join(",");

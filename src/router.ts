@@ -1,11 +1,12 @@
 /**
- * 极简 hash 路由 —— 五个页面：主菜单 / 选关 / 战斗 / 训练场 / 工坊编辑器。
+ * 极简 hash 路由 —— 六个页面：主菜单 / 选关 / 战斗 / 训练场 / 工坊编辑器 / 数值调参。
  * URL 形如：#/ 或 #/menu → 主菜单；#/levels → 选关；
- * #/play → 战斗；#/training → 训练场；#/workshop → 工坊编辑器。
+ * #/play → 战斗；#/training → 训练场；#/workshop → 工坊编辑器；
+ * #/tuning → 数值调参（开发者专属）。
  * 所有页面共享同一个 PixiJS renderer，只是用 CSS 控制哪个显隐。
  */
 
-export type Route = "menu" | "levels" | "play" | "training" | "workshop" | "survival";
+export type Route = "menu" | "levels" | "play" | "training" | "workshop" | "survival" | "tuning";
 
 const VALID_ROUTES: Record<string, Route> = {
   "": "menu",
@@ -17,6 +18,7 @@ const VALID_ROUTES: Record<string, Route> = {
   "/training": "training",
   "/workshop": "workshop",
   "/survival": "survival",
+  "/tuning": "tuning",
 };
 
 export type RouteListener = (route: Route, old: Route) => void;

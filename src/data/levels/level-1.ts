@@ -34,16 +34,12 @@ export const level1: LevelJson = {
   ],
   settings: {
     wave: {
-      count: 8,
-      base: 120,
-      growth: 1.06,
       spawnBase: 12,
       spawnPerWave: 2,
       spawnMax: 80,
       maxAlive: 400,
-      reinforce: 1,
     },
-    human: { start: 50, cap: 50, hp: 100, speed: 54, sight: 420, turnTime: 2.8 },
+    human: { cap: 50, hp: 100, speed: 54, sight: 420, turnTime: 2.8 },
     zombie: {
       jitter: 0.2,
       types: {

@@ -517,6 +517,10 @@ body {
   color: #6ee7b7;
 }
 
+.tuning-save-state.warn {
+  color: #fbbf24;
+}
+
 .tuning-body {
   flex: 1;
   min-height: 0;

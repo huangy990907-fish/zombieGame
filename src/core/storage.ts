@@ -85,15 +85,65 @@ async function idbDelete(key: string): Promise<void> {
 // localStorage —— 快速兜底，每次滑块变化先写这个
 // ============================================================
 
-export function saveToLocal(): void {
+export function saveToLocal(): boolean {
   try {
     localStorage.setItem(
       LS_SETTINGS,
-      JSON.stringify({ _version: SAVE_VERSION, settings: getOverridesSnapshot() }),
+      JSON.stringify({
+        _version: SAVE_VERSION,
+        _exportedAt: new Date().toISOString(),
+        settings: getOverridesSnapshot(),
+      }),
     );
+    return true;
   } catch {
-    // 存不下或用户禁了隐私模式就静默失败
+    // 存不下或用户禁了隐私模式：返回 false，由调用方提示"仅本机 / 保存失败"
+    return false;
   }
+}
+
+/** 一存档文本 + 用于比较新旧的时间戳 */
+export interface SavePayloadText {
+  text: string;
+  /** `_exportedAt` 解析结果；缺失 / 非法为 NaN */
+  at: number;
+}
+
+/** 从存档 JSON 里取 `_exportedAt`，缺失或非法返回 NaN */
+function exportedAtOf(raw: string): number {
+  try {
+    const parsed = JSON.parse(raw) as { _exportedAt?: unknown } | null;
+    const at = typeof parsed?._exportedAt === "string" ? Date.parse(parsed._exportedAt) : NaN;
+    return Number.isFinite(at) ? at : NaN;
+  } catch {
+    return NaN;
+  }
+}
+
+function readLocalPayload(): SavePayloadText | null {
+  try {
+    const raw = localStorage.getItem(LS_SETTINGS);
+    if (!raw) return null;
+    return { text: raw, at: exportedAtOf(raw) };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 两份存档都存在时挑较新的：只比较 `_exportedAt`（缺失时用调用方给的兜底时间戳）。
+ * 两边都拿不到时间戳时保持旧的「目录优先」；只有一边存在就用那一边。
+ */
+export function pickNewerSave(
+  dir: SavePayloadText | null,
+  local: SavePayloadText | null,
+): "dir" | "local" | null {
+  if (!dir) return local ? "local" : null;
+  if (!local) return "dir";
+  const dirAt = Number.isFinite(dir.at) ? dir.at : Number.NEGATIVE_INFINITY;
+  const localAt = Number.isFinite(local.at) ? local.at : Number.NEGATIVE_INFINITY;
+  if (dirAt === localAt) return "dir";
+  return localAt > dirAt ? "local" : "dir";
 }
 
 export function loadFromLocal(): boolean {
@@ -140,7 +190,73 @@ export async function getSaveDir(): Promise<DirHandle | null> {
   return cachedDirHandle;
 }
 
-/** 让用户在系统对话框里选一个文件夹作为存档目录；之后所有自动读写都走这里 */
+/** 目录存档的读取结果：读到 / 还没有文件 / 读失败（权限、IO 等） */
+type DirReadState =
+  | { kind: "ok"; payload: SavePayloadText }
+  | { kind: "missing" }
+  | { kind: "failed" };
+
+/**
+ * 读目录里的 settings.json。
+ * 文件不存在 = missing（首次使用，正常）；其它异常 = failed（不要拿默认值回写）。
+ * 时间戳优先用 `_exportedAt`，缺失时退回文件 mtime。
+ */
+async function readDirState(): Promise<DirReadState> {
+  const dir = await getSaveDir();
+  if (!dir) return { kind: "missing" };
+  try {
+    const handle = await dir.getFileHandle(SETTINGS_FILE);
+    const file = await handle.getFile();
+    const text = await file.text();
+    const parsedAt = exportedAtOf(text);
+    return {
+      kind: "ok",
+      payload: { text, at: Number.isFinite(parsedAt) ? parsedAt : file.lastModified },
+    };
+  } catch (e) {
+    if ((e as { name?: string })?.name === "NotFoundError") return { kind: "missing" };
+    console.warn("loadFromDir failed", e);
+    return { kind: "failed" };
+  }
+}
+
+/** 把文本写进指定目录下的文件（目录写失败的异常交给调用方处理） */
+async function writeTextFile(dir: DirHandle, name: string, text: string): Promise<void> {
+  const file = await dir.getFileHandle(name, { create: true });
+  const writable = await file.createWritable();
+  await writable.write(new Blob([text], { type: "application/json" }));
+  await writable.close();
+}
+
+function describeError(e: unknown): string {
+  return e instanceof Error ? `${e.name}: ${e.message}` : String(e);
+}
+
+/**
+ * 选目录时目录里已有 settings.json：让用户显式决定覆盖方向。
+ * 返回 cancel 表示不改任何文件。
+ */
+function askDirConflict(): "dir" | "local" | "backup" | "cancel" {
+  const input = window.prompt(
+    "这个目录里已经有 settings.json：\n\n" +
+      "输入 1：用目录里的设置覆盖本机\n" +
+      "输入 2：用本机当前设置覆盖目录\n" +
+      "输入 3：先把目录里的文件备份，再用本机覆盖\n\n" +
+      "留空或取消：不改变任何文件",
+    "1",
+  );
+  if (input === null) return "cancel";
+  const value = input.trim();
+  if (value === "1") return "dir";
+  if (value === "2") return "local";
+  if (value === "3") return "backup";
+  return "cancel";
+}
+
+/**
+ * 让用户在系统对话框里选一个文件夹作为存档目录；之后所有自动读写都走这里。
+ * 目录里已有 settings.json 时不会静默覆盖，先问用户选覆盖方向。
+ */
 export async function selectSaveDir(): Promise<DirHandle | null> {
   if (!FSA_SUPPORTED) {
     // 降级：把目录路径贴进 localStorage 当"标记"用，但没法真正自动读写
@@ -159,9 +275,42 @@ export async function selectSaveDir(): Promise<DirHandle | null> {
         return null;
       }
     }
+
+    // 先试探目录里是否已有存档，有就交给用户决定，不静默写
+    let existing: string | null = null;
+    try {
+      const handle = await dir.getFileHandle(SETTINGS_FILE);
+      existing = await (await handle.getFile()).text();
+    } catch (e) {
+      if ((e as { name?: string })?.name !== "NotFoundError") throw e;
+    }
+
+    if (existing !== null) {
+      const choice = askDirConflict();
+      if (choice === "cancel") return null;
+      if (choice === "dir") {
+        // 先校验再动本机值：解析失败时保持原样，不清空
+        const settings = parseSaveJSON(existing);
+        if (!settings) {
+          alert("目录里的 settings.json 无法解析，已保持本机设置不变。");
+          return null;
+        }
+        // 用目录覆盖本机：整体替换，避免本机独有字段残留在合并结果里
+        replaceOverrides(settings);
+        saveToLocal();
+        await idbPut(IDB_DIR_KEY, dir);
+        cachedDirHandle = dir;
+        return dir;
+      }
+      if (choice === "backup") {
+        const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+        await writeTextFile(dir, `settings.backup-${stamp}.json`, existing);
+      }
+    }
+
     await idbPut(IDB_DIR_KEY, dir);
     cachedDirHandle = dir;
-    // 立刻把当前设置落盘一次
+    // 用本机设置覆盖目录（含"先备份"分支）
     await saveToDir();
     return dir;
   } catch (e) {
@@ -184,10 +333,7 @@ export async function saveToDir(): Promise<boolean> {
   const dir = await getSaveDir();
   if (!dir) return false;
   try {
-    const file = await dir.getFileHandle(SETTINGS_FILE, { create: true });
-    const writable = await file.createWritable();
-    await writable.write(new Blob([buildSavePayload()], { type: "application/json" }));
-    await writable.close();
+    await writeTextFile(dir, SETTINGS_FILE, buildSavePayload());
     return true;
   } catch (e) {
     console.warn("saveToDir failed", e);
@@ -197,17 +343,9 @@ export async function saveToDir(): Promise<boolean> {
 
 /** 从 FSA 目录读 settings.json，读不到或损坏就返回 false */
 export async function loadFromDir(): Promise<boolean> {
-  const dir = await getSaveDir();
-  if (!dir) return false;
-  try {
-    const handle = await dir.getFileHandle(SETTINGS_FILE);
-    const file = await handle.getFile();
-    const text = await file.text();
-    return applySaveJSON(text);
-  } catch {
-    // 目录里还没有 settings.json（用户第一次选目录），不算错
-    return false;
-  }
+  const state = await readDirState();
+  if (state.kind !== "ok") return false;
+  return applySaveJSON(state.payload.text);
 }
 
 // ============================================================
@@ -382,22 +520,78 @@ export function recordBeaten(levelId: string, levelIds?: string[]): Progress {
 // 启停入口 —— 每次滑块变化时调用 saveSettings()；页面启动时调用 loadSettings()
 // ============================================================
 
-/** 滑一下先存 localStorage，再异步写 FSA 目录（如果已选过） */
-export async function saveSettings(): Promise<void> {
-  saveToLocal();
-  // 不 await，别让滑块卡顿
-  void saveToDir();
+/** 一次保存的真实结果：local / dir 各自是否成功，目录失败时带原因 */
+export interface SaveResult {
+  local: boolean;
+  /** 未配置目录时也是 false（dirError 为空） */
+  dir: boolean;
+  dirError?: string;
 }
 
-/** 启动时读：先 FSA 目录（最权威，跨设备同步），再 localStorage（本机兜底），都没有就用默认值 */
+export type SaveStatusTone = "saved" | "warn" | "error";
+export interface SaveStatus {
+  text: string;
+  tone: SaveStatusTone;
+}
+
+/**
+ * 把保存结果翻译成 UI 三态：
+ * 两处都成功 = 已保存；只剩本机 = 警告（带原因）；都失败 = 保存失败。
+ */
+export function describeSaveResult(result: SaveResult, time = ""): SaveStatus {
+  const stamp = time ? ` ${time}` : "";
+  if (result.dir) return { text: `✅ 已保存${stamp}`, tone: "saved" };
+  if (result.local) {
+    const reason = result.dirError ? `目录写入失败：${result.dirError}` : "未配置存档目录";
+    return { text: `⚠️ 仅本机已保存${stamp} · ${reason}`, tone: "warn" };
+  }
+  return {
+    text: `❌ 保存失败：${result.dirError ?? "浏览器拒绝了本地存储"}`,
+    tone: "error",
+  };
+}
+
+/** 滑一下先存 localStorage，再写 FSA 目录（如果已选过），返回两边真实结果 */
+export async function saveSettings(): Promise<SaveResult> {
+  const local = saveToLocal();
+  const dir = await getSaveDir();
+  if (!dir) return { local, dir: false };
+  try {
+    await writeTextFile(dir, SETTINGS_FILE, buildSavePayload());
+    return { local, dir: true };
+  } catch (e) {
+    console.warn("saveToDir failed", e);
+    return { local, dir: false, dirError: describeError(e) };
+  }
+}
+
+/**
+ * 启动时读：目录与 localStorage 都存在时比较 `_exportedAt` 取较新者；
+ * 只有一边存在就用那一边；都没有才写默认值。
+ * 目录读取失败时保持本机现状，不拿默认值回写任何一边。
+ */
 export async function loadSettings(): Promise<"dir" | "local" | "default"> {
-  if (await loadFromDir()) {
-    saveToLocal(); // 把目录里的值同步进 localStorage，两边对齐
-    return "dir";
+  const dirState = await readDirState();
+  const localState = readLocalPayload();
+  const dirPayload = dirState.kind === "ok" ? dirState.payload : null;
+
+  const order: Array<"dir" | "local"> =
+    pickNewerSave(dirPayload, localState) === "local" ? ["local", "dir"] : ["dir", "local"];
+
+  for (const src of order) {
+    if (src === "dir") {
+      if (dirPayload && applySaveJSON(dirPayload.text)) {
+        saveToLocal(); // 把较新的目录值同步进 localStorage，两边对齐
+        return "dir";
+      }
+    } else if (loadFromLocal()) {
+      return "local";
+    }
   }
-  if (loadFromLocal()) {
-    return "local";
-  }
+
+  // 目录读失败：不拿默认值覆盖，避免把只是"暂时读不到"的存档抹掉
+  if (dirState.kind === "failed") return "default";
+
   // 什么存档都没有 —— 主动把默认值存一次，之后刷新就有东西了
   saveToLocal();
   return "default";

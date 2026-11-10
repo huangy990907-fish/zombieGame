@@ -204,11 +204,20 @@ for (const id of Object.keys(WEAPONS)) {
     if (!(key in source)) continue;
     const meta = FIELD[key];
     if (!meta) continue;
+    // 弹速 / 爆炸半径必须为正：0 会让子弹寿命变成 Infinity、爆炸衰减算出 NaN。
+    // 只在武器确实使用该字段（默认值 > 0）时抬高下限，电击枪 / 喷火枪的 0 仍然合法。
+    const baseValue = Number(source[key]);
+    const min =
+      key === "speed" && baseValue > 0
+        ? Math.max(meta.min, 100)
+        : key === "blast" && baseValue > 0
+          ? Math.max(meta.min, 2)
+          : meta.min;
     weaponSliders.push({
       key: `${id}.${key}`,
       label: `${def.name}·${meta.label}`,
       group: "weapons",
-      min: meta.min,
+      min,
       max: meta.max,
       step: meta.step,
       path: `weapons.${id}.${key}`,

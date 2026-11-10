@@ -530,7 +530,7 @@ interface BulletOptions {
   tracer?: number;
 }
 
-function spawnBullet(
+export function spawnBullet(
   world: World,
   h: Human,
   angle: number,
@@ -545,17 +545,20 @@ function spawnBullet(
   const muzzle = humanMuzzle(weaponId, h.x, h.y, angle);
   const x = muzzle.x;
   const y = muzzle.y;
+  // 极端配置（弹速 0 / 寿命 Infinity）兜底：否则子弹永远停在枪口且不会被回收
+  const safeSpeed = Number.isFinite(speed) && speed > 0 ? speed : 1;
+  const safeLife = Number.isFinite(life) && life > 0 ? life : 1;
   world.bullets.push({
     x,
     y,
     px: x,
     py: y,
-    vx: Math.cos(angle) * speed,
-    vy: Math.sin(angle) * speed,
+    vx: Math.cos(angle) * safeSpeed,
+    vy: Math.sin(angle) * safeSpeed,
     damage,
     kind,
     blast,
-    life,
+    life: safeLife,
     alive: true,
     // 记录来源，训练场据此把伤害/击杀归到具体武器
     weapon: weaponId,
@@ -634,8 +637,18 @@ function bulletSource(b: { weapon?: string; ownerId?: number }): DamageSource | 
   return { weapon: b.weapon, humanId: b.ownerId ?? -1 };
 }
 
+/**
+ * 爆炸距离衰减：半径 <= 0 或非有限值时退化为"全量伤害"，
+ * 命中点与爆心重合（d = 0）时也直接给满伤害 —— 避免 0/0 得到 NaN 后污染 z.hp。
+ */
+export function blastFalloff(distance: number, radius: number): number {
+  if (!Number.isFinite(radius) || radius <= 0) return 1;
+  if (!Number.isFinite(distance) || distance <= 0) return 1;
+  return 1 - Math.min(1, distance / radius) * 0.55;
+}
+
 /** 火箭爆炸：范围伤害 + 距离衰减，只伤丧尸不伤人类 */
-function explode(
+export function explode(
   world: World,
   x: number,
   y: number,
@@ -643,12 +656,13 @@ function explode(
   source?: DamageSource,
   dmgMul = 1,
 ): void {
+  const safeRadius = Number.isFinite(radius) && radius > 0 ? radius : 1;
   world.effects.push({
     kind: "blast",
     x,
     y,
     angle: 0,
-    radius,
+    radius: safeRadius,
     color: 0xffb066,
     age: 0,
     life: 0.42,
@@ -657,12 +671,12 @@ function explode(
   const blastDamage = source?.weapon
     ? effectiveWeapon(source.weapon).blastDamage
     : effectiveWeapon(WEAPON_IDS.rocket).blastDamage;
-  world.zombieGrid.query(x, y, radius, queryBuf);
+  world.zombieGrid.query(x, y, safeRadius, queryBuf);
   for (let i = 0; i < queryBuf.length; i++) {
     const z = queryBuf[i];
     if (!z.alive) continue;
     const d = Math.sqrt(dist2(x, y, z.x, z.y));
-    const falloff = 1 - Math.min(1, d / radius) * 0.55;
+    const falloff = blastFalloff(d, radius);
     damageZombie(world, z, blastDamage * falloff * dmgMul, source);
   }
 }

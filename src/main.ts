@@ -50,6 +50,7 @@ import {
   FSA_SUPPORTED,
   clearProgress,
   clearSaveDir,
+  describeSaveResult,
   exportToFile,
   getSaveDir,
   loadProgress,
@@ -60,7 +61,7 @@ import {
   selectSaveDir,
 } from "./core/storage";
 import { Game } from "./core/game";
-import { checkDevPassword, isDevModeEnabled, setDevModeEnabled } from "./core/devMode";
+import { checkDevPassword, devModeAvailable, isDevModeEnabled, setDevModeEnabled } from "./core/devMode";
 import { Hud } from "./ui/hud";
 import { InventoryPanel } from "./ui/inventory";
 import { Renderer } from "./render/renderer";
@@ -307,10 +308,14 @@ async function boot(): Promise<void> {
   let tuningStatsRaf = 0;
   let pendingRoute: Route | null = null;
 
-  const setTuningSaveState = (text: string, tone: "idle" | "dirty" | "saved" = "idle"): void => {
+  const setTuningSaveState = (
+    text: string,
+    tone: "idle" | "dirty" | "saved" | "warn" | "error" = "idle",
+  ): void => {
     tuningSaveStateEl.textContent = text;
     tuningSaveStateEl.classList.toggle("dirty", tone === "dirty");
     tuningSaveStateEl.classList.toggle("saved", tone === "saved");
+    tuningSaveStateEl.classList.toggle("warn", tone === "warn" || tone === "error");
   };
 
   const markDirty = (): void => {
@@ -534,13 +539,16 @@ async function boot(): Promise<void> {
 
   const saveTuningDraft = async (): Promise<void> => {
     commitDraft();
-    await saveSettings();
+    const result = await saveSettings();
     // 音量属于玩法设置：保存后才真正应用到 AudioManager
     sound.setMaster(getSetting("audio.master"));
     sound.setSfx(getSetting("audio.sfx"));
-    tuningDirty = false;
     const time = new Date().toLocaleTimeString("zh-CN", { hour12: false });
-    setTuningSaveState(`✅ 已保存 ${time}`, "saved");
+    const status = describeSaveResult(result, time);
+    // 只有两边都写失败才算"没保存"；只剩本机时 local 仍然持久
+    tuningDirty = !result.dir && !result.local;
+    setTuningSaveState(status.text, status.tone);
+    if (!result.dir) await refreshStorageStatus();
   };
 
   const resetTuningDraft = (): void => {
@@ -1257,7 +1265,18 @@ async function boot(): Promise<void> {
   const pickDirBtn = document.getElementById("btnPickDir") as HTMLButtonElement;
   const clearDirBtn = document.getElementById("btnClearDir") as HTMLButtonElement;
 
-  pickDirBtn.onclick = async () => { await selectSaveDir(); await refreshStorageStatus(); };
+  pickDirBtn.onclick = async () => {
+    const dir = await selectSaveDir();
+    await refreshStorageStatus();
+    // 选了「用目录覆盖本机」时覆盖值已变：重新取草稿并刷新面板 / 预览
+    if (dir && tuningPageActive) {
+      beginDraft();
+      tuningDirty = false;
+      renderTuningParams();
+      applyPreviewSelection();
+      setTuningSaveState("✅ 已按存档目录里的设置重新载入", "saved");
+    }
+  };
   clearDirBtn.onclick = async () => { await clearSaveDir(); await refreshStorageStatus(); };
 
   // ====== 主菜单按钮 ======
@@ -1338,12 +1357,16 @@ async function boot(): Promise<void> {
   // ====== 开发者模式：密码开启 / 退出；入口只在开发者模式下出现 ======
   const syncDevModeUI = (message = "", ok = false): void => {
     const on = isDevModeEnabled();
+    const available = devModeAvailable();
     workshopBtn.classList.toggle("hidden", !on);
     tuningBtn.classList.toggle("hidden", !on);
-    devModeStatusEl.textContent = on
-      ? "已开启：主菜单显示「地图工坊」与「数值调参」入口，可直接访问 #/workshop、#/tuning。"
-      : "未开启。开启后主菜单会显示「地图工坊」与「数值调参」入口。";
-    devModeAuthRow.classList.toggle("hidden", on);
+    devModeStatusEl.textContent = !available
+      ? "开发者模式不可用：当前是发布构建，或开发环境没有配置口令。"
+      : on
+        ? "已开启：主菜单显示「地图工坊」与「数值调参」入口，可直接访问 #/workshop、#/tuning。"
+        : "未开启。开启后主菜单会显示「地图工坊」与「数值调参」入口。";
+    // 发布构建里连密码输入行都不展示
+    devModeAuthRow.classList.toggle("hidden", on || !available);
     devModeDisableBtn.classList.toggle("hidden", !on);
     devModeFeedbackEl.textContent = message;
     devModeFeedbackEl.classList.toggle("ok", ok);

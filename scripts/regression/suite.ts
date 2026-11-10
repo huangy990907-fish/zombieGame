@@ -20,7 +20,8 @@ import {
   setSetting,
   setZombieModeOverrides,
 } from "../../src/data/settings/runtime";
-import { isDevModeEnabled } from "../../src/core/devMode";
+import { checkDevPassword, devModeAvailable, isDevModeEnabled } from "../../src/core/devMode";
+import { describeSaveResult, pickNewerSave } from "../../src/core/storage";
 import {
   SURVIVAL_BOSS_POOL,
   SURVIVAL_WEAPON_POOL,
@@ -34,7 +35,7 @@ import { validateLevelJson } from "../../src/data/levels/schema";
 import { registerRuntimeMap } from "../../src/data/maps";
 import { World, type Zombie } from "../../src/core/world";
 import { updateHumans, updateZombies } from "../../src/systems/ai";
-import { damageZombie, tryFire, updateCombat } from "../../src/systems/combat";
+import { blastFalloff, damageZombie, explode, spawnBullet, tryFire, updateCombat } from "../../src/systems/combat";
 import { openingNetWidth } from "../../src/systems/flowField";
 import { isBlockedForBody } from "../../src/systems/collision";
 import { SurvivalSession } from "../../src/survival/session";
@@ -1157,6 +1158,71 @@ scenario("求生：暂停菜单退出只 stop，不写记录也不置失败", ()
     s.record.bestTime === 99 && s.record.bestLevel === 8,
     `退出不应改写最佳记录，实际 ${s.record.bestTime} / ${s.record.bestLevel}`,
   );
+});
+
+scenario("存档优先级：两份都在时取 _exportedAt 较新者，缺失时间戳回落目录", () => {
+  const payload = (at: number) => ({ text: "{}", at });
+  assert(pickNewerSave(payload(2000), payload(1000)) === "dir", "目录更新时应选目录");
+  assert(pickNewerSave(payload(1000), payload(2000)) === "local", "本机更新时应选本机");
+  assert(pickNewerSave(payload(Number.NaN), payload(2000)) === "local", "目录缺时间戳时应选较新的本机");
+  assert(pickNewerSave(payload(2000), payload(Number.NaN)) === "dir", "本机缺时间戳时应选有时间的目录");
+  assert(pickNewerSave(payload(Number.NaN), payload(Number.NaN)) === "dir", "两边都缺时间戳应保持目录优先");
+  assert(pickNewerSave(null, payload(1)) === "local", "只有本机存档时应用本机");
+  assert(pickNewerSave(payload(1), null) === "dir", "只有目录存档时应用目录");
+  assert(pickNewerSave(null, null) === null, "两边都没有应返回 null");
+});
+
+scenario("保存结果三态：目录写失败不显示已保存，失败原因带进提示", () => {
+  const full = describeSaveResult({ local: true, dir: true }, "10:00:00");
+  assert(full.tone === "saved" && full.text.includes("已保存"), `两处都成功应为已保存，实际 ${full.text}`);
+
+  const partial = describeSaveResult(
+    { local: true, dir: false, dirError: "QuotaExceededError: full" },
+    "10:00:00",
+  );
+  assert(partial.tone === "warn", `只剩本机应为警告，实际 ${partial.tone}`);
+  assert(!partial.text.includes("✅ 已保存"), "目录写失败时不能再显示「已保存」");
+  assert(partial.text.includes("QuotaExceededError"), `失败原因应带出来，实际 ${partial.text}`);
+
+  const noDir = describeSaveResult({ local: true, dir: false }, "10:00:00");
+  assert(noDir.tone === "warn" && noDir.text.includes("未配置存档目录"), "未配置目录时应说明原因");
+
+  const failed = describeSaveResult({ local: false, dir: false }, "10:00:00");
+  assert(failed.tone === "error" && failed.text.includes("保存失败"), `两边都失败应为错误态，实际 ${failed.text}`);
+});
+
+scenario("爆炸半径 0：衰减不产生 NaN，僵尸血量保持有限", () => {
+  assert(blastFalloff(0, 0) === 1, "半径 0 且命中点重合时应给满伤害");
+  assert(Number.isFinite(blastFalloff(20, 0)), "半径 0 的衰减必须是有限值");
+  assert(blastFalloff(0, 62) === 1, "命中点重合时应给满伤害");
+  assert(Math.abs(blastFalloff(62, 62) - 0.45) < 1e-9, `半径边缘应保留 45% 伤害，实际 ${blastFalloff(62, 62)}`);
+
+  const world = new World(mapDef({ id: "t-blast-zero" }));
+  const z = world.spawnZombie(400, 300, ZOMBIE_IDS.normal);
+  z.hp = 500;
+  world.rebuildGrids();
+  explode(world, z.x, z.y, 0, { weapon: WEAPON_IDS.rocket });
+  assert(Number.isFinite(z.hp), `爆炸半径 0 不应把血量算成 NaN，实际 ${z.hp}`);
+  assert(z.hp < 500, `爆炸应造成伤害，实际血量 ${z.hp}`);
+});
+
+scenario("弹速 0：子弹寿命有限、速度兜底且会被回收", () => {
+  const world = new World(mapDef({ id: "t-bullet-zero-speed" }));
+  const h = world.spawnHuman(400, 300, "mg");
+  world.rebuildGrids();
+  spawnBullet(world, h, 0, 0, 10, "bullet", 0, Number.POSITIVE_INFINITY);
+  const b = world.bullets[0];
+  assert(b !== undefined, "应生成子弹");
+  assert(Number.isFinite(b.life) && b.life > 0, `寿命应为有限正值，实际 ${b.life}`);
+  assert(Number.isFinite(b.vx) && b.vx > 0, `速度应被兜底成正数，实际 ${b.vx}`);
+  for (let i = 0; i < 120; i++) updateCombat(world, 1 / 60);
+  assert(world.bullets.every((item) => !item.alive), `寿命结束后子弹应失效，仍有 ${world.bullets.filter((item) => item.alive).length} 发存活`);
+});
+
+scenario("发布构建：开发者口令与入口默认禁用", () => {
+  assert(isDevModeEnabled() === false, "非开发者构建不应默认开启");
+  assert(devModeAvailable() === false, "非 dev 构建不应提供开发者入口");
+  assert(checkDevPassword("zb9993") === false, "生产构建里不应能凭默认口令进入");
 });
 
 // ============================================================

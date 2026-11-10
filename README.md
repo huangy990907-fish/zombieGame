@@ -338,7 +338,7 @@
 | 音频 | Web Audio API（`AudioBuffer` 预加载 + 全局限频） |
 | 路由 | 自写 hash 路由（`#/menu`、`#/levels`、`#/play`、`#/training`、`#/workshop`） |
 | 存档 | localStorage + File System Access API + JSON 导入导出 |
-| 测试 | `npm run regression`（Node + esbuild 加载真实模块跑 23 个场景）；行为仍以浏览器实跑为准 |
+| 测试 | `npm run regression`（Node + esbuild 加载真实模块跑 34 个场景）；行为仍以浏览器实跑为准 |
 | 桌面版 | Electron + electron-builder；主进程在回环地址起只读静态服务加载 `dist`，不使用 `file://` |
 
 逻辑采用固定步长 1/60 秒 + 累加器：渲染帧率波动不影响模拟；速度倍率通过「一帧多走几步」实现。空间查询使用空间哈希网格，寻路使用 BFS 流场，子弹与飘字使用对象池 / 数量上限控制内存与 GC 压力。
@@ -356,7 +356,7 @@ zombieGame/
 ├── scripts/
 │   ├── workshop-save-plugin.ts # 地图 / 关卡「保存、删除」dev 中间件（校验 / 名称唯一 / 备份 / manifest / 静态 JSON）
 │   ├── make-dmg.mjs        # 桌面版 dmg 封装（electron-builder 出 .app 后用 hdiutil 打包）
-│   └── regression/         # 回归脚本：run.mjs（esbuild 打包） + suite.ts（23 个场景）
+│   └── regression/         # 回归脚本：run.mjs（esbuild 打包） + suite.ts（34 个场景）
 ├── README.md               # 本文件
 ├── CHANGELOG.md            # 变更记录
 ├── AGENTS.md               # 项目索引（给后续接手的 AI：模块职责 / 改动映射 / 约定）
@@ -483,7 +483,7 @@ npm install
 npm run dev       # 开发服务器，默认 http://localhost:5173/
 npm run build     # tsc --noEmit 类型检查 + vite build，产物输出到 dist/
 npm run preview   # 本地预览 dist/ 构建产物
-npm run regression # Node + esbuild 回归脚本（29 个场景，失败返回非零退出码）
+npm run regression # Node + esbuild 回归脚本（34 个场景，失败返回非零退出码）
 npm run app:build # 先 build，再按当前平台打包桌面版（macOS 输出 dmg）
 npm run app:build:win # 在 Windows 上先 build，再出 NSIS 安装包
 ```
@@ -797,7 +797,7 @@ npm run dev
 - 母体产卵按环形采样找空地，周围被墙或其它地形完全堵死时会少产甚至本轮不产；死亡产卵同样受落点限制（开放地图可稳定产出 12 只）。母体与尖叫者不主动攻击人类，但仍会啃门窗；它们的撕咬伤害为 0，训练场统计里的「人类被咬」不会增长。
 - 尖叫强化对同一只僵尸只保留最强倍率并刷新 6 秒计时，不叠加；BOSS 与尖叫者自身免疫。被强化僵尸的粉紫染色 / 粉环只活在渲染层，与压制标识（紫色）区分。BOSS 血条在多只母体时按「当前血量最高」选择展示对象，血量接近时可能发生切换。
 - 求生 BOSS 为独立投放：玩家 8 级首次出现，之后每 3 分钟尝试一次，同屏最多 1 只；现有母体未死时计时停在 0，死亡后立即补下一只。求生普通出怪权重里的尖叫者为 3 级起、权重中等，具体数值在 `SURVIVAL_ZOMBIE_WEIGHTS`。
-- `npm run regression` 提供 29 个场景的自动化回归（开口通行、碰撞、breach、求生经验 / 目标、JSON 校验、地形、双武器、额外投射物、狙击穿透与减速、飞扑附身 / 挣脱 / 扑空冷却、求生连点缩短挣脱、毒液弹飞行 / 落地分离与毒液伤害、腐蚀者死亡留毒、特殊僵尸距离维持、母体产卵与死亡产卵、尖叫强化、求生池守卫、覆盖层提升后基础值不变、子配置与武器扩展可覆盖、关卡覆盖只作用于本局、非开发者默认无权进入、求生 ESC 暂停、暂停菜单退出不结算），但它只覆盖逻辑层，不替代浏览器实跑；渲染、输入与 DOM 仍以 `#/play` / `#/survival` / `#/training` / `#/tuning` 手动验证为准。
+- `npm run regression` 提供 34 个场景的自动化回归（开口通行、碰撞、breach、求生经验 / 目标、JSON 校验、地形、双武器、额外投射物、狙击穿透与减速、飞扑附身 / 挣脱 / 扑空冷却、求生连点缩短挣脱、毒液弹飞行 / 落地分离与毒液伤害、腐蚀者死亡留毒、特殊僵尸距离维持、母体产卵与死亡产卵、尖叫强化、求生池守卫、覆盖层提升后基础值不变、子配置与武器扩展可覆盖、关卡覆盖只作用于本局、非开发者默认无权进入、求生 ESC 暂停、暂停菜单退出不结算、存档双写取较新者、保存结果三态、爆炸半径 0 不产生 NaN、弹速 0 子弹寿命有限、发布构建开发者入口禁用），但它只覆盖逻辑层，不替代浏览器实跑；渲染、输入与 DOM 仍以 `#/play` / `#/survival` / `#/training` / `#/tuning` 手动验证为准。
 - 面向桌面浏览器：训练场需要鼠标精确点选，未做移动端触控适配。
 - 顶栏速度按钮支持 8x；速度只有按钮，没有键盘快捷键（数字键留给选择人类种类）。
 - 训练场的单位、改动和统计不落盘，退出路由即重置；在训练场内切换地图同样会清空单位与全部读数（不跨图共用会话），退出再进入时回到进入训练场时指定的地图（`?map=` 或默认图）。
